@@ -49,7 +49,7 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
     hasRuntimeTunnel, installUpdate, isVaultInitialized, keys, knownHosts, openSettingsWindow, portForwardingRules, proxyProfiles, sessions, setKeyboardInteractiveQueue,
     t, terminalSettings, updateState, workspaces,
   } = ctx;
-  // Vault hosts for tray/menu; resumeHosts may include ephemeral quick-connect rows.
+  // Vault hosts for the Dock menu; resumeHosts may include ephemeral quick-connect rows.
   const dedicatedResumeHosts = resumeHosts ?? hosts;
   const sessionsRef = useRef(sessions);
 
@@ -277,7 +277,7 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
     terminalSettings,
   });
 
-  // Sync tray menu data + handle tray actions
+  // Sync Dock menu data (macOS Dock "New Connection" menu)
   useEffect(() => {
     if (!enabled) return;
     const bridge = netcattyBridge.get();

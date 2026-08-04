@@ -92,7 +92,7 @@ import { AppActiveTabChrome } from './application/app/AppActiveTabChrome';
 import { AppView } from './application/app/AppView';
 import { useAppStartupEffects } from './application/app/useAppStartupEffects';
 import { LogViewWrapper, SftpViewMount, TerminalLayerMount, VaultViewContainer } from './application/app/AppMounts';
-import { handleTrayJumpToSessionImpl, handleTrayTogglePortForwardImpl, handleTrayPanelConnectImpl, handleTrayPanelConnectRequestImpl, flushQueuedTrayPanelConnectHostsImpl, handleGlobalHotkeyKeyDownImpl, handleEscapeKeyDownImpl, handleKeyboardInteractiveSubmitImpl, handleKeyboardInteractiveCancelImpl, handlePassphraseSubmitImpl, handlePassphraseCancelImpl, handlePassphraseSkipImpl, createLocalTerminalWithCurrentShellImpl, splitSessionWithCurrentShellImpl, copySessionWithCurrentShellImpl, copyWorkspaceWithCurrentShellImpl, copySessionToNewWindowWithCurrentShellImpl, confirmIfBusyLocalTerminalImpl, closeTabsBatchImpl, executeHotkeyActionImpl, handleCreateLocalTerminalImpl, handleConnectToHostImpl, handleTerminalDataCaptureImpl, hasMultipleProtocolsImpl, handleHostConnectWithProtocolCheckImpl, handleProtocolSelectImpl, handleRootContextMenuImpl } from './application/app/AppHandlers';
+import { handleTrayPanelConnectImpl, handleTrayPanelConnectRequestImpl, flushQueuedTrayPanelConnectHostsImpl, handleGlobalHotkeyKeyDownImpl, handleEscapeKeyDownImpl, handleKeyboardInteractiveSubmitImpl, handleKeyboardInteractiveCancelImpl, handlePassphraseSubmitImpl, handlePassphraseCancelImpl, handlePassphraseSkipImpl, createLocalTerminalWithCurrentShellImpl, splitSessionWithCurrentShellImpl, copySessionWithCurrentShellImpl, copyWorkspaceWithCurrentShellImpl, copySessionToNewWindowWithCurrentShellImpl, confirmIfBusyLocalTerminalImpl, closeTabsBatchImpl, executeHotkeyActionImpl, handleCreateLocalTerminalImpl, handleConnectToHostImpl, handleTerminalDataCaptureImpl, hasMultipleProtocolsImpl, handleHostConnectWithProtocolCheckImpl, handleProtocolSelectImpl, handleRootContextMenuImpl } from './application/app/AppHandlers';
 
 // Initialize fonts eagerly at app startup
 initializeFonts();
@@ -684,19 +684,6 @@ function App({ settings }: { settings: SettingsState }) {
 
   // Window controls - must be before update toast effect which uses openSettingsWindow
   const { openSettingsWindow } = useWindowControls();
-  const _handleTrayJumpToSession = useEffectEvent((sessionId: string) => {
-    return handleTrayJumpToSessionImpl(() => ({
-      sessionId,
-      sessions,
-      setActiveTabId,
-      setWorkspaceFocusedSession,
-      getActiveTabId: () => activeTabStore.getActiveTabId(),
-      netcattyBridge,
-      toast,
-      t,
-    }), sessionId);
-  });
-  const _handleTrayTogglePortForward = useEffectEvent((ruleId: string, start: boolean) => { return handleTrayTogglePortForwardImpl(() => ({ hasRuntimeTunnel, hosts, identities, keys, knownHosts: effectiveKnownHosts, portForwardingRules, resolveEffectiveHost, ruleId, start, startTunnel, stopTunnel, t, terminalSettings, toast, undefined }), ruleId, start); });
   const _handleTrayPanelConnect = useEffectEvent((hostId: string) => { return handleTrayPanelConnectImpl(() => ({ addConnectionLog, connectToHost, hostId, hosts, identities, keys, resolveEffectiveHost, resolveHostAuth, systemInfoRef, t, toast }), hostId); });
   const _handleTrayPanelConnectRequest = useEffectEvent((hostId: string) => { return handleTrayPanelConnectRequestImpl(() => ({ connectNow: _handleTrayPanelConnect, hostId, isVaultInitialized, queueConnect: (queuedHostId: string) => setPendingTrayPanelConnectHostIds((prev) => [...prev, queuedHostId]) }), hostId); });
   const _handleGlobalHotkeyKeyDown = useEffectEvent((e: KeyboardEvent) => { return handleGlobalHotkeyKeyDownImpl(() => ({ HOTKEY_DEBUG, closeTabKeyStr, e, executeHotkeyAction, hotkeyScheme, keyBindings, matchesKeyBinding }), e); });
@@ -730,34 +717,12 @@ function App({ settings }: { settings: SettingsState }) {
   useEffect(() => {
     if (isPeerSessionWindow) return;
     const bridge = netcattyBridge.get();
-    if (!bridge?.onTrayFocusSession || !bridge?.onTrayTogglePortForward) return;
+    if (!bridge?.onTrayPanelConnectToHost) return;
 
-    const unsubscribeFocus = bridge.onTrayFocusSession((sessionId) => {
-      _handleTrayJumpToSession(sessionId);
-    });
-    const unsubscribeToggle = bridge.onTrayTogglePortForward((ruleId, start) => {
-      _handleTrayTogglePortForward(ruleId, start);
-    });
-
-    return () => {
-      unsubscribeFocus?.();
-      unsubscribeToggle?.();
-    };
-  }, [isPeerSessionWindow]);
-
-  useEffect(() => {
-    if (isPeerSessionWindow) return;
-    const bridge = netcattyBridge.get();
-    if (!bridge?.onTrayPanelJumpToSession || !bridge?.onTrayPanelConnectToHost) return;
-
-    const unsubscribeJump = bridge.onTrayPanelJumpToSession((sessionId) => {
-      _handleTrayJumpToSession(sessionId);
-    });
     const unsubscribeConnect = bridge.onTrayPanelConnectToHost((hostId) => {
       _handleTrayPanelConnectRequest(hostId);
     });
     return () => {
-      unsubscribeJump?.();
       unsubscribeConnect?.();
     };
   }, [isPeerSessionWindow]);
@@ -1309,15 +1274,6 @@ function App({ settings }: { settings: SettingsState }) {
     closeSession(sessionId);
     return { ok: true as const };
   }, [closeSession, sessions]);
-
-  useEffect(() => {
-    if (isPeerSessionWindow) return;
-    const bridge = netcattyBridge.get();
-    const unsubscribe = bridge?.onTrayPanelCloseSession?.((sessionId) => {
-      closeSessionForVaultAgent(sessionId);
-    });
-    return () => unsubscribe?.();
-  }, [isPeerSessionWindow, closeSessionForVaultAgent]);
 
   useVaultAgentBridge({
     hosts,

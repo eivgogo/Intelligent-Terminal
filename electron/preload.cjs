@@ -757,13 +757,6 @@ ipcRenderer.on("netcatty:filewatch:stopped", (_event, payload) => {
   });
 });
 
-// Buffer the latest tray menu data so it can be replayed when the React
-// component subscribes after lazy-mount (avoiding the first-open race).
-let _lastTrayMenuData = null;
-ipcRenderer.on("netcatty:trayPanel:setMenuData", (_event, data) => {
-  _lastTrayMenuData = data;
-});
-
 const api = createPreloadApi({
   ipcRenderer,
   os,
@@ -813,8 +806,6 @@ const api = createPreloadApi({
   fileWatchSyncedListeners,
   fileWatchErrorListeners,
   fileWatchStoppedListeners,
-  get _lastTrayMenuData() { return _lastTrayMenuData; },
-  set _lastTrayMenuData(value) { _lastTrayMenuData = value; },
 });
 
 // Fig autocomplete spec loading via main process

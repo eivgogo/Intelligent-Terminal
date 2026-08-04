@@ -1,46 +1,26 @@
 /**
- * Global Shortcut Bridge - Handles global keyboard shortcuts and system tray
- * Implements the "Quake mode" / drop-down terminal feature
+ * Global Shortcut Bridge - Handles global keyboard shortcuts (Quake mode /
+ * drop-down terminal) and the macOS Dock menu. The system tray icon and its
+ * tray panel were removed; this module only serves the global hotkey and the
+ * Dock "New Connection" menu.
  */
-
-const path = require("node:path");
-const fs = require("node:fs");
 
 let electronModule = null;
 let ensureMainWindow = null;
 let sendWhenRendererReady = null;
 let getSystemMenuMainWindow = null;
-let tray = null;
-let closeToTray = false;
 let currentHotkey = null;
 let hotkeyEnabled = false;
 
-const STATUS_TEXT = {
-  session: {
-    connected: "Connected",
-    connecting: "Connecting",
-    disconnected: "Disconnected",
-  },
-  portForward: {
-    active: "Active",
-    connecting: "Connecting",
-    inactive: "Inactive",
-    error: "Error",
-  },
-};
-// Dynamic tray menu data (synced from renderer)
+// Dynamic Dock menu host data (synced from renderer)
 let trayMenuData = {
   sessions: [],        // { id, label, hostLabel, status }
   portForwardRules: [], // { id, label, type, localPort, remoteHost, remotePort, status, hostId, canStop }
   hosts: [],           // { id, label, hostname, group, pinned, lastConnectedAt }
 };
-
-let trayPanelWindow = null;
-
-let trayPanelRefreshTimer = null;
 // Watchdog: if `leave-full-screen` never arrives (edge case / stuck transition)
 // we eventually give up and force a hide attempt. Better a visible window than
-// a hung close-to-tray path.
+// a stuck hide path.
 const FULLSCREEN_LEAVE_WATCHDOG_MS = 5000;
 // After `leave-full-screen` fires, macOS emits a trailing `show` event while
 // the native space transition finishes. Calling `win.hide()` before that show
@@ -160,7 +140,7 @@ function startPendingFullscreenHideWatchdog(win) {
     }
     if (pending.leaveFullScreenFired) return;
 
-    console.warn("[GlobalShortcut] Timed out waiting for leave-full-screen before hiding to tray; forcing hide");
+    console.warn("[GlobalShortcut] Timed out waiting for leave-full-screen before hiding window; forcing hide");
     // Give up and hide anyway. Simulate the leave path so the trailing-show
     // wait still applies (defence in depth against spurious show events).
     handleLeaveFullScreenForPendingHide(win);
@@ -178,10 +158,6 @@ function bringMainWindowToForeground(win) {
     // ignore
   }
   return focused;
-}
-
-function openMainWindow() {
-  bringMainWindowToForeground(getMainWindow());
 }
 
 function getTrackedMainWindow() {
@@ -248,159 +224,6 @@ async function connectToHostFromSystemMenu(hostId) {
   await sendToMainWindow("netcatty:trayPanel:connectToHost", hostId);
 }
 
-function getTrayPanelUrl() {
-  const devServerUrl = process.env.VITE_DEV_SERVER_URL;
-  if (devServerUrl) {
-    return `${devServerUrl.replace(/\/$/, "")}/#/tray`;
-  }
-  return "app://netcatty/index.html#/tray";
-}
-
-function pushTrayMenuDataToPanel() {
-  if (!trayPanelWindow || trayPanelWindow.isDestroyed()) return;
-  try {
-    trayPanelWindow.webContents?.send("netcatty:trayPanel:setMenuData", trayMenuData);
-  } catch {
-    // ignore
-  }
-}
-
-function ensureTrayPanelWindow() {
-  const { BrowserWindow } = electronModule;
-  if (trayPanelWindow && !trayPanelWindow.isDestroyed()) return trayPanelWindow;
-
-  trayPanelWindow = new BrowserWindow({
-    width: 360,
-    height: 520,
-    show: false,
-    frame: false,
-    resizable: false,
-    movable: false,
-    fullscreenable: false,
-    minimizable: false,
-    maximizable: false,
-    skipTaskbar: true,
-    alwaysOnTop: true,
-    transparent: true,
-    hasShadow: true,
-    webPreferences: {
-      preload: path.join(__dirname, "../preload.cjs"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: false,
-    },
-  });
-
-  trayPanelWindow.webContents.on("console-message", (_event, level, message) => {
-    // Forward renderer logs to main process output for easy debugging.
-    console.log(`[TrayPanel:renderer:${level}] ${message}`);
-  });
-
-  trayPanelWindow.on("blur", () => {
-    try {
-      trayPanelWindow?.hide();
-    } catch {
-      // ignore
-    }
-  });
-
-  const url = getTrayPanelUrl();
-  console.log("[TrayPanel] loadURL", url);
-  void trayPanelWindow.loadURL(url);
-
-  trayPanelWindow.webContents.on("did-finish-load", () => {
-    pushTrayMenuDataToPanel();
-  });
-
-  return trayPanelWindow;
-}
-
-function showTrayPanel() {
-  if (!tray) return;
-  const { screen } = electronModule;
-  const win = ensureTrayPanelWindow();
-
-  const trayBounds = tray.getBounds();
-  const display = screen.getDisplayNearestPoint({ x: trayBounds.x, y: trayBounds.y });
-  const workArea = display.workArea;
-
-  const panelBounds = win.getBounds();
-  const x = Math.min(
-    Math.max(trayBounds.x + Math.round(trayBounds.width / 2) - Math.round(panelBounds.width / 2), workArea.x),
-    workArea.x + workArea.width - panelBounds.width,
-  );
-  const y = Math.min(trayBounds.y + trayBounds.height + 6, workArea.y + workArea.height - panelBounds.height);
-
-  win.setBounds({ x, y, width: panelBounds.width, height: panelBounds.height }, false);
-  win.show();
-  win.focus();
-
-  pushTrayMenuDataToPanel();
-
-  if (trayPanelRefreshTimer) clearInterval(trayPanelRefreshTimer);
-  trayPanelRefreshTimer = setInterval(() => {
-    try {
-      if (!trayPanelWindow || trayPanelWindow.isDestroyed() || !trayPanelWindow.isVisible()) return;
-      trayPanelWindow.webContents?.send("netcatty:trayPanel:refresh");
-    } catch {
-      // ignore
-    }
-  }, 1000);
-}
-
-function hideTrayPanel() {
-  if (trayPanelWindow && !trayPanelWindow.isDestroyed()) {
-    trayPanelWindow.hide();
-  }
-
-  if (trayPanelRefreshTimer) {
-    clearInterval(trayPanelRefreshTimer);
-    trayPanelRefreshTimer = null;
-  }
-}
-
-function toggleTrayPanel() {
-  if (trayPanelWindow && !trayPanelWindow.isDestroyed() && trayPanelWindow.isVisible()) {
-    hideTrayPanel();
-  } else {
-    showTrayPanel();
-  }
-}
-
-function resolveTrayIconPath() {
-  const { app } = electronModule;
-
-  // Platform-specific tray source:
-  //  - macOS: template image (black + transparent, system handles tint)
-  //  - Windows: multi-size .ico so the shell can pick the right pixel size
-  //    per DPI scale (avoids blur at 125/150/175/250 % scale)
-  //  - Linux: colored PNG (with an @2x representation attached at load time)
-  let iconName;
-  if (process.platform === "darwin") {
-    iconName = "tray-iconTemplate.png";
-  } else if (process.platform === "win32") {
-    iconName = "tray-icon.ico";
-  } else {
-    iconName = "tray-icon.png";
-  }
-
-  // Security: Only use known packaged icon locations, ignore renderer-provided paths
-  const candidates = [
-    path.join(app.getAppPath(), "dist", iconName),
-    path.join(app.getAppPath(), "public", iconName),
-    path.join(__dirname, "../../public", iconName),
-    path.join(__dirname, "../../dist", iconName),
-  ];
-
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
-  return null;
-}
-
 /**
  * Initialize the bridge with dependencies
  */
@@ -423,10 +246,10 @@ function getMainWindow() {
   if (tracked && !tracked.isDestroyed?.()) {
     return tracked;
   }
-  // Fallback: filter out tray panel window from all windows
+  // Fallback: first non-destroyed window
   const { BrowserWindow } = electronModule;
   const wins = BrowserWindow.getAllWindows();
-  const mainWins = wins.filter((w) => w !== trayPanelWindow && !w.isDestroyed?.());
+  const mainWins = wins.filter((w) => !w.isDestroyed?.());
   return mainWins && mainWins.length ? mainWins[0] : null;
 }
 
@@ -436,7 +259,8 @@ function hideWindowRespectingMacFullscreen(win) {
   clearPendingFullscreenHide(win);
 
   if (process.platform === "darwin" && win.isFullScreen?.()) {
-    // Close-to-tray on a native-fullscreen window on macOS has two traps:
+    // Hiding a native-fullscreen window on macOS (used by the global hotkey
+    // toggle) has two traps:
     //
     // 1. `isFullScreen()` can flip to false BEFORE the exit animation
     //    completes. Polling it and calling `win.hide()` at that moment
@@ -448,10 +272,9 @@ function hideWindowRespectingMacFullscreen(win) {
     //
     // Strategy: wait for `leave-full-screen`, then wait for the trailing
     // `show` that follows it (or a short timeout), and only then hide.
-    // All legitimate "bring the window back" entry points (openMainWindow,
-    // toggleWindowVisibility, setCloseToTray(false), app.on("activate"),
-    // closed) explicitly call clearPendingFullscreenHide so we never race
-    // with genuine user intent.
+    // All legitimate "bring the window back" entry points
+    // (toggleWindowVisibility, app.on("activate"), closed) explicitly call
+    // clearPendingFullscreenHide so we never race with genuine user intent.
     const pending = {
       watchdogTimer: null,
       trailingShowTimer: null,
@@ -635,171 +458,6 @@ function unregisterGlobalHotkey() {
   currentHotkey = null;
 }
 
-/**
- * Create the system tray icon
- */
-function createTray() {
-  const { Tray, Menu, app, nativeImage } = electronModule;
-
-  if (tray) {
-    // Tray already exists
-    return;
-  }
-
-  try {
-    // Load the tray icon
-    let trayIcon;
-    const resolvedIconPath = resolveTrayIconPath();
-    if (resolvedIconPath) {
-      trayIcon = nativeImage.createFromPath(resolvedIconPath);
-      if (process.platform === "darwin") {
-        trayIcon = trayIcon.resize({ width: 16, height: 16 });
-        trayIcon.setTemplateImage(true);
-      } else if (process.platform === "win32") {
-        // The .ico already carries 16/20/24/32/40/48/64 — Windows picks the
-        // right size per DPI scale on its own. Do not resize.
-      } else {
-        // Linux: attach the @2x representation so the shell can pick the
-        // right pixel size on HiDPI. Leaving the base at its native size
-        // (no force resize) keeps it crisp at 100 % too.
-        const hiDpiPath = resolvedIconPath.replace(/\.png$/i, "@2x.png");
-        if (fs.existsSync(hiDpiPath)) {
-          trayIcon.addRepresentation({
-            scaleFactor: 2,
-            buffer: fs.readFileSync(hiDpiPath),
-          });
-        }
-      }
-    }
-
-    tray = new Tray(trayIcon || nativeImage.createEmpty());
-    tray.setToolTip("Intelligent Terminal");
-
-    // Build and set initial context menu
-    updateTrayMenu();
-
-    // Click on tray icon behaviors depending on platform conventions
-    if (process.platform === "win32") {
-      // Windows: Left-click opens/focuses main window, Right-click toggles custom tray panel
-      tray.on("click", () => {
-        openMainWindow();
-      });
-      tray.on("right-click", () => {
-        toggleTrayPanel();
-      });
-    } else if (process.platform === "linux") {
-      // Linux: GtkStatusIcon left-click can toggle the custom panel; StatusNotifier
-      // activation shows the native context menu set via setContextMenu() (there is
-      // no right-click / popUpContextMenu API on Linux — see Electron Tray docs).
-      tray.on("click", () => {
-        toggleTrayPanel();
-      });
-    } else {
-      // macOS: Click toggles custom tray panel
-      tray.on("click", () => {
-        toggleTrayPanel();
-      });
-    }
-
-    console.log("[GlobalShortcut] System tray created");
-  } catch (err) {
-    console.error("[GlobalShortcut] Error creating tray:", err);
-  }
-}
-
-/**
- * Build the tray context menu with dynamic content
- */
-function buildTrayMenuTemplate() {
-  const { app } = electronModule;
-  const menuTemplate = [];
-
-  // Open Main Window
-  menuTemplate.push({
-    label: "Open Main Window",
-    click: () => {
-      openMainWindow();
-    },
-  });
-
-  menuTemplate.push({ type: "separator" });
-
-  // Active Sessions
-  if (trayMenuData.sessions && trayMenuData.sessions.length > 0) {
-    menuTemplate.push({
-      label: "Sessions",
-      enabled: false,
-    });
-    for (const session of trayMenuData.sessions) {
-      const statusText =
-        session.status === "connected"
-          ? STATUS_TEXT.session.connected
-          : session.status === "connecting"
-            ? STATUS_TEXT.session.connecting
-            : STATUS_TEXT.session.disconnected;
-      menuTemplate.push({
-        label: `  ${session.hostLabel || session.label}  (${statusText})`,
-        click: () => {
-          // AI silent sessions open a terminal popup from the renderer and must
-          // not be force-focused into a tab-less main-window surface.
-          void sendToMainWindow("netcatty:tray:focusSession", session.id, {
-            focus: session.aiHidden !== true,
-          });
-        },
-      });
-    }
-    menuTemplate.push({ type: "separator" });
-  }
-
-  // Port Forwarding Rules
-  if (trayMenuData.portForwardRules && trayMenuData.portForwardRules.length > 0) {
-    menuTemplate.push({
-      label: "Port Forwarding",
-      enabled: false,
-    });
-    for (const rule of trayMenuData.portForwardRules) {
-      const isActive = rule.status === "active";
-      const isConnecting = rule.status === "connecting";
-      const isStoppable = isActive || isConnecting || rule.canStop === true;
-      const statusText =
-        rule.status === "active"
-          ? STATUS_TEXT.portForward.active
-          : rule.status === "connecting"
-            ? STATUS_TEXT.portForward.connecting
-            : rule.status === "error"
-              ? STATUS_TEXT.portForward.error
-              : STATUS_TEXT.portForward.inactive;
-      const typeLabel = rule.type === "local" ? "L" : rule.type === "remote" ? "R" : "D";
-      const portInfo = rule.type === "dynamic"
-        ? `${rule.localPort}`
-        : `${rule.localPort} → ${rule.remoteHost}:${rule.remotePort}`;
-
-      menuTemplate.push({
-        label: `  [${typeLabel}] ${rule.label || portInfo}  (${statusText})`,
-        enabled: !isConnecting,
-        click: () => {
-          const win = getMainWindow();
-          if (win) {
-            win.webContents?.send("netcatty:tray:togglePortForward", rule.id, !isStoppable);
-          }
-        },
-      });
-    }
-    menuTemplate.push({ type: "separator" });
-  }
-
-  // Quit
-  menuTemplate.push({
-    label: "Quit",
-    click: () => {
-      closeToTray = false;
-      app.quit();
-    },
-  });
-
-  return menuTemplate;
-}
-
 function getDockHostLabel(host) {
   const label = typeof host?.label === "string" ? host.label.trim() : "";
   if (label) return label;
@@ -863,27 +521,7 @@ function updateDockMenu() {
 }
 
 /**
- * Update the tray context menu
- */
-function updateTrayMenu() {
-  if (!tray) return;
-  try {
-    if (process.platform === "linux") {
-      const { Menu } = electronModule;
-      const menu = Menu.buildFromTemplate(buildTrayMenuTemplate());
-      tray.setContextMenu(menu);
-    } else {
-      // Avoid showing a context menu on left-click; we toggle our custom panel instead.
-      // On macOS, right-click may still show a menu if one is set, so we don't set any.
-      tray.setContextMenu(null);
-    }
-  } catch {
-    // ignore
-  }
-}
-
-/**
- * Update tray menu data from renderer
+ * Update Dock menu data from renderer
  */
 function setTrayMenuData(data) {
   if (data.sessions !== undefined) {
@@ -895,52 +533,8 @@ function setTrayMenuData(data) {
   if (data.hosts !== undefined) {
     trayMenuData.hosts = data.hosts;
   }
-  // Rebuild menu with new data
-  updateTrayMenu();
+  // Rebuild the Dock menu with new data
   updateDockMenu();
-  pushTrayMenuDataToPanel();
-}
-
-/**
- * Destroy the system tray icon
- */
-function destroyTray() {
-  if (tray) {
-    try {
-      tray.destroy();
-      tray = null;
-      console.log("[GlobalShortcut] System tray destroyed");
-    } catch (err) {
-      console.warn("[GlobalShortcut] Error destroying tray:", err);
-    }
-  }
-}
-
-/**
- * Set close-to-tray behavior
- */
-function setCloseToTray(enabled) {
-  closeToTray = !!enabled;
-
-  if (closeToTray) {
-    // Create tray if it doesn't exist
-    if (!tray) {
-      createTray();
-    }
-  } else {
-    clearPendingFullscreenHide(getMainWindow());
-    // Destroy tray if it exists
-    destroyTray();
-  }
-
-  return { success: true, enabled: closeToTray };
-}
-
-/**
- * Check if close-to-tray is enabled
- */
-function isCloseToTrayEnabled() {
-  return closeToTray;
 }
 
 /**
@@ -951,18 +545,6 @@ function getHotkeyStatus() {
     enabled: hotkeyEnabled,
     hotkey: currentHotkey,
   };
-}
-
-/**
- * Handle window close event - hide to tray instead of closing
- */
-function handleWindowClose(event, win) {
-  if (closeToTray && tray) {
-    event.preventDefault();
-    hideWindowRespectingMacFullscreen(win);
-    return true; // Prevented close
-  }
-  return false; // Allow close
 }
 
 /**
@@ -985,61 +567,15 @@ function registerHandlers(ipcMain) {
     return getHotkeyStatus();
   });
 
-  // Set close-to-tray behavior
-  ipcMain.handle("netcatty:tray:setCloseToTray", async (_event, { enabled }) => {
-    return setCloseToTray(enabled);
-  });
-
-  // Get close-to-tray status
-  ipcMain.handle("netcatty:tray:isCloseToTray", async () => {
-    return { enabled: closeToTray };
-  });
-
-  // Update tray menu data
+  // Update Dock menu data (used by the macOS Dock "New Connection" menu)
   ipcMain.handle("netcatty:tray:updateMenuData", async (_event, data) => {
     setTrayMenuData(data);
     return { success: true };
   });
 
-  ipcMain.handle("netcatty:trayPanel:hide", async () => {
-    hideTrayPanel();
-    return { success: true };
-  });
-
+  // Open / focus the main window (used by external MCP/CLI host-open)
   ipcMain.handle("netcatty:trayPanel:openMainWindow", async () => {
     await openMainWindowReady();
-    return { success: true };
-  });
-
-  ipcMain.handle("netcatty:trayPanel:jumpToSession", async (_event, sessionId) => {
-    // Do not force-focus the main window here. Visible sessions open/focus it
-    // from the renderer; AI silent sessions open a terminal popup instead and
-    // should not steal focus into a tab-less main-window surface.
-    await sendToMainWindow("netcatty:trayPanel:jumpToSession", sessionId, {
-      focus: false,
-    });
-    return { success: true };
-  });
-
-  ipcMain.handle("netcatty:trayPanel:connectToHost", async (_event, hostId) => {
-    await connectToHostFromSystemMenu(hostId);
-    return { success: true };
-  });
-
-  ipcMain.handle("netcatty:trayPanel:closeSession", async (_event, sessionId) => {
-    const delivered = await sendToMainWindow("netcatty:trayPanel:closeSession", sessionId, {
-      focus: false,
-      createIfMissing: false,
-    });
-    return delivered
-      ? { success: true }
-      : { success: false, error: "Main window is not available" };
-  });
-
-  ipcMain.handle("netcatty:trayPanel:quitApp", async () => {
-    const { app } = electronModule;
-    closeToTray = false;
-    app.quit();
     return { success: true };
   });
 
@@ -1051,7 +587,6 @@ function registerHandlers(ipcMain) {
  */
 function cleanup() {
   unregisterGlobalHotkey();
-  destroyTray();
   if (electronModule?.app?.dock?.setMenu) {
     try {
       electronModule.app.dock.setMenu(null);
@@ -1059,27 +594,11 @@ function cleanup() {
       // ignore
     }
   }
-
-  if (trayPanelRefreshTimer) {
-    clearInterval(trayPanelRefreshTimer);
-    trayPanelRefreshTimer = null;
-  }
-
-  if (trayPanelWindow && !trayPanelWindow.isDestroyed()) {
-    try {
-      trayPanelWindow.destroy();
-    } catch {
-      // ignore
-    }
-    trayPanelWindow = null;
-  }
 }
 
 module.exports = {
   init,
   registerHandlers,
-  handleWindowClose,
   clearPendingFullscreenHide,
   cleanup,
-  getTray: () => tray,
 };

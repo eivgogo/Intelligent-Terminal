@@ -16,7 +16,6 @@ import { ToastProvider } from './components/ui/toast';
 import { TooltipProvider } from './components/ui/tooltip';
 
 const LazySettingsPage = lazy(() => import('./components/SettingsPage'));
-const LazyTrayPanel = lazy(() => import('./components/TrayPanel'));
 const LazyTerminalPopupPage = lazy(() => import('./components/TerminalPopupPage'));
 
 function SettingsWindowFallback() {
@@ -126,9 +125,6 @@ const getRoute = () => {
   if (hash === '#/settings' || hash.startsWith('#/settings')) {
     return 'settings';
   }
-  if (hash === '#/tray' || hash.startsWith('#/tray')) {
-    return 'tray';
-  }
   if (hash === '#/terminal-popup' || hash.startsWith('#/terminal-popup')) {
     return 'terminal-popup';
   }
@@ -148,16 +144,6 @@ const renderApp = () => {
         <TooltipProvider delayDuration={300}>
           <Suspense fallback={<SettingsWindowFallback />}>
             <LazySettingsPage />
-          </Suspense>
-        </TooltipProvider>
-      </ToastProvider>
-    );
-  } else if (route === 'tray') {
-    root.render(
-      <ToastProvider>
-        <TooltipProvider delayDuration={300}>
-          <Suspense fallback={<div style={{ padding: 12, color: '#fff' }}>Loading tray panel…</div>}>
-            <LazyTrayPanel />
           </Suspense>
         </TooltipProvider>
       </ToastProvider>

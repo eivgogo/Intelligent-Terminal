@@ -297,7 +297,7 @@ function createSettingsWindowApi(ctx) {
     }
     
     /**
-     * Hide the settings window without destroying it (used when main window hides to tray).
+     * Hide the settings window without destroying it (used by the settings-close flow).
      */
     function hideSettingsWindow() {
       if (settingsWindow && !settingsWindow.isDestroyed()) {

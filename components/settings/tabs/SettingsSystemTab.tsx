@@ -100,8 +100,6 @@ interface SettingsSystemTabProps {
   setRestoreTerminalCwd: (enabled: boolean) => void;
   toggleWindowHotkey: string;
   setToggleWindowHotkey: (hotkey: string) => void;
-  closeToTray: boolean;
-  setCloseToTray: (enabled: boolean) => void;
   httpNetworkProxy: HttpNetworkProxySettings;
   setHttpNetworkProxy: (settings: HttpNetworkProxySettings | ((prev: HttpNetworkProxySettings) => HttpNetworkProxySettings)) => void;
   hotkeyRegistrationError: string | null;
@@ -141,8 +139,6 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
   setRestoreTerminalCwd,
   toggleWindowHotkey,
   setToggleWindowHotkey,
-  closeToTray,
-  setCloseToTray,
   httpNetworkProxy,
   setHttpNetworkProxy,
   hotkeyRegistrationError,
@@ -1154,17 +1150,6 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
                   <p className="text-sm text-destructive mt-2">{hotkeyError || hotkeyRegistrationError}</p>
                 )}
               </div>
-
-              {/* Close to Tray */}
-              <SettingRow
-                label={t("settings.globalHotkey.closeToTray")}
-                description={t("settings.globalHotkey.closeToTrayDesc")}
-              >
-                <Toggle
-                  checked={closeToTray}
-                  onChange={setCloseToTray}
-                />
-              </SettingRow>
             </SettingCard>
 
             <p className="text-xs text-muted-foreground">

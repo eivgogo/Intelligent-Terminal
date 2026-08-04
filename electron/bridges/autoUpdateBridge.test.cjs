@@ -266,10 +266,10 @@ test("install handler marks quitting-for-update before quitAndInstall", async ()
     // The flag must be set with `true`...
     assert.deepEqual(fakeWindowManager.calls, [true]);
     // ...and it must happen BEFORE quitAndInstall fires app.quit(), otherwise the
-    // close-to-tray / before-quit guards would already be racing the quit (#1215).
+    // before-quit guards would already be racing the quit (#1215).
     assert.equal(order[0], "setQuittingForUpdate");
     assert.ok(order.indexOf("setQuittingForUpdate") < order.indexOf("quitAndInstall"));
-    // Tray cleanup still runs so the tray doesn't keep the process alive.
+    // Global-shortcut cleanup still runs so the app can exit cleanly.
     assert.equal(fakeGlobalShortcut.cleanupCount, 1);
     assert.equal(order.includes("quitAndInstall"), true);
   });
@@ -287,8 +287,8 @@ test("install handler is a no-op when the updater fails to load", async () => {
   };
   // electron-updater exports no `autoUpdater` => getAutoUpdater() returns null,
   // so the handler must return early WITHOUT committing the app to a quit. Doing
-  // so otherwise would leave isQuitting=true and break close-to-tray even though
-  // no install actually started.
+  // so otherwise would leave isQuitting=true and change window-close behavior
+  // even though no install actually started.
   await withMocks({ autoUpdaterExports: {}, windowManager: fakeWindowManager }, async ({ bridge, fakeGlobalShortcut }) => {
     const ipcMain = makeIpcMain();
     bridge.registerHandlers(ipcMain);
@@ -325,7 +325,7 @@ test("install handler rolls back quitting-for-update when quitAndInstall throws"
     await ipcMain.invoke("netcatty:update:install");
 
     // First set true (commit), then reset to false on the synchronous throw so
-    // the app doesn't get stuck bypassing close-to-tray / the quit guard (#1215).
+    // the app doesn't get stuck bypassing the quit guard (#1215).
     assert.deepEqual(fakeWindowManager.calls, [true, false]);
     assert.equal(fakeWindowManager.isQuittingForUpdate(), false);
   });
@@ -432,7 +432,7 @@ test("install handler aborts and notifies when the renderer reports dirty editor
       await ipcMain.invoke("netcatty:update:install");
 
       // Dirty editors → the install must be fully aborted:
-      // - no quitAndInstall, no setQuittingForUpdate, no tray cleanup
+      // - no quitAndInstall, no setQuittingForUpdate, no bridge cleanup
       assert.equal(order.includes("quitAndInstall"), false);
       assert.equal(order.includes("setQuittingForUpdate"), false);
       assert.deepEqual(fakeWindowManager.calls, []);

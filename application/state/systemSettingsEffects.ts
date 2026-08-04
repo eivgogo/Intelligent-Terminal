@@ -1,7 +1,6 @@
 import { useEffect, useRef, type MutableRefObject } from 'react';
 import {
   STORAGE_KEY_AUTO_UPDATE_ENABLED,
-  STORAGE_KEY_CLOSE_TO_TRAY,
   STORAGE_KEY_GLOBAL_HOTKEY_ENABLED,
   STORAGE_KEY_TOGGLE_WINDOW_HOTKEY,
   STORAGE_KEY_WINDOW_OPACITY,
@@ -28,7 +27,6 @@ interface UseSystemSettingsEffectsParams {
   enabled?: boolean;
   toggleWindowHotkey: string;
   globalHotkeyEnabled: boolean;
-  closeToTray: boolean;
   windowOpacityRecord: WindowOpacityRecord;
   windowOpacityMutationSourceRef: MutableRefObject<WindowOpacityMutationSource>;
   appIconVariant: AppIconVariant;
@@ -45,7 +43,6 @@ export function useSystemSettingsEffects({
   enabled = true,
   toggleWindowHotkey,
   globalHotkeyEnabled,
-  closeToTray,
   windowOpacityRecord,
   windowOpacityMutationSourceRef,
   appIconVariant,
@@ -106,22 +103,6 @@ export function useSystemSettingsEffects({
     if (!persistMountedRef.current) return;
     notifySettingsChanged(STORAGE_KEY_GLOBAL_HOTKEY_ENABLED, globalHotkeyEnabled);
   }, [enabled, globalHotkeyEnabled, notifySettingsChanged, persistMountedRef]);
-
-  // Persist and sync close to tray setting
-  useEffect(() => {
-    if (!enabled) return;
-    // Update main process tray behavior (needed on mount)
-    const bridge = netcattyBridge.get();
-    if (bridge?.setCloseToTray) {
-      bridge.setCloseToTray(closeToTray).catch((err) => {
-        console.warn('[SystemTray] Failed to set close-to-tray:', err);
-      });
-    }
-    localStorageAdapter.writeString(STORAGE_KEY_CLOSE_TO_TRAY, closeToTray ? 'true' : 'false');
-    // Skip IPC on initial mount
-    if (!persistMountedRef.current) return;
-    notifySettingsChanged(STORAGE_KEY_CLOSE_TO_TRAY, closeToTray);
-  }, [enabled, closeToTray, notifySettingsChanged, persistMountedRef]);
 
   // Persist and apply app-level HTTP(S) network proxy (cloud sync / AI)
   useEffect(() => {

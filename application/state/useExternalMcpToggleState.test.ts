@@ -146,7 +146,6 @@ describe('useExternalMcpToggleState startup ready gate', () => {
     assert.equal(isExternalMcpStartupReady(), false);
     assert.equal(shouldWaitForExternalMcpStartupReady(''), true);
     assert.equal(shouldWaitForExternalMcpStartupReady('#/settings'), false);
-    assert.equal(shouldWaitForExternalMcpStartupReady('#/tray'), false);
     assert.equal(shouldWaitForExternalMcpStartupReady('#/session-window'), false);
 
     let resolved = false;
@@ -168,10 +167,10 @@ describe('useExternalMcpToggleState startup ready gate', () => {
     await waitForExternalMcpStartupReady('');
   });
 
-  it('does not block settings/tray consumers on the App-only gate', async () => {
+  it('does not block settings/popup consumers on the App-only gate', async () => {
     resetExternalMcpStartupReadyForTests();
     await waitForExternalMcpStartupReady('#/settings');
-    await waitForExternalMcpStartupReady('#/tray');
+    await waitForExternalMcpStartupReady('#/terminal-popup');
     assert.equal(isExternalMcpStartupReady(), false);
     assert.equal(getExternalMcpStartupReadyWaiterCountForTests(), 0);
   });

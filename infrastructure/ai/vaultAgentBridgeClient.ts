@@ -443,7 +443,7 @@ export interface VaultAgentApiDeps {
   ) => Promise<{ success: boolean; error?: string }>;
   stopRuleTunnels: (ruleId: string) => Promise<{ success: boolean; error?: string }>;
   /**
-   * Open a vault host as a terminal tab (same path as tray / host list click).
+   * Open a vault host as a terminal tab (same path as host list click).
    * Must return the new sessionId so MCP can target terminal tools. `isExternalMcpCall`
    * is true only when the request has no chatSessionId — i.e. it came from an actual
    * external MCP client rather than the in-app Catty AI chat — and gates the "silent

@@ -815,7 +815,7 @@ function createTerminalWorkerManager(options = {}) {
   function findFallbackHomeWebContentsId(preferredId) {
     if (isLiveWebContentsId(preferredId)) return preferredId;
     // Only fall back to registered main app windows — never settings/prewarm/
-    // tray/popup renderers, which cannot host the hidden silent Terminal.
+    // popup renderers, which cannot host the hidden silent Terminal.
     try {
       const wm = require("./windowManager.cjs");
       const mains = typeof wm.getMainWindows === "function"
@@ -844,7 +844,8 @@ function createTerminalWorkerManager(options = {}) {
     }
     const homeId = findFallbackHomeWebContentsId(preferredHomeWebContentsId ?? savedHomeId);
     if (homeId == null) {
-      // Keep the attach-home mapping so a later tray re-open can still recover.
+      // Keep the attach-home mapping so a later silent-session re-open can
+      // still recover.
       return {
         success: false,
         restored: false,

@@ -212,27 +212,9 @@ export const zhTWCoreMessages: Messages = {
   'settings.globalHotkey.toggleWindowDesc': '按下組合鍵以設定顯示/隱藏視窗的全域快捷鍵。',
   'settings.globalHotkey.notSet': '未設定',
   'settings.globalHotkey.reset': '恢復預設',
-  'settings.globalHotkey.closeToTray': '關閉時最小化到系統匣',
-  'settings.globalHotkey.closeToTrayDesc': '啟用後，關閉視窗將最小化到系統匣而不是結束程式。',
   'settings.globalHotkey.enabled': '啟用全域快捷鍵',
   'settings.globalHotkey.enabledDesc': '註冊系統級鍵盤快捷鍵。停用後將取消所有全域快捷鍵註冊。',
   'settings.globalHotkey.hint': '全域快捷鍵在系統範圍內工作，可快速顯示或隱藏視窗（下拉式終端風格）。',
-
-  // Tray Panel
-  'tray.openMainWindow': '開啟主視窗',
-  'tray.sessions': '工作階段',
-  'tray.portForwarding': '埠轉發',
-  'tray.status.connected': '已連線',
-  'tray.status.connecting': '連線中',
-  'tray.status.disconnected': '已斷開',
-  'tray.status.active': '已啟用',
-  'tray.status.inactive': '未啟用',
-  'tray.status.error': '錯誤',
-  'tray.recentHosts': '最近連線的主機',
-  'tray.empty.title': '一切都很安靜',
-  'tray.empty.subtitle': '去連線個伺服器吧，它們想念你了 🚀',
-  'tray.quit': '結束 Intelligent Terminal',
-  'tray.closeSession': '關閉工作階段',
 
   // Vault Sidebar
   'vault.sidebar.collapse': '收起側邊欄',

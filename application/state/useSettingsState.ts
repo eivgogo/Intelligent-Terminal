@@ -50,7 +50,6 @@ import {
   STORAGE_KEY_JMS_DEEP_LINK_ENABLED,
   STORAGE_KEY_EXPLORER_CONTEXT_MENU_ENABLED,
   STORAGE_KEY_TOGGLE_WINDOW_HOTKEY,
-  STORAGE_KEY_CLOSE_TO_TRAY,
   STORAGE_KEY_HTTP_NETWORK_PROXY,
   STORAGE_KEY_GLOBAL_HOTKEY_ENABLED,
   STORAGE_KEY_WINDOW_OPACITY,
@@ -451,12 +450,6 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     // Default: Ctrl+` (Control+backtick) - similar to VS Code terminal toggle
     const isMac = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform);
     return isMac ? '⌃ + `' : 'Ctrl + `';
-  });
-  const [closeToTray, setCloseToTray] = useState<boolean>(() => {
-    const stored = readStoredString(STORAGE_KEY_CLOSE_TO_TRAY);
-    // Default to true (enabled)
-    if (stored === null) return true;
-    return stored === 'true';
   });
   const [httpNetworkProxy, setHttpNetworkProxyState] = useState<HttpNetworkProxySettings>(() => {
     const stored = localStorageAdapter.read<unknown>(STORAGE_KEY_HTTP_NETWORK_PROXY);
@@ -1519,7 +1512,6 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     enabled: enableSystemEffects,
     toggleWindowHotkey,
     globalHotkeyEnabled,
-    closeToTray,
     windowOpacityRecord,
     windowOpacityMutationSourceRef,
     appIconVariant,
@@ -1720,8 +1712,6 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     // Global Toggle Window (Quake Mode)
     toggleWindowHotkey,
     setToggleWindowHotkey,
-    closeToTray,
-    setCloseToTray,
     httpNetworkProxy,
     setHttpNetworkProxy,
     autoUpdateEnabled,

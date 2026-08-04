@@ -365,17 +365,6 @@ function createMainWindowApi(ctx) {
           return;
         }
 
-        // Check if close-to-tray is enabled
-        const trackedMainWindowCount = typeof getMainWindowCount === "function" ? getMainWindowCount() : 1;
-        if (registerAsMainWindow && trackedMainWindowCount <= 1 && !isQuitting && getGlobalShortcutBridge().handleWindowClose(event, win)) {
-          // Window was hidden to tray - save state before returning
-          if (saveStateTimer) clearTimeout(saveStateTimer);
-          const state = persistWindowState ? getWindowBoundsState(win, lastNormalBounds) : null;
-          if (state) saveWindowStateSync(state);
-          hideSettingsWindow();
-          return;
-        }
-
         if (registerAsMainWindow && registerAsAppContentWindow && !isQuitting && !dirtyEditorCloseConfirmed) {
           queryDirtyEditorsBeforeClose(event);
           return;

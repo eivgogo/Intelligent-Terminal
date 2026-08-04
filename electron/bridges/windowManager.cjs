@@ -10,10 +10,6 @@ const { safeSend } = require("./ipcUtils.cjs");
 
 const V8_CACHE_OPTIONS = "bypassHeatCheck";
 
-function getGlobalShortcutBridge() {
-  return require("./globalShortcutBridge.cjs");
-}
-
 // Theme colors configuration
 const THEME_COLORS = {
   dark: {
@@ -49,13 +45,10 @@ let isQuitting = false;
 // Set right before electron-updater's quitAndInstall() drives app.quit() for a
 // macOS/Windows in-place update. The install only succeeds if the app process
 // exits cleanly: Squirrel.Mac's ShipIt helper waits on the parent PID to die
-// before swapping the bundle. Two normal-quit behaviors would otherwise keep
-// the process alive and strand the installer (see #1215):
-//   1. close-to-tray hides the window instead of closing it, and
-//   2. the before-quit dirty-editor guard preventDefault()s the quit for a
-//      5s renderer round-trip.
-// This flag lets both paths recognize an update install and let the quit
-// through immediately.
+// before swapping the bundle. The before-quit dirty-editor guard would
+// otherwise preventDefault() the quit for a 5s renderer round-trip and strand
+// the installer (see #1215). This flag lets that path recognize an update
+// install and let the quit through immediately.
 let quittingForUpdate = false;
 const rendererReadyCallbacksByWebContentsId = new Map();
 const rendererReadySeenByWebContentsId = new Set();
@@ -117,8 +110,8 @@ function shouldCloseWindowFromInput(input) {
 
 /**
  * Read the generic "app is quitting" flag. Window close handlers gate
- * close-to-tray / settings-window hiding on this; exposed so the update-quit
- * rollback can be verified.
+ * settings-window hiding on this; exposed so the update-quit rollback can be
+ * verified.
  */
 function getIsQuitting() {
   return isQuitting;
@@ -126,13 +119,14 @@ function getIsQuitting() {
 
 /**
  * Mark that the app is quitting to install a downloaded update. Mirrors the
- * generic isQuitting flag so the main-window close handler bypasses
- * close-to-tray. Call this right before electron-updater's quitAndInstall().
+ * generic isQuitting flag so the main-window close handler lets the quit
+ * through during an update install. Call this right before electron-updater's
+ * quitAndInstall().
  *
  * Passing false rolls BOTH flags back — used when a quitAndInstall never
  * actually quits the app (throw / Squirrel follow-up error / stale download).
- * Without resetting isQuitting too, close-to-tray and settings-window hiding
- * would stay disabled for the rest of the session (#1215 review).
+ * Without resetting isQuitting too, settings-window hiding would stay disabled
+ * for the rest of the session (#1215 review).
  */
 function setQuittingForUpdate(nextValue) {
   quittingForUpdate = Boolean(nextValue);
@@ -915,7 +909,6 @@ const mainWindowApi = createMainWindowApi({
   console,
   setTimeout,
   clearTimeout,
-  getGlobalShortcutBridge,
   debugLog,
   resolveFrontendBackgroundColor,
   loadWindowState,
@@ -1355,7 +1348,7 @@ function getSettingsWindow() {
 
 /**
  * Show the main window and restore reliable keyboard/caret routing (#760, #1722).
- * Global hotkeys and tray entry points invoke this from non-foreground contexts
+ * Global hotkeys and Dock entry points invoke this from non-foreground contexts
  * where bare BrowserWindow.focus() is silently rejected on Windows.
  */
 function showAndFocusMainWindow(win) {
@@ -1374,7 +1367,7 @@ function showAndFocusMainWindow(win) {
 
 /**
  * Renderer input-focus recovery is only valid after an explicit foreground
- * request (hotkey, tray, Dock, deep link). Plain BrowserWindow "show" events
+ * request (hotkey, Dock, deep link). Plain BrowserWindow "show" events
  * can also come from OS window/space transitions and must not steal focus.
  */
 function notifyWindowFocusRequested(win) {

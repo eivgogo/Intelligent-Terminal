@@ -254,7 +254,7 @@ test("System on a light OS changes to Dark in every open follow-app terminal", (
     theme: "system",
   }, darkSelection);
 
-  // Detached terminal and tray renderers run the production storage-event
+  // Detached terminal renderers run the production storage-event
   // reducer because they are not direct IPC broadcast targets.
   const detachedUpdate = resolveAppearanceStorageEvent(
     detachedTerminal,

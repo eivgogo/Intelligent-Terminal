@@ -203,27 +203,9 @@ export const ruCoreMessages: Messages = {
   'settings.globalHotkey.toggleWindowDesc': 'Нажмите сочетание клавиш, чтобы задать глобальную горячую клавишу для показа или скрытия окна.',
   'settings.globalHotkey.notSet': 'Не задано',
   'settings.globalHotkey.reset': 'Сбросить по умолчанию',
-  'settings.globalHotkey.closeToTray': 'Сворачивать в системный трей',
-  'settings.globalHotkey.closeToTrayDesc': 'Если включено, при закрытии окно будет сворачиваться в системный трей вместо выхода из приложения.',
   'settings.globalHotkey.enabled': 'Включить глобальную горячую клавишу',
   'settings.globalHotkey.enabledDesc': 'Регистрировать системные сочетания клавиш. Когда отключено, все глобальные горячие клавиши снимаются с регистрации.',
   'settings.globalHotkey.hint': 'Глобальная горячая клавиша работает на уровне всей системы и позволяет быстро показывать или скрывать окно (терминал в стиле Quake).',
-
-  // Tray Panel
-  'tray.openMainWindow': 'Открыть главное окно',
-  'tray.sessions': 'Сессии',
-  'tray.portForwarding': 'Проброс портов',
-  'tray.status.connected': 'Подключено',
-  'tray.status.connecting': 'Подключение',
-  'tray.status.disconnected': 'Отключено',
-  'tray.status.active': 'Активно',
-  'tray.status.inactive': 'Неактивно',
-  'tray.status.error': 'Ошибка',
-  'tray.recentHosts': 'Недавние хосты',
-  'tray.empty.title': 'Пока здесь ничего нет',
-  'tray.empty.subtitle': 'Подключитесь к серверу, они по вам скучают 🚀',
-  'tray.quit': 'Выйти из Intelligent Terminal',
-  'tray.closeSession': 'Закрыть сессию',
 
   // Vault Sidebar
   'vault.sidebar.collapse': 'Свернуть боковую панель',

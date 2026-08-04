@@ -383,8 +383,9 @@ function focusMainWindow() {
     const win = getReusableMainWindow({ getWindowManager });
     if (!win) return false;
 
-    // Cancel any in-flight close-to-tray hide so second-instance / dock-click
-    // re-entry beats a pending leave-full-screen → hide sequence.
+    // Cancel any in-flight fullscreen hide (from the global hotkey) so
+    // second-instance / dock-click re-entry beats a pending
+    // leave-full-screen → hide sequence.
     try {
       getGlobalShortcutBridge().clearPendingFullscreenHide?.(win);
     } catch {}
@@ -1155,14 +1156,15 @@ if (!gotLock) {
 
     // Re-create or focus window on macOS dock click
     app.on("activate", () => {
-      // If the main window was hidden (e.g. "close to tray"), clicking the Dock icon
-      // should bring it back. Fallback to creating a new window if none exists.
+      // If the main window was hidden (e.g. via the global hotkey), clicking
+      // the Dock icon should bring it back. Fallback to creating a new window
+      // if none exists.
       try {
         const mainWin = getWindowManager().getMainWindow?.();
         if (mainWin && !mainWin.isDestroyed?.()) {
-          // If a close-to-tray hide is still pending (fullscreen exit animation
-          // not finished yet), cancel it — user intent to bring the window
-          // back overrides the pending hide.
+          // If a fullscreen hide is still pending (exit animation not finished
+          // yet), cancel it — user intent to bring the window back overrides
+          // the pending hide.
           try {
             getGlobalShortcutBridge().clearPendingFullscreenHide?.(mainWin);
           } catch {}
@@ -1213,8 +1215,8 @@ if (!gotLock) {
   // Commit the window manager to "we're quitting" state. Must only run once
   // we've decided to actually proceed — if we set it unconditionally on every
   // before-quit, a dirty-cancelled quit leaves isQuitting=true and changes
-  // later window-close behavior (e.g. close-to-tray hooks that gate on
-  // !isQuitting would stop firing).
+  // later window-close behavior (e.g. hooks that gate on !isQuitting would
+  // stop firing).
   const commitQuit = () => {
     getWindowManager().setIsQuitting(true);
     quitGuardChannelBusy = true;
@@ -1238,12 +1240,12 @@ if (!gotLock) {
     if (quitConfirmed) return;
 
     // NOTE: an update install (quitAndInstall) intentionally still runs the
-    // dirty-editor check below. setQuittingForUpdate(true) only bypasses
-    // close-to-tray (so the window actually closes and Squirrel.Mac's ShipIt
-    // can swap the bundle); it must NOT skip the unsaved-work guard, or
-    // clicking "Restart Now" with a dirty SFTP editor would silently lose
-    // edits (#1215 review). If the user cancels to save, the quit is aborted
-    // and autoUpdateBridge's watchdog clears the quitting-for-update flags.
+    // dirty-editor check below. setQuittingForUpdate(true) flips isQuitting so
+    // the window actually closes and Squirrel.Mac's ShipIt can swap the
+    // bundle; it must NOT skip the unsaved-work guard, or clicking "Restart
+    // Now" with a dirty SFTP editor would silently lose edits (#1215 review).
+    // If the user cancels to save, the quit is aborted and autoUpdateBridge's
+    // watchdog clears the quitting-for-update flags.
 
     // A check is already in flight — swallow this event; the in-flight handler
     // will issue commitQuit() when it completes if appropriate.
@@ -1254,7 +1256,7 @@ if (!gotLock) {
 
     const { ipcMain: _ipcMain } = electronModule;
     // Target app-content windows explicitly. Falling back to
-    // BrowserWindow.getAllWindows() could pick tray/settings windows whose
+    // BrowserWindow.getAllWindows() could pick settings windows whose
     // renderers don't listen for app:query-dirty-editors and would force the
     // timeout fallback on every quit.
     const dirtyEditorWindows = typeof getWindowManager().getDirtyEditorWindows === "function"
@@ -1268,8 +1270,8 @@ if (!gotLock) {
 
     // The renderer needs to be alive for the IPC roundtrip to make sense.
     // Crashed/dead renderers are skipped; there is no usable UI to warn from.
-    // Hidden-to-tray windows are still queried because their renderer can own
-    // dirty SFTP editor tabs.
+    // Hidden windows are still queried because their renderer can own dirty
+    // SFTP editor tabs.
     const queryableWindows = mainWindows.filter((candidate) => (
       candidate && !candidate.isDestroyed?.() &&
       candidate.webContents &&
@@ -1320,12 +1322,11 @@ if (!gotLock) {
         //
         // A normal quit never sets isQuitting before commitQuit, so there is
         // nothing to undo. But an update install (quitAndInstall) calls
-        // setQuittingForUpdate(true) — which also flips isQuitting=true to
-        // bypass close-to-tray — BEFORE this dirty check runs. If the user
-        // cancels to save, clear it NOW instead of waiting up to 10s for
-        // autoUpdateBridge's watchdog; otherwise close-to-tray and other
-        // !isQuitting-gated behavior stay bypassed while the app keeps running
-        // (#1215 review).
+        // setQuittingForUpdate(true) — which also flips isQuitting=true —
+        // BEFORE this dirty check runs. If the user cancels to save, clear it
+        // NOW instead of waiting up to 10s for autoUpdateBridge's watchdog;
+        // otherwise other !isQuitting-gated behavior stays bypassed while the
+        // app keeps running (#1215 review).
         if (wm.isQuittingForUpdate?.()) wm.setQuittingForUpdate(false);
       })
       .catch((err) => {

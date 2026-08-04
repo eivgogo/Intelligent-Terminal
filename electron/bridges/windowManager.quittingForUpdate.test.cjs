@@ -21,7 +21,7 @@ test("setQuittingForUpdate(true) flips the update-install flag and commits isQui
   wm.setQuittingForUpdate(true);
   assert.equal(wm.isQuittingForUpdate(), true);
   // Must also set the generic isQuitting flag so the main-window close handler
-  // bypasses close-to-tray during the update quit (#1215).
+  // lets the quit through during the update install (#1215).
   assert.equal(wm.getIsQuitting(), true);
 });
 
@@ -31,7 +31,7 @@ test("setQuittingForUpdate(false) clears BOTH the update flag and isQuitting", (
   assert.equal(wm.isQuittingForUpdate(), true);
   assert.equal(wm.getIsQuitting(), true);
   // Rollback (failed install) must restore normal close behavior — resetting
-  // isQuitting too, otherwise close-to-tray / settings hiding stay disabled for
+  // isQuitting too, otherwise settings-window hiding stays disabled for
   // the rest of the session (#1215 review).
   wm.setQuittingForUpdate(false);
   assert.equal(wm.isQuittingForUpdate(), false);

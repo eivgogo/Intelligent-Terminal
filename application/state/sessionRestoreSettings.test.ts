@@ -76,7 +76,6 @@ test("session restore persistence re-arms when restore previous session is enabl
 
 test("session restore persistence can be disabled for non-main windows", () => {
   const hookSource = readFileSync(new URL("./useSessionState.ts", import.meta.url), "utf8");
-  const traySource = readFileSync(new URL("../../components/TrayPanel.tsx", import.meta.url), "utf8");
   const appSource = readFileSync(new URL("../../App.tsx", import.meta.url), "utf8");
   const indexSource = readFileSync(new URL("../../index.tsx", import.meta.url), "utf8");
   const registerBridgesSource = readFileSync(new URL("../../electron/main/registerBridges.cjs", import.meta.url), "utf8");
@@ -86,7 +85,6 @@ test("session restore persistence can be disabled for non-main windows", () => {
   assert.match(hookSource, /restoreEnabled: persistSessionRestore && resolveRestorePreviousSessionSetting/);
   assert.match(hookSource, /payload: persistSessionRestore \? sessionRestoreStorage\.read\(\) : null/);
   assert.match(hookSource, /if \(!persistSessionRestore\) return;/);
-  assert.match(traySource, /useSessionState\(\{ persistSessionRestore: false \}\)/);
   assert.match(appSource, /window\.location\.hash\.startsWith\('#\/session-window'\)/);
   assert.match(appSource, /persistSessionRestore: !isPeerSessionWindow/);
   assert.match(indexSource, /hash === '#\/session-window'/);
@@ -108,8 +106,7 @@ test("session peer windows do not run main-window startup effects", () => {
   const settingsIpcSyncSource = readFileSync(new URL("./settingsIpcSync.ts", import.meta.url), "utf8");
   const storageSyncSource = readFileSync(new URL("./settingsStorageSync.ts", import.meta.url), "utf8");
   const systemEffectsSource = readFileSync(new URL("./systemSettingsEffects.ts", import.meta.url), "utf8");
-  const trayFocusIndex = appSource.indexOf("onTrayFocusSession");
-  const trayPanelJumpIndex = appSource.indexOf("onTrayPanelJumpToSession");
+  const trayPanelConnectIndex = appSource.indexOf("onTrayPanelConnectToHost");
 
   assert.match(appSource, /const isPeerSessionWindow = typeof window !== 'undefined' && window\.location\.hash\.startsWith\('#\/session-window'\)/);
   assert.match(appSource, /useSettingsState\(\{[^}]*enableSettingsSync: !isPeerSessionWindow[^}]*enableSystemEffects: !isPeerSessionWindow/s);
@@ -137,12 +134,8 @@ test("session peer windows do not run main-window startup effects", () => {
   assert.match(systemEffectsSource, /enabled\?: boolean/);
   assert.match(systemEffectsSource, /if \(!enabled\) return;/);
   assert.ok(
-    appSource.lastIndexOf("if (isPeerSessionWindow) return;", trayFocusIndex) !== -1,
-    "peer session windows should not register tray focus/toggle listeners",
-  );
-  assert.ok(
-    appSource.lastIndexOf("if (isPeerSessionWindow) return;", trayPanelJumpIndex) !== -1,
-    "peer session windows should not register tray panel listeners",
+    appSource.lastIndexOf("if (isPeerSessionWindow) return;", trayPanelConnectIndex) !== -1,
+    "peer session windows should not register Dock connect listeners",
   );
   assert.match(startupEffectsSource, /enabled = true/);
   assert.match(startupEffectsSource, /if \(!enabled\) return;/);

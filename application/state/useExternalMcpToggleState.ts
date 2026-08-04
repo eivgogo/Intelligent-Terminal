@@ -43,9 +43,8 @@ export function shouldWaitForExternalMcpStartupReady(hash?: string): boolean {
   if (!current || current === '#' || current === '#/') return true;
   // Peer windows never own External MCP lifecycle.
   if (current.startsWith('#/session-window')) return false;
-  // Settings / tray / popup windows mount the shared hook but never run App reconcile.
+  // Settings / popup windows mount the shared hook but never run App reconcile.
   if (current.startsWith('#/settings')) return false;
-  if (current.startsWith('#/tray')) return false;
   if (current.startsWith('#/terminal-popup')) return false;
   return true;
 }
