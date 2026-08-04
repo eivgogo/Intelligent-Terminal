@@ -58,8 +58,9 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean; enabled?
   // Accept auto-update toggle from the caller (e.g. useSettingsState) so it
   // reacts immediately in the same window. Falls back to reading localStorage
   // when no caller provides the value (e.g. in non-settings contexts).
+  // Auto-update is opt-in and OFF by default — only an explicit 'true' enables it.
   const autoUpdateEnabled = options?.autoUpdateEnabled ??
-    (localStorageAdapter.readString(STORAGE_KEY_AUTO_UPDATE_ENABLED) !== 'false');
+    (localStorageAdapter.readString(STORAGE_KEY_AUTO_UPDATE_ENABLED) === 'true');
 
   // Latest "install blocked by unsaved editors" callback (#1215). Kept in a ref
   // so the listener effect (empty deps) always calls the current one without
@@ -206,11 +207,11 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean; enabled?
       if (isDismissed) {
         dismissedAutoDownloadRef.current = true;
       }
-      // When auto-update is disabled, autoDownload=false in the main process
-      // so no download will start. Don't transition to 'downloading' or the
-      // UI will be stuck at 0%. Keep status idle and let the manual download
-      // link surface instead.
-      const isAutoUpdateOff = localStorageAdapter.readString(STORAGE_KEY_AUTO_UPDATE_ENABLED) === 'false';
+      // When auto-update is disabled (opt-in, off by default), autoDownload=false
+      // in the main process so no download will start. Don't transition to
+      // 'downloading' or the UI will be stuck at 0%. Keep status idle and let
+      // the manual download link surface instead.
+      const isAutoUpdateOff = localStorageAdapter.readString(STORAGE_KEY_AUTO_UPDATE_ENABLED) !== 'true';
       const shouldTrackDownload = !isDismissed && !isAutoUpdateOff;
       setUpdateState((prev) => ({
         ...prev,
@@ -669,9 +670,10 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean; enabled?
 
     startupCheckTimeoutRef.current = setTimeout(async () => {
       // Re-check the toggle at fire time — the user may have toggled it
-      // after the timer was scheduled.
+      // after the timer was scheduled. Auto-update is opt-in, so only an
+      // explicit 'true' keeps the check scheduled.
       const stillEnabled = localStorageAdapter.readString(STORAGE_KEY_AUTO_UPDATE_ENABLED);
-      if (stillEnabled === 'false') {
+      if (stillEnabled !== 'true') {
         debugLog('Skipping startup check — auto-update disabled after timer was scheduled');
         return;
       }
