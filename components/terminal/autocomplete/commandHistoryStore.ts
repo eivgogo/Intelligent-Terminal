@@ -29,6 +29,41 @@ interface HistoryStore {
 }
 
 let cachedStore: HistoryStore | null = null;
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Drop the in-memory cache when another renderer window rewrites history.
+ * Also cancel any pending debounced save so a stale closed-over store cannot
+ * resurrect entries that were deleted elsewhere.
+ */
+function invalidateCachedStoreFromExternalChange(): void {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  cachedStore = null;
+}
+
+const storageTarget = globalThis as typeof globalThis & {
+  addEventListener?: (type: string, listener: EventListener) => void;
+  window?: Window & typeof globalThis;
+};
+
+const crossWindowStorageTarget =
+  typeof storageTarget.addEventListener === "function"
+    ? storageTarget
+    : storageTarget.window;
+
+if (
+  crossWindowStorageTarget
+  && typeof crossWindowStorageTarget.addEventListener === "function"
+) {
+  crossWindowStorageTarget.addEventListener("storage", ((event: StorageEvent) => {
+    if (event.key === STORAGE_KEY) {
+      invalidateCachedStoreFromExternalChange();
+    }
+  }) as EventListener);
+}
 
 function loadStore(): HistoryStore {
   if (cachedStore) return cachedStore;
@@ -44,8 +79,6 @@ function loadStore(): HistoryStore {
   cachedStore = { entries: [], version: 1 };
   return cachedStore;
 }
-
-let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
 function persistStoreNow(store: HistoryStore): boolean {
   const ok = localStorageAdapter.write(STORAGE_KEY, store);
