@@ -696,7 +696,7 @@ export const generateDeviceId = (): string => {
  */
 export const getDefaultDeviceName = (): string => {
   const platform = navigator.platform || 'Unknown';
-  const hostname = 'Netcatty';
+  const hostname = 'Intelligent Terminal';
   return `${hostname} (${platform})`;
 };
 

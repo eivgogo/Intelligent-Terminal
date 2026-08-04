@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="public/icon.png" alt="Netcatty" width="128" height="128">
+  <img src="public/icon.png" alt="Intelligent Terminal" width="128" height="128">
 </p>
 
-<h1 align="center">Netcatty</h1>
+<h1 align="center">Intelligent Terminal</h1>
 
 <p align="center">
   <strong>🔥 AI-Powered SSH Client, SFTP Browser & Terminal Manager 🚀</strong><br/>
@@ -75,8 +75,8 @@ Watch Catty Agent orchestrate a Docker Swarm cluster across two servers in one c
 # Contents <!-- omit in toc -->
 
 - [🔥 Catty Agent — AI Partner](#catty-agent)
-- [What is Netcatty](#what-is-netcatty)
-- [Why Netcatty](#why-netcatty)
+- [What is Intelligent Terminal](#what-is-intelligent-terminal)
+- [Why Intelligent Terminal](#why-intelligent-terminal)
 - [Features](#features)
 - [Screenshots](#screenshots)
   - [Main Window](#main-window)
@@ -93,23 +93,23 @@ Watch Catty Agent orchestrate a Docker Swarm cluster across two servers in one c
 
 ---
 
-<a name="what-is-netcatty"></a>
-# What is Netcatty
+<a name="what-is-intelligent-terminal"></a>
+# What is Intelligent Terminal
 
-**Netcatty** is a modern SSH client and terminal manager for macOS, Windows, and Linux, designed for developers, sysadmins, and DevOps engineers who need to manage multiple remote servers efficiently.
+**Intelligent Terminal** is a modern SSH client and terminal manager for macOS, Windows, and Linux, designed for developers, sysadmins, and DevOps engineers who need to manage multiple remote servers efficiently.
 
-- **Netcatty is** an alternative to PuTTY, Termius, SecureCRT, and macOS Terminal.app for SSH connections
-- **Netcatty is** a powerful SFTP client with dual-pane file browser
-- **Netcatty is** a terminal workspace with split panes, tabs, and session management
-- **Netcatty supports** SSH, local terminal, Telnet, Mosh, and Serial connections (when available)
-- **Netcatty is not** a shell replacement — it connects to shells via SSH/Telnet/Mosh or local/serial sessions
+- **Intelligent Terminal is** an alternative to PuTTY, Termius, SecureCRT, and macOS Terminal.app for SSH connections
+- **Intelligent Terminal is** a powerful SFTP client with dual-pane file browser
+- **Intelligent Terminal is** a terminal workspace with split panes, tabs, and session management
+- **Intelligent Terminal supports** SSH, local terminal, Telnet, Mosh, and Serial connections (when available)
+- **Intelligent Terminal is not** a shell replacement — it connects to shells via SSH/Telnet/Mosh or local/serial sessions
 
 ---
 
-<a name="why-netcatty"></a>
-# Why Netcatty
+<a name="why-intelligent-terminal"></a>
+# Why Intelligent Terminal
 
-If you regularly work with a fleet of servers, Netcatty is built for speed and flow:
+If you regularly work with a fleet of servers, Intelligent Terminal is built for speed and flow:
 
 - **Workspace-first** — split panes + tabs + session restore for “always-on” workflows
 - **Vault organization** — grid/list/tree views with fast search and drag-friendly workflows
@@ -174,7 +174,7 @@ Split panes help you monitor multiple servers/services at the same time (deploy 
 <a name="supported-distros"></a>
 # Supported Distros
 
-Netcatty automatically detects and displays OS icons for connected hosts:
+Intelligent Terminal automatically detects and displays OS icons for connected hosts:
 
 <p align="center">
   <img src="public/distro/ubuntu.svg" width="48" alt="Ubuntu" title="Ubuntu">
@@ -209,27 +209,27 @@ Or browse all releases at [GitHub Releases](https://github.com/binaricat/Netcatt
 
 ### Code signing and privacy
 
-Netcatty is applying to the SignPath Foundation open-source program. Once
+Intelligent Terminal is applying to the SignPath Foundation open-source program. Once
 approved, covered Windows release artifacts will use **Free code signing provided by SignPath.io, certificate by SignPath Foundation**.
 See the [code signing policy](CODE_SIGNING_POLICY.md) and
 [privacy policy](PRIVACY.md). Windows releases may remain unsigned until the
 application and integration are complete.
 
-> **Windows portable data:** Exit Netcatty, then create a folder named `data` beside `Netcatty.exe` (zip build) or beside the portable launcher. Netcatty will store its profile there on the next launch. Saved passwords and private keys remain protected by the Windows user account that created them, so they must be re-entered after moving the folder to another computer or Windows account.
+> **Windows portable data:** Exit Intelligent Terminal, then create a folder named `data` beside `Intelligent Terminal.exe` (zip build) or beside the portable launcher. Intelligent Terminal will store its profile there on the next launch. Saved passwords and private keys remain protected by the Windows user account that created them, so they must be re-entered after moving the folder to another computer or Windows account.
 
-> **Open folders in Netcatty on Windows:** The installed version adds **Open in Netcatty** to Explorer's folder context menu and folder-background context menu. It opens a local terminal in that folder. On Windows 11, choose **Show more options** first. Turn the menu off or on in **Settings → System → Windows Explorer**. ZIP and portable versions do not add this menu by default.
+> **Open folders in Intelligent Terminal on Windows:** The installed version adds **Open in Intelligent Terminal** to Explorer's folder context menu and folder-background context menu. It opens a local terminal in that folder. On Windows 11, choose **Show more options** first. Turn the menu off or on in **Settings → System → Windows Explorer**. ZIP and portable versions do not add this menu by default.
 
 > **macOS Users:** Current releases are expected to be code-signed and notarized. If Gatekeeper still warns, make sure you downloaded the latest official build from GitHub Releases.
 
 ### Nix / NixOS
 
-Netcatty provides a flake that wraps the official Linux AppImage release for Nix and NixOS users:
+Intelligent Terminal provides a flake that wraps the official Linux AppImage release for Nix and NixOS users:
 
 ```bash
 nix run github:binaricat/Netcatty
 ```
 
-For declarative installs, add the Netcatty flake as an input and use `inputs.netcatty.packages.${pkgs.system}.default` in your NixOS or Home Manager package list.
+For declarative installs, add the Intelligent Terminal flake as an input and use `inputs.netcatty.packages.${pkgs.system}.default` in your NixOS or Home Manager package list.
 
 ### Prerequisites
 - Node.js 18+ and npm

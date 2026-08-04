@@ -670,7 +670,7 @@ function createBridgeRegistrar(context) {
         }
         const title = typeof payload.title === "string" && payload.title.trim()
           ? payload.title.trim()
-          : "Netcatty";
+          : "Intelligent Terminal";
         const win = await getWindowManager().createWindow(electronModule, {
           preload,
           devServerUrl: effectiveDevServerUrl,

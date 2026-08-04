@@ -54,8 +54,8 @@ version_is_newer() {
   return 1
 }
 
-ARM_DMG="${ARTIFACTS_DIR}/Netcatty-${VERSION}-mac-arm64.dmg"
-X64_DMG="${ARTIFACTS_DIR}/Netcatty-${VERSION}-mac-x64.dmg"
+ARM_DMG="${ARTIFACTS_DIR}/Intelligent Terminal-${VERSION}-mac-arm64.dmg"
+X64_DMG="${ARTIFACTS_DIR}/Intelligent Terminal-${VERSION}-mac-x64.dmg"
 
 for f in "$ARM_DMG" "$X64_DMG"; do
   if [[ ! -f "$f" ]]; then

@@ -335,7 +335,7 @@ main();
     function prepareEtSshEnvironment(sessionId, options) {
       const jumpHosts = Array.isArray(options.jumpHosts) ? options.jumpHosts : [];
       if (jumpHosts.length > 1) {
-        throw new Error("EternalTerminal currently supports at most one jump host in Netcatty.");
+        throw new Error("EternalTerminal currently supports at most one jump host in Intelligent Terminal.");
       }
 
       const tempDir = tempDirBridge.getTempFilePath(`et-ssh-home-${sessionId}`);

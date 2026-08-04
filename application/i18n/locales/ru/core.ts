@@ -158,7 +158,7 @@ export const ruCoreMessages: Messages = {
   'settings.update.downloadError': 'Не удалось загрузить обновление.',
   'settings.update.manualDownload': 'Скачать с GitHub',
   'settings.update.manualDownloadHint': 'Автообновление недоступно на этой платформе. Скачайте последнюю версию с GitHub.',
-  'settings.update.hint': 'Netcatty проверяет обновления через GitHub Releases.',
+  'settings.update.hint': 'Intelligent Terminal проверяет обновления через GitHub Releases.',
   'settings.update.lastCheckedJustNow': 'только что',
   'settings.update.lastCheckedMinutesAgo': '{n} мин назад',
   'settings.update.lastCheckedHoursAgo': '{n} ч назад',
@@ -222,7 +222,7 @@ export const ruCoreMessages: Messages = {
   'tray.recentHosts': 'Недавние хосты',
   'tray.empty.title': 'Пока здесь ничего нет',
   'tray.empty.subtitle': 'Подключитесь к серверу, они по вам скучают 🚀',
-  'tray.quit': 'Выйти из Netcatty',
+  'tray.quit': 'Выйти из Intelligent Terminal',
   'tray.closeSession': 'Закрыть сессию',
 
   // Vault Sidebar
@@ -254,7 +254,7 @@ export const ruCoreMessages: Messages = {
   'settings.vault.showHostTreeSidebar': 'Показывать боковую панель хостов',
   'settings.vault.showHostTreeSidebarDesc': 'Показывать список хостов и кнопку в верхней панели для вкладок терминала и редактора.',
   'settings.vault.autoImportSystemKnownHosts': 'Автоимпорт системного known_hosts',
-  'settings.vault.autoImportSystemKnownHostsDesc': 'При открытии хранилища тихо импортировать записи из OpenSSH known_hosts. Отключите, чтобы держать известные хосты Netcatty отдельно; кнопка «Сканировать систему» по-прежнему импортирует вручную.',
+  'settings.vault.autoImportSystemKnownHostsDesc': 'При открытии хранилища тихо импортировать записи из OpenSSH known_hosts. Отключите, чтобы держать известные хосты Intelligent Terminal отдельно; кнопка «Сканировать систему» по-прежнему импортирует вручную.',
 
   // Update notifications
   'update.available.title': 'Доступно обновление',
@@ -407,7 +407,7 @@ export const ruCoreMessages: Messages = {
   'settings.appearance.windowOpacity': 'Прозрачность окна',
   'settings.appearance.windowOpacity.desc': 'Настройте прозрачность всего окна приложения. При низких значениях текст терминала тоже бледнеет. В некоторых средах Linux это может не поддерживаться.',
   'settings.appearance.appIcon': 'Значок приложения',
-  'settings.appearance.appIcon.desc': 'Выберите стиль значка для Dock/панели задач, чтобы Netcatty было проще найти при переключении приложений. Применяется во время работы; значок установленного пакета не меняется.',
+  'settings.appearance.appIcon.desc': 'Выберите стиль значка для Dock/панели задач, чтобы Intelligent Terminal было проще найти при переключении приложений. Применяется во время работы; значок установленного пакета не меняется.',
   'settings.appearance.appIcon.original': 'Оригинал',
   'settings.appearance.appIcon.bright': 'Яркий',
   'settings.appearance.appIcon.dark': 'Тёмный',
@@ -464,7 +464,7 @@ export const ruCoreMessages: Messages = {
   'settings.terminal.font.cjk.useCustom': 'Использовать шрифт',
   'settings.terminal.font.cjk.refresh': 'Обновить список шрифтов',
   'settings.terminal.font.cjk.alignmentWarning': 'Этот шрифт не проверен как моноширинный. Проверьте выравнивание в предварительном просмотре.',
-  'settings.terminal.font.cjk.unavailableWarning': 'Этот шрифт не установлен на устройстве. Netcatty сохранит настройку и использует безопасный запасной шрифт.',
+  'settings.terminal.font.cjk.unavailableWarning': 'Этот шрифт не установлен на устройстве. Intelligent Terminal сохранит настройку и использует безопасный запасной шрифт.',
   'settings.terminal.font.size': 'Размер шрифта',
   'settings.terminal.font.size.desc': 'Размер текста терминала',
   'settings.terminal.font.weight': 'Толщина шрифта',
@@ -967,7 +967,7 @@ export const ruCoreMessages: Messages = {
   'settings.plugins.scopeTarget': 'Цель {scope}',
   'settings.plugins.noScopeTargets': 'Нет доступных целей',
   'settings.plugins.thisDevice': 'Это устройство',
-  'plugins.authentication.description': 'Завершите запрос аутентификации в этом диалоге Netcatty.',
+  'plugins.authentication.description': 'Завершите запрос аутентификации в этом диалоге Intelligent Terminal.',
   'plugins.authentication.value': 'Значение',
   'plugins.authentication.password': 'Пароль',
   'plugins.authentication.code': 'Одноразовый код',

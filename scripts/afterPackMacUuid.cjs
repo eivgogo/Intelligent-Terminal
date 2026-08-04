@@ -316,7 +316,7 @@ async function afterPack(context) {
 
   if (context.electronPlatformName !== "darwin") return;
 
-  const appId = context.packager.appInfo.id || "com.netcatty.app";
+  const appId = context.packager.appInfo.id || "com.intelligentterminal.app";
   const productFilename = context.packager.appInfo.productFilename;
   const appPath = path.join(context.appOutDir, `${productFilename}.app`);
   const exePath = path.join(

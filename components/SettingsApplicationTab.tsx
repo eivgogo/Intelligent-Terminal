@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ArrowUpCircle, Bug, Check, Github, Loader2, MessageCircle, Newspaper, RefreshCcw } from "lucide-react";
 import AppLogo from "./AppLogo";
-import AppWordmark from "./AppWordmark";
 import { Button } from "./ui/button";
 import { cn } from "../lib/utils";
 import { useApplicationBackend } from "../application/state/useApplicationBackend";
@@ -57,7 +56,7 @@ export const buildIssueUrl = (appInfo: AppInfo) => {
   const ua = typeof navigator !== "undefined" ? navigator.userAgent : "unknown";
   params.set(
     "logs",
-    `Reported from Netcatty Settings (${appInfo.name} ${appInfo.version || "unknown"}).\n\nUser-Agent: ${ua}`,
+    `Reported from Intelligent Terminal Settings (${appInfo.name} ${appInfo.version || "unknown"}).\n\nUser-Agent: ${ua}`,
   );
 
   return `${REPO_URL}/issues/new?${params.toString()}`;
@@ -97,7 +96,7 @@ interface SettingsApplicationTabProps {
 export default function SettingsApplicationTab({ updateState, checkNow, openReleasePage, installUpdate, startDownload, isUpdateDemoMode }: SettingsApplicationTabProps) {
   const { t } = useI18n();
   const { openExternal, getApplicationInfo } = useApplicationBackend();
-  const [appInfo, setAppInfo] = useState<AppInfo>({ name: "Netcatty", version: "" });
+  const [appInfo, setAppInfo] = useState<AppInfo>({ name: "Intelligent Terminal", version: "" });
   const [lastCheckResult, setLastCheckResult] = useState<'none' | 'available' | 'upToDate'>('none');
 
   useEffect(() => {
@@ -174,7 +173,6 @@ export default function SettingsApplicationTab({ updateState, checkNow, openRele
           <div className="flex items-center gap-4">
             <AppLogo className="w-16 h-16" />
             <div>
-              <AppWordmark accessibleLabel="Netcatty" className="h-8 w-auto text-foreground" />
               <div className="flex items-center gap-2 mt-1">
                 <span className="text-sm text-muted-foreground">
                   {appInfo.version ? appInfo.version : " "}

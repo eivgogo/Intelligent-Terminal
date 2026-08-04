@@ -226,7 +226,7 @@ const devServerUrl = process.env.VITE_DEV_SERVER_URL;
 const isDev = !app.isPackaged && !!devServerUrl;
 const effectiveDevServerUrl = isDev ? devServerUrl : undefined;
 if (isDev) {
-  app.setName("Netcatty Dev");
+  app.setName("Intelligent Terminal Dev");
   app.setPath("userData", path.join(app.getPath("userData"), "dev"));
 }
 const { applyPortableDataDirectory } = require("./portableData.cjs");
@@ -899,7 +899,7 @@ function hasUsableWindow() {
 }
 
 function showStartupError(err) {
-  const title = "Netcatty";
+  const title = "Intelligent Terminal";
   const code = err && typeof err === "object" ? err.code : null;
   const message =
     code === "ENOENT"

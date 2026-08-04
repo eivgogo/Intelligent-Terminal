@@ -673,7 +673,7 @@ function createTray() {
     }
 
     tray = new Tray(trayIcon || nativeImage.createEmpty());
-    tray.setToolTip("Netcatty");
+    tray.setToolTip("Intelligent Terminal");
 
     // Build and set initial context menu
     updateTrayMenu();

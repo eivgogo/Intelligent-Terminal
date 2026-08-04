@@ -51,7 +51,7 @@ native approvals, `request_user_input`, model discovery, and process cleanup.
 - Observer maps to `read-only + never`, Confirm to `read-only + on-request`, and
   Auto to `danger-full-access + never`.
 - App Server native “allow for session” decisions are session-scoped Codex
-  grants and must not become persistent Netcatty permission grants.
+  grants and must not become persistent Intelligent Terminal permission grants.
 - `turn/completed` is the terminal lifecycle event. Retryable `error`
   notifications are warnings; process exit is fatal.
 - Regenerate the committed protocol contract with
@@ -172,9 +172,9 @@ Issues opened without the required format are **auto-closed** by the issue-forma
 Full contributor guidance (setup, commits, PR process): [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## Review Boundaries
-- Treat `electron/cli/*`, `netcatty-tool-cli`, the CLI discovery file, and the local TCP bridge as internal Netcatty integration surfaces unless a task explicitly says otherwise.
-- Do not review those surfaces as public APIs by default, and do not assume they must support third-party callers, manual launches, or non-Netcatty agents.
-- On supported first-party paths, assume Netcatty's own launcher provides required integration environment such as `NETCATTY_TOOL_CLI_DISCOVERY_FILE`.
+- Treat `electron/cli/*`, `netcatty-tool-cli`, the CLI discovery file, and the local TCP bridge as internal Intelligent Terminal integration surfaces unless a task explicitly says otherwise.
+- Do not review those surfaces as public APIs by default, and do not assume they must support third-party callers, manual launches, or non-Intelligent Terminal agents.
+- On supported first-party paths, assume Intelligent Terminal's own launcher provides required integration environment such as `NETCATTY_TOOL_CLI_DISCOVERY_FILE`.
 - If a review concern depends on external exposure, third-party compatibility, or public API stability, call it out as out of scope unless the task explicitly includes that contract.
 
 ---

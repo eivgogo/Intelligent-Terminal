@@ -35,7 +35,7 @@ npm run pack:linux
 
 ## Architecture
 
-Netcatty is an Electron + React desktop app (SSH manager, terminal, SFTP browser). It has two runtimes:
+Intelligent Terminal is an Electron + React desktop app (SSH manager, terminal, SFTP browser). It has two runtimes:
 
 ### Electron Main Process (`electron/`)
 - **`main.cjs`** — entry point; wires crash logging, process error guards, and delegates to `main/registerBridges.cjs`

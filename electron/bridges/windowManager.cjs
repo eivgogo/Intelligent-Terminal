@@ -1091,7 +1091,7 @@ function registerWindowHandlers(ipcMain, nativeTheme) {
     if (!win || win.isDestroyed()) return false;
     const value = typeof title === "string" ? title.trim() : "";
     try {
-      win.setTitle(value || "Netcatty");
+      win.setTitle(value || "Intelligent Terminal");
       return true;
     } catch {
       return false;

@@ -5,8 +5,8 @@ const { etExtraResources } = require('./scripts/et-extra-resources.cjs');
  * @type {import('electron-builder').Configuration}
  */
 module.exports = {
-    appId: 'com.netcatty.app',
-    productName: 'Netcatty',
+    appId: 'com.intelligentterminal.app',
+    productName: 'Intelligent Terminal',
     artifactName: '${productName}-${version}-${os}-${arch}.${ext}',
     protocols: [
         {
@@ -24,7 +24,7 @@ module.exports = {
     ],
     electronLanguages: ['en', 'en-US', 'zh_CN', 'zh-CN', 'zh_TW', 'zh-TW', 'ru'],
     // Give the macOS build a unique Mach-O LC_UUID before signing, so macOS
-    // Local Network privacy treats Netcatty distinctly from every other
+    // Local Network privacy treats Intelligent Terminal distinctly from every other
     // Electron app (which all share Electron's prebuilt LC_UUID) — see #1040
     // and scripts/afterPackMacUuid.cjs. No-op on Windows/Linux.
     beforePack: './scripts/beforePackCursorSdk.cjs',
@@ -240,7 +240,7 @@ module.exports = {
         allowToChangeInstallationDirectory: true,
         createDesktopShortcut: true,
         createStartMenuShortcut: true,
-        shortcutName: 'Netcatty'
+        shortcutName: 'Intelligent Terminal'
     },
     linux: {
         // Linux .deb/.rpm/AppImage icons come from build/icons/* (see

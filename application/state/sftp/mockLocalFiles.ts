@@ -191,7 +191,7 @@ export function buildMockLocalFiles(path: string): SftpFileEntry[] {
     ],
     "C:/Users/damao/Desktop": [
       {
-        name: "Netcatty",
+        name: "Intelligent Terminal",
         type: "directory",
         size: 0,
         sizeFormatted: "--",
@@ -215,7 +215,7 @@ export function buildMockLocalFiles(path: string): SftpFileEntry[] {
         lastModifiedFormatted: formatDate(Date.now() - 43200000),
       },
     ],
-    "C:/Users/damao/Desktop/Netcatty": [
+    "C:/Users/damao/Desktop/Intelligent Terminal": [
       {
         name: "src",
         type: "directory",
@@ -321,7 +321,7 @@ export function buildMockLocalFiles(path: string): SftpFileEntry[] {
     ],
     "/Users/damao/Desktop": [
       {
-        name: "Netcatty",
+        name: "Intelligent Terminal",
         type: "directory",
         size: 0,
         sizeFormatted: "--",
@@ -345,7 +345,7 @@ export function buildMockLocalFiles(path: string): SftpFileEntry[] {
         lastModifiedFormatted: formatDate(Date.now() - 43200000),
       },
     ],
-    "/Users/damao/Desktop/Netcatty": [
+    "/Users/damao/Desktop/Intelligent Terminal": [
       {
         name: "src",
         type: "directory",

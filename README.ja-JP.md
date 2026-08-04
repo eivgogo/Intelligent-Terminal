@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="public/icon.png" alt="Netcatty" width="128" height="128">
+  <img src="public/icon.png" alt="Intelligent Terminal" width="128" height="128">
 </p>
 
-<h1 align="center">Netcatty</h1>
+<h1 align="center">Intelligent Terminal</h1>
 
 <p align="center">
   <strong>🔥 AI 搭載の SSH クライアント、SFTP ブラウザ & ターミナルマネージャー 🚀</strong><br/>
@@ -76,8 +76,8 @@ Catty Agent にサーバーの健全性チェックを依頼すると、適切�
 # 目次 <!-- omit in toc -->
 
 - [🔥 Catty Agent — AI パートナー](#catty-agent)
-- [Netcatty とは](#netcatty-とは)
-- [なぜ Netcatty](#なぜ-netcatty)
+- [Intelligent Terminal とは](#intelligent-terminal-とは)
+- [なぜ Intelligent Terminal](#なぜ-intelligent-terminal)
 - [機能](#機能)
 - [スクリーンショット](#スクリーンショット)
   - [メインウィンドウ](#メインウィンドウ)
@@ -94,23 +94,23 @@ Catty Agent にサーバーの健全性チェックを依頼すると、適切�
 
 ---
 
-<a name="netcatty-とは"></a>
-# Netcatty とは
+<a name="intelligent-terminal-とは"></a>
+# Intelligent Terminal とは
 
-**Netcatty** は、複数のリモートサーバーを効率的に管理する必要がある開発者、システム管理者、DevOps エンジニア向けに設計された、モダンなクロスプラットフォーム SSH クライアントおよびターミナルマネージャーです。
+**Intelligent Terminal** は、複数のリモートサーバーを効率的に管理する必要がある開発者、システム管理者、DevOps エンジニア向けに設計された、モダンなクロスプラットフォーム SSH クライアントおよびターミナルマネージャーです。
 
-- **Netcatty は** PuTTY、Termius、SecureCRT、macOS Terminal.app の代替となる SSH 接続ツール
-- **Netcatty は** デュアルペインのファイルブラウザを備えた強力な SFTP クライアント
-- **Netcatty は** 分割ペイン、タブ、セッション管理を備えたターミナルワークスペース
-- **Netcatty は** SSH、ローカルターミナル、Telnet、Mosh、シリアル接続をサポートします（利用可能な場合）
-- **Netcatty は** シェルの代替ではありません — SSH/Telnet/Mosh またはローカル/シリアルセッション経由でシェルに接続します
+- **Intelligent Terminal は** PuTTY、Termius、SecureCRT、macOS Terminal.app の代替となる SSH 接続ツール
+- **Intelligent Terminal は** デュアルペインのファイルブラウザを備えた強力な SFTP クライアント
+- **Intelligent Terminal は** 分割ペイン、タブ、セッション管理を備えたターミナルワークスペース
+- **Intelligent Terminal は** SSH、ローカルターミナル、Telnet、Mosh、シリアル接続をサポートします（利用可能な場合）
+- **Intelligent Terminal は** シェルの代替ではありません — SSH/Telnet/Mosh またはローカル/シリアルセッション経由でシェルに接続します
 
 ---
 
-<a name="なぜ-netcatty"></a>
-# なぜ Netcatty
+<a name="なぜ-intelligent-terminal"></a>
+# なぜ Intelligent Terminal
 
-複数サーバーを日常的に扱うなら、Netcatty は「スピード」と「流れ」を重視した作りになっています：
+複数サーバーを日常的に扱うなら、Intelligent Terminal は「スピード」と「流れ」を重視した作りになっています：
 
 - **ワークスペース中心** — 分割ペイン + タブ + セッション復元で常時使うワークフローに対応
 - **Vault の整理** — グリッド/リスト/ツリー表示、高速検索、ドラッグしやすいワークフロー
@@ -173,7 +173,7 @@ Catty Agent にサーバーの健全性チェックを依頼すると、適切�
 <a name="対応ディストリビューション"></a>
 # 対応ディストリビューション
 
-Netcatty は接続したホストの OS を検出し、ホスト一覧でアイコンとして表示します：
+Intelligent Terminal は接続したホストの OS を検出し、ホスト一覧でアイコンとして表示します：
 
 <p align="center">
   <img src="public/distro/ubuntu.svg" width="48" alt="Ubuntu" title="Ubuntu">
@@ -208,27 +208,27 @@ Netcatty は接続したホストの OS を検出し、ホスト一覧でアイ�
 
 ### コード署名とプライバシー
 
-Netcatty は SignPath Foundation のオープンソースプログラムに申請中です。
+Intelligent Terminal は SignPath Foundation のオープンソースプログラムに申請中です。
 承認後、対象となる Windows リリース成果物には **Free code signing provided by SignPath.io, certificate by SignPath Foundation** が使用されます。詳細は
 [コード署名ポリシー](CODE_SIGNING_POLICY.md)と
 [プライバシーポリシー](PRIVACY.md)をご覧ください。申請と導入が完了するまで、
 Windows リリースは未署名の場合があります。
 
-> **Windows のポータブルデータ：** Netcatty を終了し、`Netcatty.exe`（zip 版）またはポータブル版ランチャーと同じ場所に `data` フォルダーを作成してください。次回起動時から、Netcatty はデータをこのフォルダーに保存します。保存済みのパスワードと秘密鍵は、作成した Windows ユーザーによって引き続き保護されます。別のコンピューターまたは Windows ユーザーへ移動した場合は、これらの機密情報を再入力する必要があります。
+> **Windows のポータブルデータ：** Intelligent Terminal を終了し、`Intelligent Terminal.exe`（zip 版）またはポータブル版ランチャーと同じ場所に `data` フォルダーを作成してください。次回起動時から、Intelligent Terminal はデータをこのフォルダーに保存します。保存済みのパスワードと秘密鍵は、作成した Windows ユーザーによって引き続き保護されます。別のコンピューターまたは Windows ユーザーへ移動した場合は、これらの機密情報を再入力する必要があります。
 
-> **Windows でフォルダーを Netcatty で開く：** インストール版では、エクスプローラーのフォルダーおよびフォルダー背景のコンテキストメニューに **Open in Netcatty** が追加されます。選択すると、そのフォルダーでローカルターミナルが開きます。Windows 11 では、先に **その他のオプションを表示** を選択してください。**設定 → システム → Windows Explorer** からメニューの表示／非表示を切り替えられます。ZIP 版とポータブル版では、既定ではこのメニューは追加されません。
+> **Windows でフォルダーを Intelligent Terminal で開く：** インストール版では、エクスプローラーのフォルダーおよびフォルダー背景のコンテキストメニューに **Open in Intelligent Terminal** が追加されます。選択すると、そのフォルダーでローカルターミナルが開きます。Windows 11 では、先に **その他のオプションを表示** を選択してください。**設定 → システム → Windows Explorer** からメニューの表示／非表示を切り替えられます。ZIP 版とポータブル版では、既定ではこのメニューは追加されません。
 
 > **macOS ユーザーへ：** 現在のリリースはコード署名と notarization が行われている想定です。Gatekeeper の警告が出る場合は、GitHub Releases から最新版の公式ビルドを取得しているか確認してください。
 
 ### Nix / NixOS
 
-Netcatty は Nix および NixOS ユーザー向けに、公式 Linux AppImage リリースをラップした flake を提供しています：
+Intelligent Terminal は Nix および NixOS ユーザー向けに、公式 Linux AppImage リリースをラップした flake を提供しています：
 
 ```bash
 nix run github:binaricat/Netcatty
 ```
 
-宣言型インストールには、Netcatty flake を input として追加し、NixOS または Home Manager のパッケージリストで `inputs.netcatty.packages.${pkgs.system}.default` を使用してください。
+宣言型インストールには、Intelligent Terminal flake を input として追加し、NixOS または Home Manager のパッケージリストで `inputs.netcatty.packages.${pkgs.system}.default` を使用してください。
 
 ### 前提条件
 - Node.js 18+ と npm

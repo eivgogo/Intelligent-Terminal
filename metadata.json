@@ -1,5 +1,5 @@
 {
-  "name": "netcatty SSH",
+  "name": "Intelligent Terminal",
   "description": "A modern, AI-powered SSH server manager and terminal simulator. Manage your hosts and practice in a virtual Linux environment powered by Gemini.",
   "requestFramePermissions": []
 }

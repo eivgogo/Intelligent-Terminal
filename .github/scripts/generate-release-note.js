@@ -53,28 +53,28 @@ const baseUrl = `https://github.com/${repo}/releases/download/${tag}`;
 // - pacman: x64 -> x64, arm64 -> aarch64
 const files = {
   mac: {
-    arm64: `Netcatty-${version}-mac-arm64.dmg`,
-    x64: `Netcatty-${version}-mac-x64.dmg`
+    arm64: `Intelligent Terminal-${version}-mac-arm64.dmg`,
+    x64: `Intelligent Terminal-${version}-mac-x64.dmg`
   },
   win: {
-    x64: `Netcatty-${version}-win-x64.exe`
+    x64: `Intelligent Terminal-${version}-win-x64.exe`
   },
   linux: {
     appimage: {
-      x64: `Netcatty-${version}-linux-x86_64.AppImage`,
-      arm64: `Netcatty-${version}-linux-arm64.AppImage`
+      x64: `Intelligent Terminal-${version}-linux-x86_64.AppImage`,
+      arm64: `Intelligent Terminal-${version}-linux-arm64.AppImage`
     },
     deb: {
-      x64: `Netcatty-${version}-linux-amd64.deb`,
-      arm64: `Netcatty-${version}-linux-arm64.deb`
+      x64: `Intelligent Terminal-${version}-linux-amd64.deb`,
+      arm64: `Intelligent Terminal-${version}-linux-arm64.deb`
     },
     rpm: {
-      x64: `Netcatty-${version}-linux-x86_64.rpm`,
-      arm64: `Netcatty-${version}-linux-aarch64.rpm`
+      x64: `Intelligent Terminal-${version}-linux-x86_64.rpm`,
+      arm64: `Intelligent Terminal-${version}-linux-aarch64.rpm`
     },
     pacman: {
-      x64: `Netcatty-${version}-linux-x64.pacman`,
-      arm64: `Netcatty-${version}-linux-aarch64.pacman`
+      x64: `Intelligent Terminal-${version}-linux-x64.pacman`,
+      arm64: `Intelligent Terminal-${version}-linux-aarch64.pacman`
     }
   }
 };

@@ -330,7 +330,7 @@ async function syncFileChangeOnce(watchId, watchInfo) {
 
   if (watchInfo.stopped || activeWatchers.get(watchId) !== watchInfo) return;
   console.log(`[FileWatcher] Sync complete: ${remotePath}`);
-  showSystemNotification("Netcatty", `File synced to remote: ${fileName}`);
+  showSystemNotification("Intelligent Terminal", `File synced to remote: ${fileName}`);
   notifyWatchOwners(watchInfo, "netcatty:filewatch:synced", {
     watchId,
     localPath,
@@ -362,7 +362,7 @@ async function handleFileChange(watchId) {
         const message = err?.message || String(err);
         console.error(`[FileWatcher] Sync failed for ${watchInfo.localPath}:`, message);
         showSystemNotification(
-          "Netcatty",
+          "Intelligent Terminal",
           `Failed to sync ${path.basename(watchInfo.remotePath)}: ${message}`,
         );
         notifyWatchOwners(watchInfo, "netcatty:filewatch:error", {

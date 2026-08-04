@@ -470,7 +470,7 @@ test("installExplorerContextMenu writes HKCU shell command entries", () => {
 
   assert.equal(result.success, true);
   assert.equal(result.enabled, true);
-  assert.ok(writes.some((args) => args.includes("MUIVerb") && args.includes("Open in Netcatty")));
+  assert.ok(writes.some((args) => args.includes("MUIVerb") && args.includes("Open in Intelligent Terminal")));
   assert.ok(writes.some((args) =>
     args.some((part) => String(part).includes('--open-terminal-path="%1."'))
   ));
@@ -549,10 +549,10 @@ test("installExplorerContextMenu falls back to HKCU when unelevated HKLM verbs a
     "HKLM\\Software\\Classes\\Directory\\Background\\shell\\Netcatty\\command",
   ]);
   const values = new Map([
-    ["HKLM\\Software\\Classes\\Directory\\shell\\Netcatty::MUIVerb", "Open in Netcatty"],
+    ["HKLM\\Software\\Classes\\Directory\\shell\\Netcatty::MUIVerb", "Open in Intelligent Terminal"],
     ["HKLM\\Software\\Classes\\Directory\\shell\\Netcatty::Icon", "C:\\Old\\Netcatty.exe,0"],
     ["HKLM\\Software\\Classes\\Directory\\shell\\Netcatty\\command::", '"C:\\Old\\Netcatty.exe" --open-terminal-path "%1"'],
-    ["HKLM\\Software\\Classes\\Directory\\Background\\shell\\Netcatty::MUIVerb", "Open in Netcatty"],
+    ["HKLM\\Software\\Classes\\Directory\\Background\\shell\\Netcatty::MUIVerb", "Open in Intelligent Terminal"],
     ["HKLM\\Software\\Classes\\Directory\\Background\\shell\\Netcatty::Icon", "C:\\Old\\Netcatty.exe,0"],
     ["HKLM\\Software\\Classes\\Directory\\Background\\shell\\Netcatty\\command::", '"C:\\Old\\Netcatty.exe" --open-terminal-path "%V"'],
   ]);
@@ -619,10 +619,10 @@ test("installExplorerContextMenu skips reg writes when shell verbs are already c
     "HKLM\\Software\\Classes\\Directory\\Background\\shell\\Netcatty\\command",
   ]);
   const values = new Map([
-    ["HKLM\\Software\\Classes\\Directory\\shell\\Netcatty::MUIVerb", "Open in Netcatty"],
+    ["HKLM\\Software\\Classes\\Directory\\shell\\Netcatty::MUIVerb", "Open in Intelligent Terminal"],
     ["HKLM\\Software\\Classes\\Directory\\shell\\Netcatty::Icon", `${exe},0`],
     ["HKLM\\Software\\Classes\\Directory\\shell\\Netcatty\\command::", folderCmd],
-    ["HKLM\\Software\\Classes\\Directory\\Background\\shell\\Netcatty::MUIVerb", "Open in Netcatty"],
+    ["HKLM\\Software\\Classes\\Directory\\Background\\shell\\Netcatty::MUIVerb", "Open in Intelligent Terminal"],
     ["HKLM\\Software\\Classes\\Directory\\Background\\shell\\Netcatty::Icon", `${exe},0`],
     ["HKLM\\Software\\Classes\\Directory\\Background\\shell\\Netcatty\\command::", backgroundCmd],
   ]);
@@ -735,16 +735,16 @@ test("installExplorerContextMenu clears stale portable HKCU verbs when HKLM exis
     "HKLM\\Software\\Classes\\Directory\\Background\\shell\\Netcatty\\command",
   ]);
   const values = new Map([
-    ["HKCU\\Software\\Classes\\Directory\\shell\\Netcatty::MUIVerb", "Open in Netcatty"],
+    ["HKCU\\Software\\Classes\\Directory\\shell\\Netcatty::MUIVerb", "Open in Intelligent Terminal"],
     ["HKCU\\Software\\Classes\\Directory\\shell\\Netcatty::Icon", "C:\\Portable\\Netcatty.exe,0"],
     ["HKCU\\Software\\Classes\\Directory\\shell\\Netcatty\\command::", '"C:\\Portable\\Netcatty.exe" -- --open-terminal-path="%1."'],
-    ["HKCU\\Software\\Classes\\Directory\\Background\\shell\\Netcatty::MUIVerb", "Open in Netcatty"],
+    ["HKCU\\Software\\Classes\\Directory\\Background\\shell\\Netcatty::MUIVerb", "Open in Intelligent Terminal"],
     ["HKCU\\Software\\Classes\\Directory\\Background\\shell\\Netcatty::Icon", "C:\\Portable\\Netcatty.exe,0"],
     ["HKCU\\Software\\Classes\\Directory\\Background\\shell\\Netcatty\\command::", '"C:\\Portable\\Netcatty.exe" -- --open-terminal-path="%V."'],
-    ["HKLM\\Software\\Classes\\Directory\\shell\\Netcatty::MUIVerb", "Open in Netcatty"],
+    ["HKLM\\Software\\Classes\\Directory\\shell\\Netcatty::MUIVerb", "Open in Intelligent Terminal"],
     ["HKLM\\Software\\Classes\\Directory\\shell\\Netcatty::Icon", `${exe},0`],
     ["HKLM\\Software\\Classes\\Directory\\shell\\Netcatty\\command::", folderCmd],
-    ["HKLM\\Software\\Classes\\Directory\\Background\\shell\\Netcatty::MUIVerb", "Open in Netcatty"],
+    ["HKLM\\Software\\Classes\\Directory\\Background\\shell\\Netcatty::MUIVerb", "Open in Intelligent Terminal"],
     ["HKLM\\Software\\Classes\\Directory\\Background\\shell\\Netcatty::Icon", `${exe},0`],
     ["HKLM\\Software\\Classes\\Directory\\Background\\shell\\Netcatty\\command::", backgroundCmd],
   ]);
@@ -883,16 +883,16 @@ test("installExplorerContextMenu keeps working HKCU when HKLM refresh fails", ()
     "HKLM\\Software\\Classes\\Directory\\Background\\shell\\Netcatty\\command",
   ]);
   const values = new Map([
-    ["HKCU\\Software\\Classes\\Directory\\shell\\Netcatty::MUIVerb", "Open in Netcatty"],
+    ["HKCU\\Software\\Classes\\Directory\\shell\\Netcatty::MUIVerb", "Open in Intelligent Terminal"],
     ["HKCU\\Software\\Classes\\Directory\\shell\\Netcatty::Icon", "C:\\Portable\\Netcatty.exe,0"],
     ["HKCU\\Software\\Classes\\Directory\\shell\\Netcatty\\command::", portableCmd],
-    ["HKCU\\Software\\Classes\\Directory\\Background\\shell\\Netcatty::MUIVerb", "Open in Netcatty"],
+    ["HKCU\\Software\\Classes\\Directory\\Background\\shell\\Netcatty::MUIVerb", "Open in Intelligent Terminal"],
     ["HKCU\\Software\\Classes\\Directory\\Background\\shell\\Netcatty::Icon", "C:\\Portable\\Netcatty.exe,0"],
     ["HKCU\\Software\\Classes\\Directory\\Background\\shell\\Netcatty\\command::", portableBg],
-    ["HKLM\\Software\\Classes\\Directory\\shell\\Netcatty::MUIVerb", "Open in Netcatty"],
+    ["HKLM\\Software\\Classes\\Directory\\shell\\Netcatty::MUIVerb", "Open in Intelligent Terminal"],
     ["HKLM\\Software\\Classes\\Directory\\shell\\Netcatty::Icon", "C:\\Old\\Netcatty.exe,0"],
     ["HKLM\\Software\\Classes\\Directory\\shell\\Netcatty\\command::", '"C:\\Old\\Netcatty.exe" --open-terminal-path "%1"'],
-    ["HKLM\\Software\\Classes\\Directory\\Background\\shell\\Netcatty::MUIVerb", "Open in Netcatty"],
+    ["HKLM\\Software\\Classes\\Directory\\Background\\shell\\Netcatty::MUIVerb", "Open in Intelligent Terminal"],
     ["HKLM\\Software\\Classes\\Directory\\Background\\shell\\Netcatty::Icon", "C:\\Old\\Netcatty.exe,0"],
     ["HKLM\\Software\\Classes\\Directory\\Background\\shell\\Netcatty\\command::", '"C:\\Old\\Netcatty.exe" --open-terminal-path "%V"'],
   ]);
@@ -957,10 +957,10 @@ test("installExplorerContextMenu fails when residual HKCU verbs cannot be cleare
   ]);
   const values = new Map([
     ["HKCU\\Software\\Classes\\Directory\\shell\\Netcatty\\command::", '"C:\\Portable\\Netcatty.exe" -- --open-terminal-path="%1."'],
-    ["HKLM\\Software\\Classes\\Directory\\shell\\Netcatty::MUIVerb", "Open in Netcatty"],
+    ["HKLM\\Software\\Classes\\Directory\\shell\\Netcatty::MUIVerb", "Open in Intelligent Terminal"],
     ["HKLM\\Software\\Classes\\Directory\\shell\\Netcatty::Icon", `${exe},0`],
     ["HKLM\\Software\\Classes\\Directory\\shell\\Netcatty\\command::", folderCmd],
-    ["HKLM\\Software\\Classes\\Directory\\Background\\shell\\Netcatty::MUIVerb", "Open in Netcatty"],
+    ["HKLM\\Software\\Classes\\Directory\\Background\\shell\\Netcatty::MUIVerb", "Open in Intelligent Terminal"],
     ["HKLM\\Software\\Classes\\Directory\\Background\\shell\\Netcatty::Icon", `${exe},0`],
     ["HKLM\\Software\\Classes\\Directory\\Background\\shell\\Netcatty\\command::", backgroundCmd],
   ]);
@@ -1156,10 +1156,10 @@ test("applyInitialExplorerContextMenuPreference repairs per-user HKCU verbs afte
     "HKCU\\Software\\Classes\\Directory\\Background\\shell\\Netcatty\\command",
   ]);
   const values = new Map([
-    ["HKCU\\Software\\Classes\\Directory\\shell\\Netcatty::MUIVerb", "Open in Netcatty"],
+    ["HKCU\\Software\\Classes\\Directory\\shell\\Netcatty::MUIVerb", "Open in Intelligent Terminal"],
     ["HKCU\\Software\\Classes\\Directory\\shell\\Netcatty::Icon", `${exe},0`],
     ["HKCU\\Software\\Classes\\Directory\\shell\\Netcatty\\command::", folderCmd],
-    ["HKCU\\Software\\Classes\\Directory\\Background\\shell\\Netcatty::MUIVerb", "Open in Netcatty"],
+    ["HKCU\\Software\\Classes\\Directory\\Background\\shell\\Netcatty::MUIVerb", "Open in Intelligent Terminal"],
     ["HKCU\\Software\\Classes\\Directory\\Background\\shell\\Netcatty::Icon", `${exe},0`],
     ["HKCU\\Software\\Classes\\Directory\\Background\\shell\\Netcatty\\command::", backgroundCmd],
   ]);

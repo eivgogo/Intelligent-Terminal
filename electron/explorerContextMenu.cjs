@@ -15,7 +15,7 @@ const EXPLORER_CONTEXT_MENU_SCHEMA_VERSION = 3;
 const SHELL_VERB = "Netcatty";
 const DIRECTORY_SHELL_KEY = `Software\\Classes\\Directory\\shell\\${SHELL_VERB}`;
 const DIRECTORY_BACKGROUND_SHELL_KEY = `Software\\Classes\\Directory\\Background\\shell\\${SHELL_VERB}`;
-const MENU_LABEL = "Open in Netcatty";
+const MENU_LABEL = "Open in Intelligent Terminal";
 const OPEN_TERMINAL_PATH_ARG = "--open-terminal-path";
 // Hides a shell verb from Explorer while keeping the key present. Used as a
 // per-user override when per-machine (HKLM) keys cannot be deleted without elevation.
@@ -41,7 +41,7 @@ function resolveExplorerContextMenuExecutablePath({
 /**
  * Resolve executable + optional app entry args for shell registration.
  * In development (`electron.exe .`), include the absolute app path so Explorer
- * launches Netcatty rather than a bare Electron binary.
+ * launches Intelligent Terminal rather than a bare Electron binary.
  */
 function resolveExplorerContextMenuLaunchSpec({
   execPath = process.execPath,

@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="public/icon.png" alt="Netcatty" width="128" height="128">
+  <img src="public/icon.png" alt="Intelligent Terminal" width="128" height="128">
 </p>
 
-<h1 align="center">Netcatty</h1>
+<h1 align="center">Intelligent Terminal</h1>
 
 <p align="center">
   <strong>🔥 AI 驱动的 SSH 客户端、SFTP 浏览器 & 终端管理器 🚀</strong><br/>
@@ -76,8 +76,8 @@
 # 目录 <!-- omit in toc -->
 
 - [🔥 Catty Agent — AI 搭档](#catty-agent)
-- [Netcatty 是什么](#netcatty-是什么)
-- [为什么是 Netcatty](#为什么是-netcatty)
+- [Intelligent Terminal 是什么](#intelligent-terminal-是什么)
+- [为什么是 Intelligent Terminal](#为什么是-intelligent-terminal)
 - [功能特性](#功能特性)
 - [界面截图](#界面截图)
   - [主界面](#主界面)
@@ -94,23 +94,23 @@
 
 ---
 
-<a name="netcatty-是什么"></a>
-# Netcatty 是什么
+<a name="intelligent-terminal-是什么"></a>
+# Intelligent Terminal 是什么
 
-**Netcatty** 是一款现代化的跨平台 SSH 客户端和终端管理器，专为需要高效管理多台远程服务器的开发者、系统管理员和 DevOps 工程师设计。
+**Intelligent Terminal** 是一款现代化的跨平台 SSH 客户端和终端管理器，专为需要高效管理多台远程服务器的开发者、系统管理员和 DevOps 工程师设计。
 
-- **Netcatty 是** PuTTY、Termius、SecureCRT 和 macOS Terminal.app 的现代替代品
-- **Netcatty 是** 一个强大的 SFTP 客户端，支持双窗格文件浏览
-- **Netcatty 是** 一个终端工作空间，支持分屏、标签页和会话管理
-- **Netcatty 支持** SSH、本地终端、Telnet、Mosh、串口（Serial）等连接方式（视环境而定）
-- **Netcatty 不是** Shell 替代品 —— 它通过 SSH/Telnet/Mosh 或本地/串口会话连接到 Shell
+- **Intelligent Terminal 是** PuTTY、Termius、SecureCRT 和 macOS Terminal.app 的现代替代品
+- **Intelligent Terminal 是** 一个强大的 SFTP 客户端，支持双窗格文件浏览
+- **Intelligent Terminal 是** 一个终端工作空间，支持分屏、标签页和会话管理
+- **Intelligent Terminal 支持** SSH、本地终端、Telnet、Mosh、串口（Serial）等连接方式（视环境而定）
+- **Intelligent Terminal 不是** Shell 替代品 —— 它通过 SSH/Telnet/Mosh 或本地/串口会话连接到 Shell
 
 ---
 
-<a name="为什么是-netcatty"></a>
-# 为什么是 Netcatty
+<a name="为什么是-intelligent-terminal"></a>
+# 为什么是 Intelligent Terminal
 
-如果你需要同时维护多台服务器，Netcatty 更像是“工作台”而不是单一终端：
+如果你需要同时维护多台服务器，Intelligent Terminal 更像是“工作台”而不是单一终端：
 
 - **以工作区为核心** —— 分屏 + 标签页 + 会话恢复，适合长期驻留的工作流
 - **Vault 管理** —— 网格/列表/树形视图，配合快速搜索与拖拽流程更顺手
@@ -173,7 +173,7 @@
 <a name="支持的发行版"></a>
 # 支持的发行版
 
-Netcatty 会自动识别并在主机列表中展示对应的系统图标：
+Intelligent Terminal 会自动识别并在主机列表中展示对应的系统图标：
 
 <p align="center">
   <img src="public/distro/ubuntu.svg" width="48" alt="Ubuntu" title="Ubuntu">
@@ -208,26 +208,26 @@ Netcatty 会自动识别并在主机列表中展示对应的系统图标：
 
 ### 代码签名与隐私
 
-Netcatty 正在申请 SignPath Foundation 开源项目计划。申请通过后，适用的
+Intelligent Terminal 正在申请 SignPath Foundation 开源项目计划。申请通过后，适用的
 Windows 发布文件将使用 **Free code signing provided by SignPath.io, certificate by SignPath Foundation**。
 详情见[代码签名政策](CODE_SIGNING_POLICY.md)和[隐私政策](PRIVACY.md)。申请和接入完成前，
 Windows 发布文件可能仍未签名。
 
-> **Windows 便携数据：** 退出 Netcatty，在 `Netcatty.exe`（zip 版）或便携版启动文件旁创建名为 `data` 的文件夹。下次启动后，Netcatty 会把数据保存在这里。已保存的密码和私钥仍受创建它们的 Windows 用户保护；将该文件夹移到其他电脑或 Windows 用户后，需要重新输入这些敏感信息。
+> **Windows 便携数据：** 退出 Intelligent Terminal，在 `Intelligent Terminal.exe`（zip 版）或便携版启动文件旁创建名为 `data` 的文件夹。下次启动后，Intelligent Terminal 会把数据保存在这里。已保存的密码和私钥仍受创建它们的 Windows 用户保护；将该文件夹移到其他电脑或 Windows 用户后，需要重新输入这些敏感信息。
 
-> **在 Windows 中用 Netcatty 打开文件夹：** 安装版会在资源管理器的文件夹右键菜单和文件夹空白处右键菜单中加入 **Open in Netcatty**。点击后会直接在该目录打开本地终端；Windows 11 需要先选择 **显示更多选项**。可在 **设置 → 系统 → Windows 资源管理器** 中随时关闭或重新开启。ZIP 版和便携版默认不会添加此菜单。
+> **在 Windows 中用 Intelligent Terminal 打开文件夹：** 安装版会在资源管理器的文件夹右键菜单和文件夹空白处右键菜单中加入 **Open in Intelligent Terminal**。点击后会直接在该目录打开本地终端；Windows 11 需要先选择 **显示更多选项**。可在 **设置 → 系统 → Windows 资源管理器** 中随时关闭或重新开启。ZIP 版和便携版默认不会添加此菜单。
 
 > **macOS 用户注意：** 当前发布版本应已完成代码签名和公证。如果 Gatekeeper 仍然提示风险，请确认您下载的是 GitHub Releases 中的最新官方构建。
 
 ### Nix / NixOS
 
-Netcatty 提供了一个 flake，为 Nix 和 NixOS 用户封装了官方 Linux AppImage 发行版：
+Intelligent Terminal 提供了一个 flake，为 Nix 和 NixOS 用户封装了官方 Linux AppImage 发行版：
 
 ```bash
 nix run github:binaricat/Netcatty
 ```
 
-声明式安装时，将 Netcatty flake 添加为输入，并在 NixOS 或 Home Manager 的软件包列表中使用 `inputs.netcatty.packages.${pkgs.system}.default`。
+声明式安装时，将 Intelligent Terminal flake 添加为输入，并在 NixOS 或 Home Manager 的软件包列表中使用 `inputs.netcatty.packages.${pkgs.system}.default`。
 
 ### 前置条件
 - Node.js 18+ 和 npm

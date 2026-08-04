@@ -1170,7 +1170,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       if (hasUsableProxyConfig(ctx.host.proxyConfig)) {
         stopEt(tr(
           "terminal.et.proxyUnsupported",
-          "EternalTerminal does not currently support Netcatty proxy settings. Use SSH or remove the proxy for this host.",
+          "EternalTerminal does not currently support Intelligent Terminal proxy settings. Use SSH or remove the proxy for this host.",
         ));
         return;
       }
@@ -1183,7 +1183,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       if (configuredChainHostCount > 1 || ctx.resolvedChainHosts.length > 1) {
         stopEt(tr(
           "terminal.et.multiJumpUnsupported",
-          "EternalTerminal currently supports at most one jump host in Netcatty.",
+          "EternalTerminal currently supports at most one jump host in Intelligent Terminal.",
         ));
         return;
       }
@@ -1360,7 +1360,7 @@ export const createTerminalSessionStarters = (ctx: TerminalSessionStartersContex
       if (unsupportedJumpProxies.length > 0) {
         stopEt(tr(
           "terminal.et.proxyUnsupported",
-          "EternalTerminal does not currently support Netcatty proxy settings. Use SSH or remove the proxy for this host.",
+          "EternalTerminal does not currently support Intelligent Terminal proxy settings. Use SSH or remove the proxy for this host.",
         ));
         return;
       }
