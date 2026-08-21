@@ -530,8 +530,6 @@ const SettingsPageContent: React.FC<{ settings: SettingsState; appLock?: AppLock
                                 setShowHostTreeSidebar={settings.setShowHostTreeSidebar}
                                 windowOpacity={settings.windowOpacity}
                                 setWindowOpacity={settings.setWindowOpacity}
-                                appIconVariant={settings.appIconVariant}
-                                setAppIconVariant={settings.setAppIconVariant}
                             />
                         </SettingsLazyTab>
                     )}

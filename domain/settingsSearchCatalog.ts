@@ -131,13 +131,6 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
     keywords: ["accent", "强调色"],
   },
   {
-    id: "appearance-app-icon",
-    tab: "appearance",
-    labelKey: "settings.appearance.appIcon",
-    descriptionKey: "settings.appearance.appIcon.desc",
-    keywords: ["icon", "图标"],
-  },
-  {
     id: "appearance-vault-show-recent",
     tab: "appearance",
     labelKey: "settings.vault.showRecentHosts",

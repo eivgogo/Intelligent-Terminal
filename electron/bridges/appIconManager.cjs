@@ -113,10 +113,6 @@ function getAppIconPath(appPath) {
   return currentIconPath;
 }
 
-function getAppIconVariant() {
-  return currentVariant;
-}
-
 function createNativeImage(nativeImage, iconPath) {
   if (!nativeImage || !iconPath || !fs.existsSync(iconPath)) return null;
   try {
@@ -131,52 +127,6 @@ function createNativeImage(nativeImage, iconPath) {
   }
 }
 
-function applyIconToWindow(win, iconPath, nativeImage) {
-  if (!win || win.isDestroyed?.() || !iconPath || !win.setIcon) return;
-  try {
-    const image = createNativeImage(nativeImage, iconPath);
-    if (image) {
-      win.setIcon(image);
-      return;
-    }
-    win.setIcon(iconPath);
-  } catch {
-    // ignore
-  }
-}
-
-function applyAppIconVariant(variant, context) {
-  const { app, BrowserWindow, nativeImage, appPath, isMac } = context;
-  preferPublicSources = !isPackagedApp(app);
-  useMacIconSources = isMac === true;
-  const normalized = normalizeAppIconVariant(variant);
-  const iconPath = resolveStrictVariantIconPath(normalized, appPath);
-  if (!iconPath || !fs.existsSync(iconPath)) {
-    return false;
-  }
-
-  currentVariant = normalized;
-  currentIconPath = iconPath;
-
-  const windows = BrowserWindow?.getAllWindows?.() || [];
-  for (const win of windows) {
-    applyIconToWindow(win, iconPath, nativeImage);
-  }
-
-  if (isMac && app?.dock?.setIcon && nativeImage) {
-    try {
-      const dockImage = createNativeImage(nativeImage, iconPath);
-      if (dockImage) {
-        app.dock.setIcon(dockImage);
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  return true;
-}
-
 module.exports = {
   DEFAULT_VARIANT,
   VALID_VARIANTS,
@@ -184,9 +134,6 @@ module.exports = {
   normalizeAppIconVariant,
   initializeAppIconManager,
   getAppIconPath,
-  getAppIconVariant,
   resolveVariantIconPath,
   resolveStrictVariantIconPath,
-  applyAppIconVariant,
-  applyIconToWindow,
 };

@@ -69,7 +69,6 @@ import {
   STORAGE_KEY_HTTP_NETWORK_PROXY,
   STORAGE_KEY_GLOBAL_HOTKEY_ENABLED,
   STORAGE_KEY_WINDOW_OPACITY,
-  STORAGE_KEY_APP_ICON_VARIANT,
   STORAGE_KEY_AUTO_UPDATE_ENABLED,
   STORAGE_KEY_WORKSPACE_FOCUS_STYLE,
   STORAGE_KEY_SHOW_RECENT_HOSTS,
@@ -162,8 +161,6 @@ import { useSettingsIpcSync } from './settingsIpcSync';
 import { TERMINAL_THEME_AUTO } from '../../domain/terminalAppearance';
 import { customThemeStore, useCustomThemes } from '../state/customThemeStore';
 import { useSystemSettingsEffects } from './systemSettingsEffects';
-import { resolveAppIconVariant, type AppIconVariant } from '../../domain/appIconVariant';
-import { DEFAULT_APP_ICON_VARIANT } from '../../infrastructure/config/appIconVariants';
 import { applyCustomCssToDocument } from '../../lib/customCss';
 import {
   DEFAULT_TERMINAL_SIDE_PANEL_AUTO_OPEN_ENABLED,
@@ -586,18 +583,6 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
       }
       windowOpacityMutationSourceRef.current = 'incoming';
       return incoming;
-    });
-  }, []);
-  const [appIconVariant, setAppIconVariantState] = useState<AppIconVariant>(() => {
-    const stored = readStoredString(STORAGE_KEY_APP_ICON_VARIANT);
-    return resolveAppIconVariant(stored ?? DEFAULT_APP_ICON_VARIANT);
-  });
-  const setAppIconVariant = useCallback((nextValue: SetStateAction<AppIconVariant>) => {
-    setAppIconVariantState((prev) => {
-      const candidate = typeof nextValue === 'function'
-        ? (nextValue as (prevState: AppIconVariant) => AppIconVariant)(prev)
-        : nextValue;
-      return resolveAppIconVariant(candidate);
     });
   }, []);
   const incomingTerminalSettingsSignatureRef = useRef<string | null>(null);
@@ -1175,7 +1160,6 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     setIsHotkeyRecordingState,
     setGlobalHotkeyEnabled,
     setWindowOpacity: applyIncomingWindowOpacity,
-    setAppIconVariant,
     setAutoUpdateEnabled,
     setHttpNetworkProxy,
     setSftpAutoOpenSidebar,
@@ -1240,7 +1224,7 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     sftpUseCompressedUpload, sftpSkipUnchanged, sftpAutoOpenSidebar, sftpFollowTerminalCwd, sftpDefaultViewMode,
     showRecentHosts, hostClickBehavior, showOnlyUngroupedHostsInRoot, showSftpTab, showHostTreeSidebar, terminalSidePanelAutoOpen, terminalSidePanelAutoOpenTab, shellOnlyTabNumberShortcuts, showTabNumberBadges, disableTerminalFontZoom, restorePreviousSession, restoreTerminalCwd, startupLanding,
     editorWordWrap, sessionLogsEnabled, sessionLogsDir, sessionLogsFormat, sessionLogsTimestampsEnabled, sshDebugLogsEnabled, sshDeepLinkEnabled, jmsDeepLinkEnabled, explorerContextMenuEnabled,
-    globalHotkeyEnabled, autoUpdateEnabled, windowOpacity, appIconVariant,
+    globalHotkeyEnabled, autoUpdateEnabled, windowOpacity,
     setTheme, setLightUiThemeId, setDarkUiThemeId, setAccentMode,
     applyIncomingCustomAccent,
     setCustomCSS, setUiFontFamilyId, setHotkeyScheme, setUiLanguage,
@@ -1250,7 +1234,7 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     setSftpUseCompressedUpload, setSftpSkipUnchanged, setSftpAutoOpenSidebar, setSftpFollowTerminalCwd, setSftpDefaultViewMode,
     setShowRecentHostsState, setHostClickBehaviorState, setShowOnlyUngroupedHostsInRootState, setShowSftpTabState, setShowHostTreeSidebarState, setTerminalSidePanelAutoOpenState, setTerminalSidePanelAutoOpenTabState, setShellOnlyTabNumberShortcutsState, setShowTabNumberBadgesState, setDisableTerminalFontZoomState, setRestorePreviousSessionState, setRestoreTerminalCwdState, setStartupLandingState,
     setEditorWordWrapState, setSessionLogsEnabled, setSessionLogsDir, setSessionLogsFormat, setSessionLogsTimestampsEnabled, setSshDebugLogsEnabled, setSshDeepLinkEnabledState: applyIncomingSshDeepLinkEnabled, setJmsDeepLinkEnabledState: applyIncomingJmsDeepLinkEnabled, setExplorerContextMenuEnabledState: applyIncomingExplorerContextMenuEnabled,
-    setGlobalHotkeyEnabled, setWindowOpacity: applyIncomingWindowOpacity, setAppIconVariant, setAutoUpdateEnabled, setWorkspaceFocusStyleState,
+    setGlobalHotkeyEnabled, setWindowOpacity: applyIncomingWindowOpacity, setAutoUpdateEnabled, setWorkspaceFocusStyleState,
     setSftpTransferConcurrencyState, setSshTransportIdleTtlMsState,
     applyIncomingCustomKeyBindings, mergeIncomingTerminalSettings,
   });
@@ -1741,13 +1725,11 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     globalHotkeyEnabled,
     windowOpacityRecord,
     windowOpacityMutationSourceRef,
-    appIconVariant,
     autoUpdateEnabled,
     httpNetworkProxy,
     persistMountedRef,
     setHotkeyRegistrationError,
     setAutoUpdateEnabled,
-    setAppIconVariant,
     notifySettingsChanged,
   });
 
@@ -2100,8 +2082,6 @@ export const useSettingsState = (options: { enableSettingsSync?: boolean; enable
     setGlobalHotkeyEnabled,
     windowOpacity,
     setWindowOpacity,
-    appIconVariant,
-    setAppIconVariant,
     rehydrateAllFromStorage,
     applyAppTheme,
     workspaceFocusStyle,

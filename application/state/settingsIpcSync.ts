@@ -46,10 +46,8 @@ import {
   STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN,
   STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB,
   STORAGE_KEY_WINDOW_OPACITY,
-  STORAGE_KEY_APP_ICON_VARIANT,
   STORAGE_KEY_HTTP_NETWORK_PROXY,
 } from '../../infrastructure/config/storageKeys';
-import { resolveAppIconVariant, type AppIconVariant } from '../../domain/appIconVariant';
 import {
   areHttpNetworkProxySettingsEqual,
   normalizeHttpNetworkProxySettings,
@@ -91,7 +89,6 @@ interface UseSettingsIpcSyncParams {
   setIsHotkeyRecordingState: Dispatch<SetStateAction<boolean>>;
   setGlobalHotkeyEnabled: Dispatch<SetStateAction<boolean>>;
   setWindowOpacity: (raw: unknown) => void;
-  setAppIconVariant: Dispatch<SetStateAction<AppIconVariant>>;
   setAutoUpdateEnabled: Dispatch<SetStateAction<boolean>>;
   setHttpNetworkProxy: Dispatch<SetStateAction<HttpNetworkProxySettings>>;
   setSftpAutoOpenSidebar: Dispatch<SetStateAction<boolean>>;
@@ -136,7 +133,6 @@ export function useSettingsIpcSync({
   setIsHotkeyRecordingState,
   setGlobalHotkeyEnabled,
   setWindowOpacity,
-  setAppIconVariant,
   setAutoUpdateEnabled,
   setHttpNetworkProxy,
   setSftpAutoOpenSidebar,
@@ -263,10 +259,6 @@ export function useSettingsIpcSync({
       if (key === STORAGE_KEY_WINDOW_OPACITY) {
         setWindowOpacity(value);
       }
-      if (key === STORAGE_KEY_APP_ICON_VARIANT) {
-        const nextVariant = resolveAppIconVariant(value);
-        setAppIconVariant((prev) => (prev === nextVariant ? prev : nextVariant));
-      }
       if (key === STORAGE_KEY_AUTO_UPDATE_ENABLED && typeof value === 'boolean') {
         setAutoUpdateEnabled((prev) => (prev === value ? prev : value));
       }
@@ -335,7 +327,6 @@ export function useSettingsIpcSync({
     setFollowAppTerminalThemeState,
     setGlobalHotkeyEnabled,
     setWindowOpacity,
-    setAppIconVariant,
     setHotkeyScheme,
     setIsHotkeyRecordingState,
     setSessionLogsDir,
