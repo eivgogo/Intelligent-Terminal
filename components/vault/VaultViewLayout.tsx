@@ -22,7 +22,6 @@ import { useConnectionLogsStore } from "../../application/state/connectionLogsSt
 import { useNotesStore } from "../../application/state/notesStore";
 import { LazyLoadBoundary } from "../ui/lazy-load-boundary";
 import { toast } from "../ui/toast";
-import { AppWordmark } from "../AppWordmark";
 
 type VaultViewLayoutContext = Record<string, any>;
 
@@ -127,7 +126,6 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
     Activity,
     allGroupPaths,
     allTags,
-    AppLogo,
     Array,
     Badge,
     BookMarked,
@@ -315,7 +313,6 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
     setSelectedHostIds,
     setSelectedGroupPaths,
     setSelectedTags,
-    setSidebarCollapsed,
     setSidebarWidth,
     setSortMode,
     setTargetParentPath,
@@ -535,33 +532,6 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
           style={{ width: effectiveSidebarWidth }}
           data-section="vault-sidebar"
         >
-          <div
-            className={cn(
-              "pt-5 pb-6 flex items-center",
-              sidebarCollapsed ? "px-2 justify-center" : "px-4",
-            )}
-          >
-            <Tooltip delayDuration={500}>
-              <TooltipTrigger asChild>
-                <button
-                  aria-label={sidebarCollapsed ? t("vault.sidebar.expand") : t("vault.sidebar.collapse")}
-                  onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-                  className="flex items-center gap-2.5 hover:opacity-80 transition-opacity"
-                >
-                  <AppLogo className="h-8 w-8 flex-shrink-0" />
-                  {!sidebarCollapsed && (
-                    <AppWordmark className="h-5 w-auto text-foreground" />
-                  )}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="right">
-                {sidebarCollapsed
-                  ? t("vault.sidebar.expand")
-                  : t("vault.sidebar.collapse")}
-              </TooltipContent>
-            </Tooltip>
-          </div>
-
           <div
             className={cn("space-y-1", sidebarCollapsed ? "px-1.5" : "px-2.5")}
           >

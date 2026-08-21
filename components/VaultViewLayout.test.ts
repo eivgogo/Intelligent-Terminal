@@ -24,13 +24,6 @@ test("vault header collapsed actions cannot retain hidden focus", () => {
   assert.match(vaultViewLayoutSource, /inert=\{isHostPanelOpen \? true : undefined\}/);
 });
 
-test("vault sidebar toggle keeps an accessible action label", () => {
-  assert.match(
-    vaultViewLayoutSource,
-    /aria-label=\{sidebarCollapsed \? t\("vault\.sidebar\.expand"\) : t\("vault\.sidebar\.collapse"\)\}/,
-  );
-});
-
 test("keychain deletion clears the remembered passphrase through the vault handler", () => {
   assert.match(vaultViewLayoutSource, /const handleDeleteVaultKey = React\.useCallback/);
   assert.match(vaultViewLayoutSource, /void deleteVaultKey\(\{/);
