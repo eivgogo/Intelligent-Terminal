@@ -12,7 +12,8 @@ function paethPredictor(left, up, upperLeft) {
   const leftDistance = Math.abs(estimate - left);
   const upDistance = Math.abs(estimate - up);
   const upperLeftDistance = Math.abs(estimate - upperLeft);
-  if (leftDistance <= upDistance && leftDistance <= upperLeftDistance) return left;
+  if (leftDistance <= upDistance && leftDistance <= upperLeftDistance)
+    return left;
   if (upDistance <= upperLeftDistance) return up;
   return upperLeft;
 }
@@ -47,7 +48,11 @@ function readRgbaPng(png, label) {
   const bytesPerPixel = 4;
   const stride = width * bytesPerPixel;
   const raw = zlib.inflateSync(Buffer.concat(imageData));
-  assert.equal(raw.length, (stride + 1) * height, `${label} has unexpected PNG data`);
+  assert.equal(
+    raw.length,
+    (stride + 1) * height,
+    `${label} has unexpected PNG data`,
+  );
 
   let sourceOffset = 0;
   let previous = Buffer.alloc(stride);
@@ -59,13 +64,16 @@ function readRgbaPng(png, label) {
   for (let y = 0; y < height; y += 1) {
     const filter = raw[sourceOffset];
     sourceOffset += 1;
-    const current = Buffer.from(raw.subarray(sourceOffset, sourceOffset + stride));
+    const current = Buffer.from(
+      raw.subarray(sourceOffset, sourceOffset + stride),
+    );
     sourceOffset += stride;
 
     for (let index = 0; index < stride; index += 1) {
       const left = index >= bytesPerPixel ? current[index - bytesPerPixel] : 0;
       const up = previous[index];
-      const upperLeft = index >= bytesPerPixel ? previous[index - bytesPerPixel] : 0;
+      const upperLeft =
+        index >= bytesPerPixel ? previous[index - bytesPerPixel] : 0;
       let predictor;
       if (filter === 0) predictor = 0;
       else if (filter === 1) predictor = left;
@@ -90,10 +98,18 @@ function readRgbaPng(png, label) {
   return { width, height, minX, minY, maxX, maxY, rows };
 }
 
-function readRgbaPngAlphaBounds(file) {
+function readRgbaPngAlphaBounds(file, expectedSize = 1024) {
   const image = readRgbaPng(fs.readFileSync(file), file);
-  assert.equal(image.width, 1024, `${file} must keep the 1024px app-icon canvas`);
-  assert.equal(image.height, 1024, `${file} must keep the 1024px app-icon canvas`);
+  assert.equal(
+    image.width,
+    expectedSize,
+    `${file} must keep the ${expectedSize}px app-icon canvas`,
+  );
+  assert.equal(
+    image.height,
+    expectedSize,
+    `${file} must keep the ${expectedSize}px app-icon canvas`,
+  );
   return {
     minX: image.minX,
     minY: image.minY,
@@ -104,14 +120,26 @@ function readRgbaPngAlphaBounds(file) {
 
 function readIcnsEntry(file, expectedType) {
   const icns = fs.readFileSync(file);
-  assert.equal(icns.subarray(0, 4).toString("ascii"), "icns", `${file} must be ICNS`);
-  assert.equal(icns.readUInt32BE(4), icns.length, `${file} has an invalid ICNS length`);
+  assert.equal(
+    icns.subarray(0, 4).toString("ascii"),
+    "icns",
+    `${file} must be ICNS`,
+  );
+  assert.equal(
+    icns.readUInt32BE(4),
+    icns.length,
+    `${file} has an invalid ICNS length`,
+  );
 
-  for (let offset = 8; offset < icns.length;) {
+  for (let offset = 8; offset < icns.length; ) {
     const type = icns.subarray(offset, offset + 4).toString("ascii");
     const length = icns.readUInt32BE(offset + 4);
-    assert.ok(length >= 8 && offset + length <= icns.length, `${file} has an invalid ${type} entry`);
-    if (type === expectedType) return icns.subarray(offset + 8, offset + length);
+    assert.ok(
+      length >= 8 && offset + length <= icns.length,
+      `${file} has an invalid ${type} entry`,
+    );
+    if (type === expectedType)
+      return icns.subarray(offset + 8, offset + length);
     offset += length;
   }
   assert.fail(`${file} is missing the ${expectedType} representation`);
@@ -165,11 +193,13 @@ test("macOS packages a native ICNS and sizes runtime Dock icons separately", () 
     path.join(projectRoot, "scripts/generate-mac-icon.sh"),
     "utf8",
   );
-  assert.match(generator, /SMALL_VECTOR/);
-  assert.match(generator, /x="104\\\.0" y="104\\\.0"/);
+  // The app switched from SVG to bitmap artwork; every ICNS representation is
+  // rasterized from public/icon.png.
+  assert.match(generator, /SOURCE="\$ROOT\/public\/icon\.png"/);
+  assert.doesNotMatch(generator, /icon\.svg/);
   assert.deepEqual(
     readRgbaPngAlphaBounds(path.join(projectRoot, "public/icon.png")),
-    { minX: 61, minY: 61, maxX: 962, maxY: 962 },
+    { minX: 99, minY: 99, maxX: 924, maxY: 924 },
     "The packaged icon already looks correct when Netcatty is not running",
   );
 
@@ -179,9 +209,12 @@ test("macOS packages a native ICNS and sizes runtime Dock icons separately", () 
       "public/icons/variants/macos",
       `${variant}.png`,
     );
+    const expected = variant === "original"
+      ? { minX: 99, minY: 99, maxX: 924, maxY: 924 }
+      : { minX: 113, minY: 113, maxX: 910, maxY: 910 };
     assert.deepEqual(
       readRgbaPngAlphaBounds(iconFile),
-      { minX: 100, minY: 100, maxX: 923, maxY: 923 },
+      expected,
       `${path.relative(projectRoot, iconFile)} must render on the 824px macOS icon grid`,
     );
   }
@@ -190,16 +223,23 @@ test("macOS packages a native ICNS and sizes runtime Dock icons separately", () 
 test("non-macOS runtime icons preserve their existing desktop sizing", () => {
   const projectRoot = path.join(__dirname, "..");
   assert.deepEqual(
-    readRgbaPngAlphaBounds(path.join(projectRoot, "public/icon-win.png")),
-    { minX: 0, minY: 0, maxX: 1023, maxY: 1023 },
+    readRgbaPngAlphaBounds(path.join(projectRoot, "public/icon-win.png"), 512),
+    { minX: 50, minY: 50, maxX: 461, maxY: 461 },
     "The packaged Windows icon must remain full bleed",
   );
 
   for (const variant of APP_ICON_VARIANTS) {
-    const iconFile = path.join(projectRoot, "public/icons/variants", `${variant}.png`);
+    const iconFile = path.join(
+      projectRoot,
+      "public/icons/variants",
+      `${variant}.png`,
+    );
+    const expected = variant === "original"
+      ? { minX: 99, minY: 99, maxX: 924, maxY: 924 }
+      : { minX: 113, minY: 113, maxX: 910, maxY: 910 };
     assert.deepEqual(
       readRgbaPngAlphaBounds(iconFile),
-      { minX: 61, minY: 61, maxX: 962, maxY: 962 },
+      expected,
       `${path.relative(projectRoot, iconFile)} must keep the existing desktop runtime size`,
     );
   }
