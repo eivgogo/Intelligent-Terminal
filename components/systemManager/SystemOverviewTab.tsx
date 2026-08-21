@@ -10,7 +10,7 @@ import React, { memo, useEffect, useMemo, useState } from 'react';
 import { useI18n } from '../../application/i18n/I18nProvider';
 import { aggregateMountedDiskUsage } from '../../domain/systemDiskUsage';
 import { cn } from '../../lib/utils';
-import { useServerStats } from '../terminal/hooks/useServerStats';
+import { useServerStats } from '../../application/state/useServerStats';
 import { ResourceBar } from './ResourceBar';
 import {
   SystemPanelEmpty,
@@ -53,6 +53,7 @@ function formatPercent(value: number | null | undefined, digits = 0): string {
 function formatBytes(bytes: number): string {
   const value = Number(bytes);
   if (!Number.isFinite(value) || value <= 0) return '0 B';
+  if (value >= 1024 ** 4) return `${(value / 1024 ** 4).toFixed(1)} TB`;
   if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(1)} GB`;
   if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(1)} MB`;
   if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
@@ -267,8 +268,11 @@ export const SystemOverviewTab = memo(function SystemOverviewTab({
     network: history.map((sample) => sample.network),
   }), [history]);
 
+  // Prefer cached stats over empty/loading so tab switches never flash the
+  // empty placeholder when we already have a successful sample.
   const showBlockingError = Boolean(error && !hasStats && !loading);
   const showInitialLoading = Boolean(loading && !hasStats);
+  const showEmpty = Boolean(!hasStats && !loading && !error);
 
   return (
     <SystemPanelShell section="system-manager-overview">
@@ -285,9 +289,9 @@ export const SystemOverviewTab = memo(function SystemOverviewTab({
         <SystemPanelError message={error} onRetry={() => void refresh()} retryLabel={t('history.action.retry')} loading={loading} />
       ) : showInitialLoading ? (
         <SystemPanelLoading message={t('systemManager.overview.loading')} />
-      ) : !hasStats ? (
+      ) : showEmpty ? (
         <SystemPanelEmpty icon={Activity} message={t('systemManager.overview.empty')} />
-      ) : (
+      ) : hasStats ? (
         <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3">
           <div className="grid grid-cols-2 gap-2">
             <MetricCard
@@ -393,11 +397,16 @@ export const SystemOverviewTab = memo(function SystemOverviewTab({
             {stats.netInterfaces.length > 0 ? (
               <div className="space-y-2">
                 {stats.netInterfaces.slice(0, 5).map((iface) => (
-                  <div key={iface.name} className="grid grid-cols-[1fr_auto] items-center gap-2 text-[11px]">
-                    <span className="min-w-0 truncate text-foreground">{iface.name}</span>
-                    <span className="shrink-0 tabular-nums text-muted-foreground">
+                  <div key={iface.name} className="space-y-0.5">
+                    <div className="grid grid-cols-[1fr_auto] items-center gap-2 text-[11px]">
+                      <span className="min-w-0 truncate text-foreground">{iface.name}</span>
+                      <span className="shrink-0 tabular-nums text-muted-foreground">
+                        {t('systemManager.overview.rx')} {formatBytes(iface.rxBytes)} · {t('systemManager.overview.tx')} {formatBytes(iface.txBytes)}
+                      </span>
+                    </div>
+                    <div className="text-right text-[10px] tabular-nums text-muted-foreground/80">
                       {t('systemManager.overview.rx')} {formatThroughput(iface.rxSpeed)} · {t('systemManager.overview.tx')} {formatThroughput(iface.txSpeed)}
-                    </span>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -428,7 +437,7 @@ export const SystemOverviewTab = memo(function SystemOverviewTab({
             )}
           </section>
         </div>
-      )}
+      ) : null}
     </SystemPanelShell>
   );
 });

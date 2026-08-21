@@ -68,6 +68,9 @@ export interface AIChatSidePanelProps {
   setAgentModel: (agentId: string, modelId: string) => void;
   agentProviderMap: Record<string, string>;
   setAgentProvider: (agentId: string, providerId: string) => void;
+  agentThinkingMap: Record<string, string>;
+  setAgentThinking: (agentId: string, thinkingLevel: string) => void;
+  updateProvider?: (id: string, updates: Partial<ProviderConfig>) => void;
 
   // Safety
   globalPermissionMode: AIPermissionMode;
@@ -87,6 +90,8 @@ export interface AIChatSidePanelProps {
   scopeTargetId?: string;
   scopeHostIds?: string[];
   scopeLabel?: string;
+  /** Workspace focused pane; preferred when inheriting AI chat after merge. */
+  focusedSessionId?: string;
 
   // Terminal session context (from parent)
   terminalSessions?: Array<{

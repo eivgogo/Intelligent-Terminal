@@ -58,6 +58,9 @@ const updateErrorListeners = new Set();
 const updateNeedsSaveListeners = new Set();
 const terminalPopupConfigState = {
   pending: null,
+  // Keep the last delivered payload so StrictMode remount (unsubscribe →
+  // resubscribe) can replay config after the one-shot pending slot was drained.
+  lastPayload: null,
   listeners: new Set(),
 };
 
@@ -340,10 +343,14 @@ ipcRenderer.on("netcatty:zmodem:detect", (_event, payload) => {
 });
 
 ipcRenderer.on("netcatty:window:terminalPopupConfig", (_event, payload) => {
+  // Always retain last config so a late/remounted subscriber (AppLockGate delay,
+  // React Strict Mode remount) still receives it via lastPayload replay.
+  terminalPopupConfigState.lastPayload = payload;
   if (terminalPopupConfigState.listeners.size === 0) {
     terminalPopupConfigState.pending = payload;
     return;
   }
+  terminalPopupConfigState.pending = null;
   terminalPopupConfigState.listeners.forEach((cb) => {
     try {
       cb(payload);
@@ -707,6 +714,7 @@ ipcRenderer.on("netcatty:plugins:contributions-changed", (_event, payload) => {
 
 // Port forwarding status listeners
 const portForwardStatusListeners = new Map();
+const portForwardRuntimeListeners = new Set();
 
 ipcRenderer.on("netcatty:portforward:status", (_event, payload) => {
   const { tunnelId, status, error } = payload;
@@ -720,6 +728,16 @@ ipcRenderer.on("netcatty:portforward:status", (_event, payload) => {
       }
     });
   }
+});
+
+ipcRenderer.on("netcatty:portforward:runtime", (_event, payload) => {
+  portForwardRuntimeListeners.forEach((cb) => {
+    try {
+      cb(payload);
+    } catch (err) {
+      console.error("Port forward runtime callback failed", err);
+    }
+  });
 });
 
 // File watcher listeners (for auto-sync feature)
@@ -803,6 +821,7 @@ const api = createPreloadApi({
   updateNeedsSaveListeners,
   terminalPopupConfigState,
   portForwardStatusListeners,
+  portForwardRuntimeListeners,
   fileWatchSyncedListeners,
   fileWatchErrorListeners,
   fileWatchStoppedListeners,

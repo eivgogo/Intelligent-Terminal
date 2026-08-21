@@ -149,6 +149,8 @@ declare global {
     sessionLog?: { enabled: boolean; directory: string; format: string; timestampsEnabled?: boolean };
     // SSH connection diagnostics. Does not capture terminal output.
     sshDebugLogEnabled?: boolean;
+    // Boot generation for correlating host-key prompts with a terminal start.
+    bootEpoch?: number;
     // Local SSH key file paths (from SSH config IdentityFile)
     identityFilePaths?: string[];
     useSshAgent?: boolean;
@@ -165,11 +167,10 @@ declare global {
     // Skip POSIX process discovery when copying a network-device session.
     skipShellPidDiscovery?: boolean;
     /**
-     * When false, openSftp must dial a fresh SSH connection and must not
-     * borrow a parked/shared registry transport. Used for dedicated bulk
-     * transfer / restart-resume so transfers do not attach to a terminal
-     * conn that may die or leave checkpoint resume half-bound.
-     * Default true (browse / MFA-skip reuse of parked transports).
+     * When false, terminal/SFTP opens must dial a fresh SSH connection and
+     * must not borrow a live, parked, or in-flight registry transport. Used by
+     * connect-time terminal automation and dedicated bulk transfers.
+     * Default true (normal terminal, browse, and MFA-skip reuse).
      */
     reuseTransport?: boolean;
   }
@@ -251,12 +252,51 @@ declare global {
     error?: string;
   }
 
+  type PortForwardRuntimePhase =
+    | 'connecting'
+    | 'active'
+    | 'stopping'
+    | 'error'
+    | 'inactive';
+
+  interface PortForwardRuntimeRecord {
+    ruleId?: string;
+    tunnelId: string;
+    phase: PortForwardRuntimePhase | string;
+    error?: string;
+    cleanupRequired?: boolean;
+    revision: number;
+    updatedAt: number;
+  }
+
+  interface PortForwardRuntimeSnapshot {
+    epoch: string;
+    revision: number;
+    records: PortForwardRuntimeRecord[];
+  }
+
+  type PortForwardRuntimeEvent =
+    | {
+        epoch: string;
+        revision: number;
+        kind: 'upsert';
+        record: PortForwardRuntimeRecord;
+      }
+    | {
+        epoch: string;
+        revision: number;
+        kind: 'remove';
+        tunnelId: string;
+        ruleId?: string;
+      };
+
   interface NetcattyWindowsPtyInfo {
     backend: 'conpty' | 'winpty';
     buildNumber?: number;
   }
 
   type PortForwardStatusCallback = (status: 'inactive' | 'connecting' | 'active' | 'error', error?: string) => void;
+  type PortForwardRuntimeEventCallback = (event: PortForwardRuntimeEvent) => void;
 
   interface NetcattyPluginRuntimeStatus {
     available: boolean;
@@ -354,10 +394,100 @@ declare global {
     providePluginTerminal?(request: NetcattyTerminalProviderRequest): Promise<ReadonlyArray<NetcattyTerminalProviderResult>>;
     cancelPluginTerminalRequest?(requestId: string): Promise<boolean>;
     publishPluginTerminalSessionEvent?(event: NetcattyTerminalSessionEvent): Promise<ReadonlyArray<{ pluginId: string; delivered: boolean }>>;
-    listPluginExtensionProviders?(options: { kind: 'connection' | 'authentication' | 'importer'; locale?: string }): Promise<ReadonlyArray<NetcattyExtensionProviderContribution>>;
+    listPluginExtensionProviders?(options: { kind: 'connection' | 'authentication' | 'importer' | 'sync'; locale?: string }): Promise<ReadonlyArray<NetcattyExtensionProviderContribution>>;
     updatePluginCredentialCatalog?(entries: ReadonlyArray<{ id: string; ciphertext: string }>): Promise<number>;
     invokePluginExtensionProvider?(request: NetcattyExtensionProviderRequest): Promise<import("@netcatty/plugin-contract").JsonValue>;
     cancelPluginExtensionRequest?(requestId: string): Promise<boolean>;
+    pluginSyncConnect?(request: {
+      requestId?: string;
+      providerId: string;
+      configuration?: unknown;
+      credential?: unknown;
+      deadlineMs?: number;
+    }): Promise<{ account: { id: string; email?: string; name?: string; avatarUrl?: string } }>;
+    pluginSyncDisconnect?(request: { requestId?: string; providerId: string; deadlineMs?: number }): Promise<null>;
+    pluginSyncGetAccount?(request: { requestId?: string; providerId: string; deadlineMs?: number }): Promise<{
+      account: { id: string; email?: string; name?: string; avatarUrl?: string } | null;
+    }>;
+    pluginSyncGetCapabilities?(request: { requestId?: string; providerId: string; deadlineMs?: number }): Promise<{
+      revisions: boolean;
+      conditionalWrites: boolean;
+      atomicReplacement: boolean;
+      maxObjectBytes?: number;
+      maxObjects?: number;
+    }>;
+    pluginSyncReadObject?(request: {
+      requestId?: string;
+      providerId: string;
+      key: string;
+      preferStream?: boolean;
+      deadlineMs?: number;
+    }): Promise<{
+      found: boolean;
+      key: string;
+      data?: Uint8Array | null;
+      streamed?: boolean;
+      transferId?: string;
+      byteLength?: number;
+      revision?: string;
+      contentType?: string;
+    }>;
+    pluginSyncReadChunk?(request: {
+      requestId: string;
+      transferId: string;
+      maxBytes?: number;
+    }): Promise<{ chunk: Uint8Array; done: boolean }>;
+    pluginSyncWriteObject?(request: {
+      requestId?: string;
+      providerId: string;
+      key: string;
+      data: Uint8Array;
+      expectedRevision?: string | null;
+      preferStream?: boolean;
+      deadlineMs?: number;
+    }): Promise<{ created: boolean; revision?: string }>;
+    pluginSyncWriteBegin?(request: {
+      requestId?: string;
+      providerId: string;
+      key: string;
+      byteLength: number;
+      expectedRevision?: string | null;
+      deadlineMs?: number;
+    }): Promise<{ transferId: string; windowBytes: number }>;
+    pluginSyncWriteChunk?(request: {
+      requestId: string;
+      transferId: string;
+      sequence: number;
+      chunk: Uint8Array;
+    }): Promise<{ accepted: number }>;
+    pluginSyncWriteCommit?(request: {
+      requestId: string;
+      transferId: string;
+    }): Promise<{ created: boolean; revision?: string }>;
+    pluginSyncDeleteObject?(request: {
+      requestId?: string;
+      providerId: string;
+      key: string;
+      expectedRevision?: string;
+      deadlineMs?: number;
+    }): Promise<{ deleted: boolean }>;
+    pluginSyncPutSecret?(request: {
+      providerId: string;
+      key: string;
+      value: string;
+    }): Promise<{ kind: 'secret'; id: string; key: string; created?: boolean }>;
+    pluginSyncDeleteSecrets?(request: {
+      providerId: string;
+      keys?: string[];
+    }): Promise<{ deleted: number }>;
+    pluginSyncRestoreSecrets?(request: {
+      providerId: string;
+      keys: string[];
+      discard?: boolean;
+    }): Promise<{ restored: number; discarded?: number }>;
+    collectPluginSyncSidecars?(): Promise<unknown>;
+    applyPluginSyncSidecars?(bundle: unknown): Promise<{ applied: boolean; count?: number; entries?: unknown }>;
+    pluginHostReady?(): boolean;
     startPluginConnection?(request: NetcattyPluginConnectionStartRequest): Promise<{ sessionId: string; providerId: string; status: 'connecting' | 'connected'; diagnostics: ReadonlyArray<import("@netcatty/plugin-contract").ProviderValidationIssue> }>;
     writePluginConnection?(sessionId: string, data: Uint8Array): Promise<void>;
     controlPluginConnection?(sessionId: string, operation: 'resize' | 'signal' | 'reconnect' | 'close' | 'getStatus', payload?: Record<string, unknown>): Promise<unknown>;

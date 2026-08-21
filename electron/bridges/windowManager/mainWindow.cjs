@@ -1,4 +1,26 @@
 /* eslint-disable no-undef */
+const {
+  windowsFramelessContentChromeOptions,
+} = require("./windowsWindowChrome.cjs");
+
+const TERMINAL_KEYBOARD_FOCUS = Symbol("netcattyTerminalKeyboardFocus");
+
+function setTerminalKeyboardFocusForWindow(win, focused) {
+  if (!win || win.isDestroyed?.() || !win.webContents) return false;
+  const isFocused = focused === true;
+  try {
+    win[TERMINAL_KEYBOARD_FOCUS] = isFocused;
+    win.webContents.setIgnoreMenuShortcuts?.(isFocused);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function hasTerminalKeyboardFocus(win) {
+  return win?.[TERMINAL_KEYBOARD_FOCUS] === true;
+}
+
 function createMainWindowApi(ctx) {
   with (ctx) {
     async function createWindow(electronModule, options) {
@@ -121,6 +143,8 @@ function createMainWindowApi(ctx) {
         }
       }
     
+      const windowsChrome = !isMac ? windowsFramelessContentChromeOptions() : {};
+
       const win = new BrowserWindow({
         ...windowBounds,
         minWidth: MIN_WINDOW_WIDTH,
@@ -131,11 +155,13 @@ function createMainWindowApi(ctx) {
         frame: isMac,
         titleBarStyle: isMac ? "hiddenInset" : undefined,
         trafficLightPosition: isMac ? { x: 12, y: 12 } : undefined,
+        ...windowsChrome,
         webPreferences: {
           preload,
           contextIsolation: true,
           nodeIntegration: false,
           sandbox: false,
+          spellcheck: false,
           backgroundThrottling: false,
           v8CacheOptions: V8_CACHE_OPTIONS,
         },
@@ -251,6 +277,15 @@ function createMainWindowApi(ctx) {
         if (isMac && shouldCloseWindowFromInput(input)) {
           event.preventDefault();
           requestWindowCommandClose(win);
+          return;
+        }
+
+        const isTerminalFontShortcut =
+          isPrimaryZoomInEqualInput(input)
+          || isPrimaryZoomOutMinusInput(input)
+          || isPrimaryResetZoomInput(input);
+        if (hasTerminalKeyboardFocus(win) && isTerminalFontShortcut) {
+          win.webContents.setIgnoreMenuShortcuts(true);
           return;
         }
 
@@ -494,4 +529,7 @@ function createMainWindowApi(ctx) {
   }
 }
 
-module.exports = { createMainWindowApi };
+module.exports = {
+  createMainWindowApi,
+  setTerminalKeyboardFocusForWindow,
+};

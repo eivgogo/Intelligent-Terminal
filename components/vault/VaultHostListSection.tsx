@@ -25,6 +25,7 @@ import {
   type HostClickBehavior,
 } from "../../domain/hostClickBehavior";
 import type { GroupNode, Host } from "../../domain/models";
+import { isPluginHostProtocol } from "../../domain/pluginConnection";
 
 type VaultHostListSectionContext = Record<string, any>;
 
@@ -53,7 +54,7 @@ const isRelatedTargetInside = (
 const EMPTY_GROUP_PATH_SET = new Set<string>();
 
 export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext }) {
-  const { Badge, Boolean, Button, cancelInlineGroupEdit, CheckSquare, ClipboardCopy, Clock, cn, commitInlineGroupRename, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Copy, displayedGroups, displayedHosts, DistroAvatar, Edit2, FileSymlink, FolderPlus, FolderTree, getDropTargetClasses, getEffectiveHostDistro, groupConfigs, groupedDisplayHosts, handleCopyCredentials, handleDuplicateHost, handleEditGroupConfig, handleEditHost, handleHostConnect, hostClickBehavior: hostClickBehaviorProp, handleUnmanageGroup, hasHostsSidePanel, hostListScrollRef, HostTreeView, isHostsSectionActive, isMultiSelectMode, lastPinnedId, LayoutGrid, managedGroupPaths, moveGroup, moveHostToGroup, onDeleteHost, Pin, pinnedHosts, Plug, recentHosts, reorderGroup, reorderHost, sanitizeHost, search, selectedGroupPath, selectedGroupPaths, selectedHostIds, selectedTags, sessionCount, setDeleteTargetPath, setDragOverDropTarget, setGroupDragOverDropTarget, setIsDeleteGroupOpen, setIsNewFolderOpen, setLastPinnedId, setNewFolderName, setSelectedGroupPath, setTargetParentPath, shouldHideEmptyRootHostsSection, showRecentHosts, sortMode, Square, Star, startInlineDeleteGroup, startInlineNewGroup, startInlineRenameGroup, t, toggleGroupSelection, toggleHostPinned, toggleHostSelection, Trash2, treeExpandedState, treeViewGroupTree, treeViewHosts, viewMode, visibleDisplayedHosts } = ctx;
+  const { Badge, Boolean, Button, cancelInlineGroupEdit, CheckSquare, ClipboardCopy, Clock, cn, commitInlineGroupRename, ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, Copy, displayedGroups, displayedHosts, DistroAvatar, Edit2, FileSymlink, FolderPlus, FolderTree, getDropTargetClasses, getEffectiveHostDistro, groupConfigs, groupedDisplayHosts, handleCopyCredentials, handleCopyHostname, handleDuplicateHost, handleEditGroupConfig, handleEditHost, handleHostConnect, hostClickBehavior: hostClickBehaviorProp, handleUnmanageGroup, hasHostsSidePanel, hostListScrollRef, HostTreeView, isHostsSectionActive, isMultiSelectMode, lastPinnedId, LayoutGrid, managedGroupPaths, moveGroup, moveHostToGroup, onDeleteHost, Pin, pinnedHosts, Plug, recentHosts, reorderGroup, reorderHost, sanitizeHost, search, selectedGroupPath, selectedGroupPaths, selectedHostIds, selectedTags, sessionCount, setDeleteTargetPath, setDragOverDropTarget, setGroupDragOverDropTarget, setIsDeleteGroupOpen, setIsNewFolderOpen, setLastPinnedId, setNewFolderName, setSelectedGroupPath, setTargetParentPath, shouldHideEmptyRootHostsSection, showRecentHosts, sortMode, Square, Star, startInlineDeleteGroup, startInlineNewGroup, startInlineRenameGroup, t, toggleGroupSelection, toggleHostPinned, toggleHostSelection, Trash2, treeExpandedState, treeViewGroupTree, treeViewHosts, viewMode, visibleDisplayedHosts } = ctx;
   const hostClickBehavior: HostClickBehavior = hostClickBehaviorProp === 'select' ? 'select' : 'connect';
   const multiSelectedGroupPaths: Set<string> = selectedGroupPaths ?? EMPTY_GROUP_PATH_SET;
   const [draggingHostId, setDraggingHostId] = React.useState<string | null>(null);
@@ -62,6 +63,21 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
   const prepareGridLayoutAnimation = useVaultGridLayoutAnimation(hostListScrollRef);
   const [focusedHostId, setFocusedHostId] = React.useState<string | null>(null);
   const [focusedGroupPath, setFocusedGroupPath] = React.useState<string | null>(null);
+  const hostListFilterFocusKey = React.useMemo(
+    () => getVaultTreeAutoExpandKey(search, selectedTags) ?? "",
+    [search, selectedTags],
+  );
+  const [prevHostListFilterFocusKey, setPrevHostListFilterFocusKey] = React.useState(
+    hostListFilterFocusKey,
+  );
+  // Clear keyboard/selection focus as soon as search or tags change so the
+  // virtual list cannot steal DOM focus back from the search input on the
+  // same commit (useEffect would run too late).
+  if (hostListFilterFocusKey !== prevHostListFilterFocusKey) {
+    setPrevHostListFilterFocusKey(hostListFilterFocusKey);
+    setFocusedHostId(null);
+    setFocusedGroupPath(null);
+  }
   const hostCollectionLayoutKey = [
     displayedGroups.length,
     hasHostsSidePanel ? "panel" : "full",
@@ -265,7 +281,8 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
 
 
   const handleHostDragStart = React.useCallback((e: React.DragEvent, hostId: string) => {
-    e.dataTransfer.effectAllowed = "move";
+    // copyMove: vault reorder uses move; focus-sidebar append uses copy.
+    e.dataTransfer.effectAllowed = "copyMove";
     e.dataTransfer.setData("host-id", hostId);
     draggingHostIdRef.current = hostId;
     setDraggingHostId(hostId);
@@ -581,6 +598,11 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                 <ContextMenuItem onClick={() => handleDuplicateHost(host)}>
                                   <Copy className="mr-2 h-4 w-4" /> {t('action.duplicate')}
                                 </ContextMenuItem>
+                                {!isPluginHostProtocol(host.protocol) ? (
+                                  <ContextMenuItem onClick={() => handleCopyHostname(host)}>
+                                    <Copy className="mr-2 h-4 w-4" /> {t('terminal.statusbar.copyHostname.label')}
+                                  </ContextMenuItem>
+                                ) : null}
                                 <ContextMenuItem onClick={() => handleCopyCredentials(host)}>
                                   <ClipboardCopy className="mr-2 h-4 w-4" /> {t('vault.hosts.copyCredentials')}
                                 </ContextMenuItem>
@@ -695,6 +717,11 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                 <ContextMenuItem onClick={() => handleDuplicateHost(host)}>
                                   <Copy className="mr-2 h-4 w-4" /> {t('action.duplicate')}
                                 </ContextMenuItem>
+                                {!isPluginHostProtocol(host.protocol) ? (
+                                  <ContextMenuItem onClick={() => handleCopyHostname(host)}>
+                                    <Copy className="mr-2 h-4 w-4" /> {t('terminal.statusbar.copyHostname.label')}
+                                  </ContextMenuItem>
+                                ) : null}
                                 <ContextMenuItem onClick={() => handleCopyCredentials(host)}>
                                   <ClipboardCopy className="mr-2 h-4 w-4" /> {t('vault.hosts.copyCredentials')}
                                 </ContextMenuItem>
@@ -923,6 +950,7 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                       onDuplicateHost={handleDuplicateHost}
                       onDeleteHost={handleTreeDeleteHost}
                       onCopyCredentials={handleCopyCredentials}
+                      onCopyHostname={handleCopyHostname}
 
                       onNewGroup={startInlineNewGroup}
                       onRenameGroup={startInlineRenameGroup}
@@ -1072,6 +1100,11 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                       >
                                         <Copy className="mr-2 h-4 w-4" /> {t('action.duplicate')}
                                       </ContextMenuItem>
+                                      {!isPluginHostProtocol(host.protocol) ? (
+                                      <ContextMenuItem onClick={() => handleCopyHostname(host)}>
+                                        <Copy className="mr-2 h-4 w-4" /> {t('terminal.statusbar.copyHostname.label')}
+                                      </ContextMenuItem>
+                                    ) : null}
                                       <ContextMenuItem
                                         onClick={() => handleCopyCredentials(host)}
                                       >
@@ -1216,11 +1249,16 @@ export function VaultHostListSection({ ctx }: { ctx: VaultHostListSectionContext
                                 >
                                   <Copy className="mr-2 h-4 w-4" /> {t('action.duplicate')}
                                 </ContextMenuItem>
-                                <ContextMenuItem
-                                  onClick={() => handleCopyCredentials(host)}
-                                >
-                                  <ClipboardCopy className="mr-2 h-4 w-4" /> {t('vault.hosts.copyCredentials')}
-                                </ContextMenuItem>
+                                {!isPluginHostProtocol(host.protocol) ? (
+                                      <ContextMenuItem onClick={() => handleCopyHostname(host)}>
+                                        <Copy className="mr-2 h-4 w-4" /> {t('terminal.statusbar.copyHostname.label')}
+                                      </ContextMenuItem>
+                                    ) : null}
+                                      <ContextMenuItem
+                                        onClick={() => handleCopyCredentials(host)}
+                                      >
+                                        <ClipboardCopy className="mr-2 h-4 w-4" /> {t('vault.hosts.copyCredentials')}
+                                      </ContextMenuItem>
                                 <ContextMenuItem onClick={() => toggleHostPinned(host.id)}>
                                   <Pin className="mr-2 h-4 w-4" /> {host.pinned ? t('vault.hosts.unpin') : t('vault.hosts.pinToTop')}
                                 </ContextMenuItem>

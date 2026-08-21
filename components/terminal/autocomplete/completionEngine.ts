@@ -50,6 +50,8 @@ export interface CompletionSuggestion {
   score: number;
   /** For history entries: execution frequency */
   frequency?: number;
+  /** Matching rule used by recent history surfaced during path completion. */
+  historyMatch?: "path-argument";
   /** For path suggestions: file type */
   fileType?: "file" | "directory" | "symlink";
   /** For snippet suggestions: the source snippet (used by the accept path). */
@@ -71,6 +73,81 @@ export interface CompletionContext {
   commandName: string;
   /** Whether the current position is after a recognized option that expects an argument */
   isOptionArg: boolean;
+}
+
+/**
+ * Soft wait for remote/local path listings. History, fig specs, and snippets are
+ * local and should paint without waiting on high-latency SSH exec (#2830).
+ * Timed-out listings still finish in the background: cacheable paths warm the
+ * shared cache, and cache-bypassed relative SSH paths notify via onLateResult
+ * so the UI can merge path suggestions when the listing finally resolves.
+ */
+export const PATH_COMPLETION_BUDGET_MS = 150;
+
+type PathSuggestionEntry = { name: string; type: "file" | "directory" | "symlink" };
+
+/** @internal Exported for unit tests covering the soft path-listing budget. */
+export async function getPathSuggestionsWithinBudget(
+  pathPromise: Promise<PathSuggestionEntry[]>,
+  budgetMs: number,
+  onLateResult?: (entries: PathSuggestionEntry[]) => void,
+): Promise<PathSuggestionEntry[]> {
+  if (!Number.isFinite(budgetMs) || budgetMs < 0) {
+    return pathPromise;
+  }
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const raced = await Promise.race([
+      // Settle rejections here so a late failure after timeout cannot surface
+      // as an unhandled rejection from the losing Promise.race branch.
+      pathPromise.then(
+        (entries) => ({ kind: "entries" as const, entries }),
+        () => ({ kind: "entries" as const, entries: [] as PathSuggestionEntry[] }),
+      ),
+      new Promise<{ kind: "timeout" }>((resolve) => {
+        timeoutId = setTimeout(() => resolve({ kind: "timeout" }), budgetMs);
+      }),
+    ]);
+    if (raced.kind === "entries") return raced.entries;
+    // Keep the listing in flight. Cacheable paths warm the shared cache for a
+    // later keystroke; bypassed relative SSH paths have no cache, so surface
+    // the late result to the caller instead of discarding it.
+    void pathPromise.then(
+      (entries) => {
+        if (entries.length > 0) onLateResult?.(entries);
+      },
+      () => {},
+    );
+    return [];
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  }
+}
+
+function buildPathCompletionSuggestions(
+  ctx: CompletionContext,
+  pathEntries: PathSuggestionEntry[],
+  cwd: string | undefined,
+): CompletionSuggestion[] {
+  if (pathEntries.length === 0) return [];
+  const { pathPrefix, quoteSuffix } = resolvePathComponents(ctx.currentWord, cwd);
+  const isQuotedPath = ctx.currentWord.startsWith('"') || ctx.currentWord.startsWith("'");
+  const suggestions: CompletionSuggestion[] = [];
+  for (const entry of pathEntries) {
+    const insertName = isQuotedPath || !/[\\$'"|!<>;#~` ]/.test(entry.name)
+      ? entry.name
+      : shellEscape(entry.name);
+    const suffix = entry.type === "directory" ? "/" : "";
+    const fullPath = pathPrefix + insertName + suffix + quoteSuffix;
+    suggestions.push({
+      text: rebuildCommand(ctx.tokens, ctx.wordIndex, fullPath),
+      displayText: entry.name + suffix,
+      source: "path",
+      score: 750,
+      fileType: entry.type,
+    });
+  }
+  return suggestions;
 }
 
 interface SpecSuggestionResult {
@@ -167,6 +244,7 @@ export async function getCompletions(
   input: string,
   options: {
     hostId?: string;
+    hostGroup?: string;
     os?: "linux" | "windows" | "macos";
     maxResults?: number;
     /** Session ID for remote path completion */
@@ -180,9 +258,22 @@ export async function getCompletions(
     snippets?: Snippet[];
     /** Which history pool to query (default: current host only). */
     historyScope?: AutocompleteHistoryScope;
+    /**
+     * Soft budget for path listings (ms). Local suggestions return when this
+     * elapses even if remote `find` is still running. Use `Infinity` in tests
+     * that need the full remote listing.
+     */
+    pathBudgetMs?: number;
+    /**
+     * Invoked when a path listing finishes after the soft budget elapsed.
+     * Needed for cache-bypassed relative SSH cwd lookups, which cannot warm
+     * the shared directory cache for a later keystroke.
+     */
+    onLatePathSuggestions?: (suggestions: CompletionSuggestion[]) => void;
   } = {},
 ): Promise<CompletionSuggestion[]> {
   const { hostId, maxResults = 15, historyScope = "host" } = options;
+  const pathBudgetMs = options.pathBudgetMs ?? PATH_COMPLETION_BUDGET_MS;
 
   if (!input || input.trim().length === 0) return [];
 
@@ -241,6 +332,7 @@ export async function getCompletions(
         source: "history",
         score: 720 - index,
         frequency: entry.frequency,
+        historyMatch: "path-argument",
       } satisfies CompletionSuggestion;
       suggestions.push(suggestion);
       seenSuggestionTexts.add(suggestion.text);
@@ -250,14 +342,28 @@ export async function getCompletions(
   const canQueryPaths = options.protocol === "local" || options.sessionId !== undefined;
 
   const pathEntries = canQueryPaths && pathCheck.shouldComplete
-    ? await getPathSuggestions(ctx, {
-      sessionId: options.sessionId,
-      protocol: options.protocol,
-      os: options.os,
-      cwd: options.cwd,
-      cwdSource: options.cwdSource,
-      foldersOnly: pathCheck.foldersOnly,
-    })
+    ? await getPathSuggestionsWithinBudget(
+      getPathSuggestions(ctx, {
+        sessionId: options.sessionId,
+        protocol: options.protocol,
+        os: options.os,
+        cwd: options.cwd,
+        cwdSource: options.cwdSource,
+        foldersOnly: pathCheck.foldersOnly,
+      }),
+      pathBudgetMs,
+      (lateEntries) => {
+        if (!options.onLatePathSuggestions) return;
+        const latePathSuggestions = buildPathCompletionSuggestions(
+          ctx,
+          lateEntries,
+          options.cwd,
+        );
+        if (latePathSuggestions.length > 0) {
+          options.onLatePathSuggestions(latePathSuggestions);
+        }
+      },
+    )
     : [];
 
   for (const suggestion of specResult.suggestions) {
@@ -265,29 +371,21 @@ export async function getCompletions(
     seenSuggestionTexts.add(suggestion.text);
   }
 
-  if (pathEntries.length > 0) {
-    const { pathPrefix, quoteSuffix } = resolvePathComponents(ctx.currentWord, options.cwd);
-    const isQuotedPath = ctx.currentWord.startsWith('"') || ctx.currentWord.startsWith("'");
-    for (const entry of pathEntries) {
-      const insertName = isQuotedPath || !/[\\$'"|!<>;#~` ]/.test(entry.name)
-        ? entry.name
-        : shellEscape(entry.name);
-      const suffix = entry.type === "directory" ? "/" : "";
-      const fullPath = pathPrefix + insertName + suffix + quoteSuffix;
-      const suggestion = {
-        text: rebuildCommand(ctx.tokens, ctx.wordIndex, fullPath),
-        displayText: entry.name + suffix,
-        source: "path",
-        score: 750,
-        fileType: entry.type,
-      } satisfies CompletionSuggestion;
-      suggestions.push(suggestion);
-      seenSuggestionTexts.add(suggestion.text);
-    }
+  for (const suggestion of buildPathCompletionSuggestions(ctx, pathEntries, options.cwd)) {
+    suggestions.push(suggestion);
+    seenSuggestionTexts.add(suggestion.text);
   }
 
-  // 3. Fuzzy history fallback (if prefix match yields few results)
-  if (!preferPathSuggestions && suggestions.length < 3 && input.length >= 2) {
+  // 3. Fuzzy history fallback while typing the command name. Once arguments
+  // are present, history completion is prefix-only: fuzzy matching the whole
+  // line can borrow characters from later paths and keep an incompatible
+  // middle argument visible (issue #3088).
+  if (
+    ctx.wordIndex === 0 &&
+    !preferPathSuggestions &&
+    suggestions.length < 3 &&
+    input.length >= 2
+  ) {
     const fuzzyMatches = fuzzyQueryHistory(input, {
       ...historyOpts,
       limit: 5,
@@ -311,7 +409,10 @@ export async function getCompletions(
   // a snippet's label collides with an existing history entry's text, the
   // score-sort + final dedup below keeps the snippet (the higher-scored one).
   if (options.snippets && options.snippets.length > 0 && ctx.wordIndex === 0) {
-    for (const snippetSuggestion of getSnippetSuggestions(input, options.snippets, { hostId })) {
+    for (const snippetSuggestion of getSnippetSuggestions(input, options.snippets, {
+      hostId,
+      hostGroup: options.hostGroup,
+    })) {
       suggestions.push(snippetSuggestion);
     }
   }

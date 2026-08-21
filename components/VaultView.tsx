@@ -52,6 +52,10 @@ import type { VaultLockHandle } from "../application/state/vaultManagedImportLoc
 import { useTreeExpandedState } from "../application/state/useTreeExpandedState";
 import { useVaultGroupDeletion } from "../application/state/useVaultGroupDeletion";
 import type { VaultHostPersistenceResult } from "../application/state/vaultImportProgress";
+import type {
+  VaultGroupMutationResult,
+  VaultGroupMutationState,
+} from "../domain/vaultGroupMutation";
 import type { PluginImporterCommitRequest } from "../application/state/usePluginImporterCommit";
 import { buildVaultCsvCredentialOptions } from "../application/vaultCsvExportCredentials";
 import { sanitizeCredentialValue } from "../domain/credentials";
@@ -61,6 +65,7 @@ import {
 } from "../domain/groupConfig";
 import {
   getEffectiveHostDistro,
+  getHostAddressForClipboard,
   resolveTelnetPassword,
   resolveTelnetPort,
   resolveTelnetUsername,
@@ -68,6 +73,9 @@ import {
   upsertHostById,
 } from "../domain/host";
 import { exportHostsToCsvWithStats } from "../domain/vaultImport";
+import {
+  remapSnippetTargetGroupPaths,
+} from "../domain/hostGroupPathMutations";
 import {
   reorderVaultItems,
   reorderVaultStrings,
@@ -93,7 +101,6 @@ import {
   SerialConfig,
   SSHKey,
   Snippet,
-  VaultNote,
 } from "../types";
 import { AppLogo } from "./AppLogo";
 import { connectHostsStaggered } from "./connectHostsStaggered";
@@ -147,7 +154,7 @@ import { Badge } from "./ui/badge";
 import { HotkeyScheme, KeyBinding } from "../domain/models";
 import { VaultViewLayout } from "./vault/VaultViewLayout";
 import { useVaultHostCollections } from "./vault/useVaultHostCollections";
-import { useVaultImportHandlers } from "./vault/useVaultImportHandlers";
+import { useVaultImportHandlers } from "../application/state/useVaultImportHandlers";
 import { useVaultGroupDragHandlers } from "./vault/useVaultGroupDragHandlers";
 
 const LazyProtocolSelectDialog = lazy(() => import("./ProtocolSelectDialog"));
@@ -210,11 +217,8 @@ interface VaultViewProps {
   proxyProfiles: ProxyProfile[];
   snippets: Snippet[];
   snippetPackages: string[];
-  notes: VaultNote[];
-  noteGroups: string[];
   customGroups: string[];
   knownHosts: KnownHost[];
-  connectionLogs: ConnectionLog[];
   managedSources: ManagedSource[];
   sessionCount: number;
   hotkeyScheme: HotkeyScheme;
@@ -239,8 +243,6 @@ interface VaultViewProps {
   onUpdateProxyProfiles: (profiles: ProxyProfile[]) => void;
   onUpdateSnippets: (snippets: Snippet[]) => void;
   onUpdateSnippetPackages: (pkgs: string[]) => void;
-  onUpdateNotes: (notes: VaultNote[]) => void;
-  onUpdateNoteGroups: (groups: string[]) => void;
   onUpdateCustomGroups: (
     groups: string[] | ((current: string[]) => string[]),
   ) => void;
@@ -266,13 +268,14 @@ interface VaultViewProps {
     }
     | { status: "superseded" }
   >;
+  onCommitVaultGroupMutation: (
+    mutate: (current: VaultGroupMutationState) => VaultGroupMutationResult,
+    lock?: VaultLockHandle | null,
+  ) => Promise<VaultGroupMutationResult | { ok: false; superseded: true }>;
   onClearAndRemoveManagedSource?: (source: ManagedSource) => Promise<() => Promise<void>>;
   onClearAndRemoveManagedSources?: (sources: ManagedSource[]) => Promise<() => Promise<void>>;
   onUnmanageSource?: (sourceId: string) => void;
   onConvertKnownHost: (knownHost: KnownHost) => void;
-  onToggleConnectionLogSaved: (id: string) => void;
-  onDeleteConnectionLog: (id: string) => void;
-  onClearUnsavedConnectionLogs: () => void;
   onOpenLogView: (log: ConnectionLog) => void;
   onRunSnippet?: (snippet: Snippet, targetHosts: Host[]) => void;
   groupConfigs: GroupConfig[];
@@ -304,11 +307,8 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   proxyProfiles,
   snippets,
   snippetPackages,
-  notes,
-  noteGroups,
   customGroups,
   knownHosts,
-  connectionLogs,
   managedSources,
   sessionCount,
   hotkeyScheme,
@@ -330,21 +330,17 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   onUpdateProxyProfiles,
   onUpdateSnippets,
   onUpdateSnippetPackages,
-  onUpdateNotes,
-  onUpdateNoteGroups,
   onUpdateCustomGroups,
   onCommitPluginImporterData,
   onUpdateKnownHosts,
   onUpdateManagedSources,
   onReadPersistedManagedSources,
   onCommitVaultImportTransaction,
+  onCommitVaultGroupMutation,
   onClearAndRemoveManagedSource,
   onClearAndRemoveManagedSources,
   onUnmanageSource,
   onConvertKnownHost,
-  onToggleConnectionLogSaved,
-  onDeleteConnectionLog,
-  onClearUnsavedConnectionLogs,
   onOpenLogView,
   onRunSnippet,
   groupConfigs,
@@ -462,6 +458,9 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   const [pendingOpenNoteId, setPendingOpenNoteId] = useState<string | null>(
     null,
   );
+  const handleOpenNoteIdHandled = useCallback(() => {
+    setPendingOpenNoteId(null);
+  }, []);
   const [pendingOpenSnippetId, setPendingOpenSnippetId] = useState<
     string | null
   >(null);
@@ -742,6 +741,28 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     }
   }, [hosts, keys, t]);
 
+  // Copy hostname/IP for cross-host paste without opening the editor
+  const handleCopyHostname = useCallback(
+    (host: Host) => {
+      const hostname = getHostAddressForClipboard(host);
+      if (!hostname) {
+        toast.error(t("terminal.statusbar.copyHostname.error"));
+        return;
+      }
+      void navigator.clipboard.writeText(hostname).then(
+        () => {
+          toast.success(
+            t("terminal.statusbar.copyHostname.toast", { hostname }),
+          );
+        },
+        () => {
+          toast.error(t("terminal.statusbar.copyHostname.error"));
+        },
+      );
+    },
+    [t],
+  );
+
   // Copy host credentials to clipboard
   const handleCopyCredentials = useCallback(
     (host: Host) => {
@@ -888,6 +909,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       hosts,
       keys,
       managedSources,
+      notify: toast,
       onReadPersistedHosts,
       onUpdateHosts,
       onUpdateKeys,
@@ -941,7 +963,66 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     setIsNewFolderOpen(false);
   };
 
-  const submitRenameGroup = () => {
+  const commitGroupPathChange = useCallback(async (
+    sourcePath: string,
+    nextPath: string,
+    replacementConfig?: GroupConfig,
+  ) => {
+    try {
+      return await onCommitVaultGroupMutation((current) => {
+        if (!current.groups.includes(sourcePath)) {
+          return { ok: false, error: `Group "${sourcePath}" was not found.` };
+        }
+        const belongsToTree = (path: string) => (
+          path === sourcePath || path.startsWith(`${sourcePath}/`)
+        );
+        const rename = (path: string) => (
+          path === sourcePath
+            ? nextPath
+            : path.startsWith(`${sourcePath}/`)
+              ? nextPath + path.slice(sourcePath.length)
+              : path
+        );
+        const occupied = new Set([
+          ...current.groups.filter((path) => !belongsToTree(path)),
+          ...current.configs.map((config) => config.path).filter((path) => !belongsToTree(path)),
+        ]);
+        const collision = [
+          ...current.groups,
+          ...current.configs.map((config) => config.path),
+        ].filter(belongsToTree).map(rename).find((path) => occupied.has(path));
+        if (collision) return { ok: false, error: `Group "${collision}" already exists.` };
+
+        const configs = current.configs.map((config) => {
+          if (replacementConfig && config.path === sourcePath) {
+            return { ...replacementConfig, path: nextPath };
+          }
+          return belongsToTree(config.path) ? { ...config, path: rename(config.path) } : config;
+        });
+        if (replacementConfig && !current.configs.some((config) => config.path === sourcePath)) {
+          configs.push({ ...replacementConfig, path: nextPath });
+        }
+        return {
+          ok: true,
+          state: {
+            groups: Array.from(new Set(current.groups.map(rename))),
+            configs,
+            hosts: current.hosts.map((host) => (
+              host.group && belongsToTree(host.group) ? { ...host, group: rename(host.group) } : host
+            )),
+            managedSources: current.managedSources.map((source) => (
+              belongsToTree(source.groupName) ? { ...source, groupName: rename(source.groupName) } : source
+            )),
+            snippets: remapSnippetTargetGroupPaths(current.snippets, sourcePath, nextPath),
+          },
+        };
+      });
+    } catch (error) {
+      return { ok: false as const, error: error instanceof Error ? error.message : String(error) };
+    }
+  }, [onCommitVaultGroupMutation]);
+
+  const submitRenameGroup = async () => {
     if (!renameTargetPath) return;
 
     const nextName = renameGroupName.trim();
@@ -962,37 +1043,11 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       return;
     }
 
-    const updatedGroups = customGroups.map((g) => {
-      if (g === renameTargetPath) return nextPath;
-      if (g.startsWith(renameTargetPath + "/"))
-        return nextPath + g.slice(renameTargetPath.length);
-      return g;
-    });
-    const updatedHosts = hosts.map((h) => {
-      const g = h.group || "";
-      if (g === renameTargetPath) return { ...h, group: nextPath };
-      if (g.startsWith(renameTargetPath + "/"))
-        return { ...h, group: nextPath + g.slice(renameTargetPath.length) };
-      return h;
-    });
-
-    // Update managed sources if any match the renamed group path
-    const updatedManagedSources = managedSources.map((s) => {
-      if (s.groupName === renameTargetPath)
-        return { ...s, groupName: nextPath };
-      if (s.groupName.startsWith(renameTargetPath + "/"))
-        return {
-          ...s,
-          groupName: nextPath + s.groupName.slice(renameTargetPath.length),
-        };
-      return s;
-    });
-    if (updatedManagedSources.some((s, i) => s !== managedSources[i])) {
-      onUpdateManagedSources(updatedManagedSources);
+    const result = await commitGroupPathChange(renameTargetPath, nextPath);
+    if ("superseded" in result || "error" in result) {
+      setRenameGroupError("superseded" in result ? t("common.error") : result.error);
+      return;
     }
-
-    onUpdateCustomGroups(Array.from(new Set(updatedGroups)));
-    onUpdateHosts(updatedHosts);
     if (
       selectedGroupPath &&
       (selectedGroupPath === renameTargetPath ||
@@ -1016,7 +1071,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   }, []);
 
   const handleSaveGroupConfig = useCallback(
-    (config: GroupConfig, _newName?: string, _newParent?: string | null) => {
+    async (config: GroupConfig, _newName?: string, _newParent?: string | null) => {
       const oldPath = editingGroupPath!;
       const newPath = config.path; // Panel already computed the correct path
 
@@ -1034,41 +1089,11 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
 
       // Handle path change (rename or parent change)
       if (newPath !== oldPath) {
-        // Update groups, hosts, managed sources, and configs for path change
-        const updatedGroups = customGroups.map((g) => {
-          if (g === oldPath) return newPath;
-          if (g.startsWith(oldPath + "/"))
-            return newPath + g.slice(oldPath.length);
-          return g;
-        });
-        const updatedHosts = hosts.map((h) => {
-          const g = h.group || "";
-          if (g === oldPath) return { ...h, group: newPath };
-          if (g.startsWith(oldPath + "/"))
-            return { ...h, group: newPath + g.slice(oldPath.length) };
-          return h;
-        });
-        const updatedManagedSources = managedSources.map((s) => {
-          if (s.groupName === oldPath) return { ...s, groupName: newPath };
-          if (s.groupName.startsWith(oldPath + "/"))
-            return {
-              ...s,
-              groupName: newPath + s.groupName.slice(oldPath.length),
-            };
-          return s;
-        });
-        if (updatedManagedSources.some((s, i) => s !== managedSources[i])) {
-          onUpdateManagedSources(updatedManagedSources);
+        const result = await commitGroupPathChange(oldPath, newPath, config);
+        if ("superseded" in result || "error" in result) {
+          toast.error("superseded" in result ? t("common.error") : result.error);
+          return;
         }
-        onUpdateCustomGroups(Array.from(new Set(updatedGroups)));
-        onUpdateHosts(updatedHosts);
-        // Update child config paths too
-        const finalConfigs = updatedConfigs.map((c) => {
-          if (c.path.startsWith(oldPath + "/"))
-            return { ...c, path: newPath + c.path.slice(oldPath.length) };
-          return c;
-        });
-        onUpdateGroupConfigs(finalConfigs);
         if (selectedGroupPath === oldPath) setSelectedGroupPath(newPath);
         if (selectedGroupPath?.startsWith(oldPath + "/")) {
           setSelectedGroupPath(
@@ -1086,13 +1111,9 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       groupConfigs,
       editingGroupPath,
       customGroups,
-      hosts,
-      managedSources,
       selectedGroupPath,
+      commitGroupPathChange,
       onUpdateGroupConfigs,
-      onUpdateCustomGroups,
-      onUpdateHosts,
-      onUpdateManagedSources,
       t,
     ],
   );
@@ -1119,7 +1140,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     managedSources,
     onReadPersistedHosts,
     onReadPersistedManagedSources,
-    onCommitVaultImportTransaction,
+    onCommitVaultGroupMutation,
     onClearAndRemoveManagedSource,
     onClearAndRemoveManagedSources,
     onDeletedPaths: handleDeletedGroupPaths,
@@ -1128,7 +1149,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
   const deleteGroupPath = (path: string, deleteHosts: boolean = false) =>
     deleteGroupPaths([path], deleteHosts);
 
-  const moveGroup = (sourcePath: string, targetParent: string | null) => {
+  const moveGroup = async (sourcePath: string, targetParent: string | null) => {
     const name = sourcePath.split("/").filter(Boolean).pop() || "";
     const newPath = targetParent ? `${targetParent}/${name}` : name;
     if (newPath === sourcePath || newPath.startsWith(sourcePath + "/")) return;
@@ -1136,50 +1157,17 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
       toast.error(t("vault.groups.errors.duplicatePath"));
       return;
     }
-    const updatedGroups = customGroups.map((g) => {
-      if (g === sourcePath) return newPath;
-      if (g.startsWith(sourcePath + "/"))
-        return newPath + g.slice(sourcePath.length);
-      return g;
-    });
-    const updatedHosts = hosts.map((h) => {
-      const g = h.group || "";
-      if (g === sourcePath) return { ...h, group: newPath };
-      if (g.startsWith(sourcePath + "/"))
-        return { ...h, group: newPath + g.slice(sourcePath.length) };
-      return h;
-    });
-    // Update managed sources if any match the moved group path
-    const updatedManagedSources = managedSources.map((s) => {
-      if (s.groupName === sourcePath) return { ...s, groupName: newPath };
-      if (s.groupName.startsWith(sourcePath + "/"))
-        return {
-          ...s,
-          groupName: newPath + s.groupName.slice(sourcePath.length),
-        };
-      return s;
-    });
-    if (updatedManagedSources.some((s, i) => s !== managedSources[i])) {
-      onUpdateManagedSources(updatedManagedSources);
-    }
-    onUpdateCustomGroups(Array.from(new Set(updatedGroups)));
-    onUpdateHosts(updatedHosts);
-    // Update group configs for moved paths
-    const updatedGroupConfigs = groupConfigs.map((c) => {
-      if (c.path === sourcePath) return { ...c, path: newPath };
-      if (c.path.startsWith(sourcePath + "/"))
-        return { ...c, path: newPath + c.path.slice(sourcePath.length) };
-      return c;
-    });
-    if (updatedGroupConfigs.some((c, i) => c !== groupConfigs[i])) {
-      onUpdateGroupConfigs(updatedGroupConfigs);
+    const result = await commitGroupPathChange(sourcePath, newPath);
+    if ("superseded" in result || "error" in result) {
+      toast.error("superseded" in result ? t("common.error") : result.error);
+      return;
     }
     if (
       selectedGroupPath &&
       (selectedGroupPath === sourcePath ||
         selectedGroupPath.startsWith(sourcePath + "/"))
     ) {
-      setSelectedGroupPath(newPath);
+      setSelectedGroupPath(newPath + selectedGroupPath.slice(sourcePath.length));
     }
   };
 
@@ -1311,8 +1299,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
     hosts,
     managedSources,
     onUpdateCustomGroups,
-    onUpdateHosts,
-    onUpdateManagedSources,
+    onCommitGroupPathChange: commitGroupPathChange,
     selectedGroupPath,
     setSelectedGroupPath,
     ensurePathExpanded: treeExpandedState.ensurePathExpanded,
@@ -1332,6 +1319,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
 
   useRegisterVaultHostTreeActions({
     handleCopyCredentials,
+    handleCopyHostname,
     handleDuplicateHost,
     startInlineRenameHost,
     onDeleteHost,
@@ -1414,7 +1402,6 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
           Clock,
           cn,
           commitInlineGroupRename,
-          connectionLogs,
           connectSelectedHosts,
           ContextMenu,
           ContextMenuContent,
@@ -1457,6 +1444,7 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
           groupedDisplayHosts,
           handleConnectClick,
           handleCopyCredentials,
+          handleCopyHostname,
           handleDeleteTag,
           handleDuplicateHost,
           handleEditGroupConfig,
@@ -1512,34 +1500,27 @@ const VaultViewInner: React.FC<VaultViewProps> = ({
           Network,
           newFolderName,
           newHostGroupPath,
-          noteGroups,
           NotebookText,
-          notes,
           NotesManager,
           onCommitPluginImporterData,
-          onClearUnsavedConnectionLogs,
           onConnectSerial,
           onCreateLocalTerminal,
-          onDeleteConnectionLog,
           onDeleteHost,
           onImportOrReuseKey,
           onOpenHostFromNote,
           onOpenLogView,
           onOpenSettings,
           onRunSnippet,
-          onToggleConnectionLogSaved,
           onUpdateCustomGroups,
           onUpdateGroupConfigs,
           onUpdateHosts,
           onUpdateIdentities,
           onUpdateKeys,
-          onUpdateNoteGroups,
-          onUpdateNotes,
           onUpdateProxyProfiles,
           onUpdateSnippetPackages,
           onUpdateSnippets,
           openNoteId: pendingOpenNoteId,
-          onOpenNoteIdHandled: () => setPendingOpenNoteId(null),
+          onOpenNoteIdHandled: handleOpenNoteIdHandled,
           openSnippetId: pendingOpenSnippetId,
           onOpenSnippetIdHandled: () => setPendingOpenSnippetId(null),
           Pin,
@@ -1674,18 +1655,17 @@ export const vaultViewAreEqual = (
     prev.proxyProfiles === next.proxyProfiles &&
     prev.snippets === next.snippets &&
     prev.snippetPackages === next.snippetPackages &&
-    prev.notes === next.notes &&
-    prev.noteGroups === next.noteGroups &&
     prev.customGroups === next.customGroups &&
     prev.knownHosts === next.knownHosts &&
-    // shellHistory is not a VaultView prop; SnippetsManager reads shellHistoryStore.
-    prev.connectionLogs === next.connectionLogs &&
+    // shellHistory / notes / connectionLogs are not VaultView props; those
+    // sections subscribe to shellHistoryStore / notesStore / connectionLogsStore.
     prev.sessionCount === next.sessionCount &&
     prev.managedSources === next.managedSources &&
     prev.groupConfigs === next.groupConfigs &&
     prev.onReadPersistedHosts === next.onReadPersistedHosts &&
     prev.onReadPersistedManagedSources === next.onReadPersistedManagedSources &&
     prev.onCommitVaultImportTransaction === next.onCommitVaultImportTransaction &&
+    prev.onCommitVaultGroupMutation === next.onCommitVaultGroupMutation &&
     prev.onCommitPluginImporterData === next.onCommitPluginImporterData &&
     prev.showRecentHosts === next.showRecentHosts &&
     prev.hostClickBehavior === next.hostClickBehavior &&

@@ -7,16 +7,23 @@ import {
 import packageJson from '../../../package.json';
 import { EncryptionService } from '../EncryptionService';
 import { mergeSyncPayloads } from '../../../domain/syncMerge';
+import { stripSyncPayloadEncryptedCredentials, healPoisonedSecretsForMerge } from '../../../domain/credentials';
 import {
   SYNC_SNAPSHOT_LIMIT,
   summarizeSyncChanges,
   withSyncReliabilityMeta,
 } from '../../../domain/syncReliability';
 import { detectSuspiciousShrink, type ShrinkFinding } from '../../../domain/syncGuards';
-import { resolveCloudSyncConflictAction, type CloudSyncConflictAction } from '../../../domain/syncStrategy';
+import { resolveCloudSyncConflictAction, type CloudSyncConflictAction, type CloudSyncStrategy } from '../../../domain/syncStrategy';
 import { assertConvergentSyncWriteCompatible } from '../../../domain/convergentSync';
 import { getConvergentSyncLocalConfig } from '../convergentSyncConfig';
 import { syncAllProvidersConvergentlyImpl } from './convergentSyncRuntimeMethods';
+import {
+  coalesceStoredSyncPreferences,
+  hasSyncPreferenceFields,
+  resolveSyncPreferencesForPersist,
+  resolveSyncVersionsForPersist,
+} from './syncConfigPersist';
 import type { CloudAdapter } from '../adapters';
 import type {
   CloudProvider,
@@ -27,6 +34,7 @@ import type {
   SyncPayload,
   SyncResult,
 } from '../../../domain/sync';
+// CloudProvider used when clearing dynamic plugin-provider bases/anchors.
 import {
   decryptLocalStorageValue,
   encryptLocalStorageValue,
@@ -50,7 +58,9 @@ async function downloadRemoteForSyncAllImpl(this: any,
   syncSecurityGeneration?: number,
 ): Promise<SyncResult> {
   assertSyncSecurityGeneration(this, syncSecurityGeneration);
-  const payload = await EncryptionService.decryptPayload(remoteFile, this.masterPassword);
+  const payload = stripSyncPayloadEncryptedCredentials(
+    await EncryptionService.decryptPayload(remoteFile, this.masterPassword),
+  );
   assertSyncSecurityGeneration(this, syncSecurityGeneration);
   this.updateProviderStatus(provider, 'connected');
 
@@ -300,15 +310,23 @@ export async function syncAllProvidersImpl(this: any,
           let merged = payload;
           for (const c of conflicts) {
             const providerBase = await this.loadSyncBase(c.provider as CloudProvider);
-            const remotePayload = await EncryptionService.decryptPayload(
+            const remoteRaw = await EncryptionService.decryptPayload(
               c.check!.remoteFile!,
               this.masterPassword,
             );
+            const localHealed = healPoisonedSecretsForMerge(merged, remoteRaw, providerBase);
+            const remotePayload = healPoisonedSecretsForMerge(
+              remoteRaw,
+              merged,
+              providerBase,
+            );
             assertSyncSecurityGeneration(this, syncSecurityGeneration);
-            const result = mergeSyncPayloads(providerBase, merged, remotePayload);
+            const result = mergeSyncPayloads(providerBase, localHealed, remotePayload);
             merged = result.payload;
           }
-          const mergeResult = { payload: merged };
+          const mergeResult = {
+            payload: stripSyncPayloadEncryptedCredentials(merged),
+          };
 
           console.info('[CloudSyncManager] syncAll: three-way merge completed');
 
@@ -596,8 +614,21 @@ export async function syncAllProvidersImpl(this: any,
     await Promise.all(uploadTasks);
 
     // 5. Final State Update
-    const hasSuccess = Array.from(results.values()).some((r) => r.success);
-    if (hasSuccess) {
+    const resultList = Array.from(results.values());
+    const hasSuccess = resultList.some((r) => r.success);
+    const hasConflict = resultList.some((r) => r.conflictDetected);
+    if (hasConflict) {
+      // Prefer CONFLICT over IDLE even when another provider succeeded, so the
+      // conflict UI from uploadToProvider is not wiped by a mixed multi-provider run.
+      this.state.syncState = 'CONFLICT';
+      if (wasMerged && payload) {
+        for (const [p, r] of results) {
+          if (r.success) {
+            results.set(p, { ...r, action: 'merge', mergedPayload: payload });
+          }
+        }
+      }
+    } else if (hasSuccess) {
       this.exitBlockedState();
       this.state.syncState = 'IDLE';
       this.state.lastShrinkFinding = undefined;
@@ -642,13 +673,18 @@ export function setDeviceNameImpl(this: any,name: string): void {
 
 export function setAutoSyncImpl(this: any,enabled: boolean, intervalMinutes?: number): void {
     this.state.autoSyncEnabled = enabled;
+    const memoryKeys: Array<'autoSync' | 'interval'> = ['autoSync'];
     if (intervalMinutes) {
       this.state.autoSyncInterval = Math.max(
         SYNC_CONSTANTS.MIN_SYNC_INTERVAL,
         Math.min(SYNC_CONSTANTS.MAX_SYNC_INTERVAL, intervalMinutes)
       );
+      memoryKeys.push('interval');
     }
-    this.saveSyncConfig();
+    // Preference write: only the fields this setter owns — leave syncStrategy
+    // (and interval when unchanged) to whatever is already persisted so another
+    // window's concurrent edit is not overwritten by stale memory.
+    this.saveSyncConfig({ preferencesFromMemory: true, memoryKeys });
     this.notifyStateChange(); // Notify UI of state change
 
     if (enabled && this.state.securityState === 'UNLOCKED') {
@@ -679,16 +715,131 @@ export function stopAutoSyncImpl(this: any): void {
     }
   }
 
-export function saveSyncConfigImpl(this: any): void {
-    this.saveToStorage(SYNC_STORAGE_KEYS.SYNC_CONFIG, {
+export function saveSyncConfigImpl(
+    this: any,
+    opts?: {
+      preferencesFromMemory?: boolean;
+      memoryKeys?: ReadonlyArray<'autoSync' | 'interval' | 'syncStrategy'>;
+    },
+  ): void {
+    const preferencesFromMemory = opts?.preferencesFromMemory === true;
+    const memoryKeys = opts?.memoryKeys;
+    type StoredPrefs = {
+      autoSync?: boolean;
+      interval?: number;
+      syncStrategy?: unknown;
+    };
+    type StoredConfig = StoredPrefs & {
+      localVersion?: number;
+      localUpdatedAt?: number;
+      remoteVersion?: number;
+      remoteUpdatedAt?: number;
+    };
+
+    const adoptPreferences = (nextPrefs: {
+      autoSync: boolean;
+      interval: number;
+      syncStrategy: CloudSyncStrategy;
+    }): boolean => {
+      const autoSyncChanged = this.state.autoSyncEnabled !== nextPrefs.autoSync;
+      const intervalChanged = this.state.autoSyncInterval !== nextPrefs.interval;
+      const strategyChanged = this.state.syncStrategy !== nextPrefs.syncStrategy;
+      this.state.autoSyncEnabled = nextPrefs.autoSync;
+      this.state.autoSyncInterval = nextPrefs.interval;
+      this.state.syncStrategy = nextPrefs.syncStrategy;
+      if (autoSyncChanged) {
+        if (nextPrefs.autoSync && this.state.securityState === 'UNLOCKED') {
+          this.startAutoSync?.();
+        } else {
+          this.stopAutoSync?.();
+        }
+      }
+      return autoSyncChanged || intervalChanged || strategyChanged;
+    };
+
+    const memoryPreferences = {
       autoSync: this.state.autoSyncEnabled,
       interval: this.state.autoSyncInterval,
+      syncStrategy: this.state.syncStrategy,
+    };
+
+    // Preference writers only touch SYNC_PREFERENCES so a concurrent
+    // version bump cannot re-enable auto-sync via a shared RMW blob (#2976).
+    // When memoryKeys is set, merge owned fields onto the stored snapshot so
+    // a strategy-only write cannot revive a stale autoSync from memory.
+    if (preferencesFromMemory) {
+      const storedPreferences = this.loadFromStorage?.(SYNC_STORAGE_KEYS.SYNC_PREFERENCES) as
+        | StoredPrefs
+        | null
+        | undefined;
+      const storedConfig = this.loadFromStorage?.(SYNC_STORAGE_KEYS.SYNC_CONFIG) as
+        | StoredConfig
+        | null
+        | undefined;
+      const nextPreferences = resolveSyncPreferencesForPersist({
+        memory: memoryPreferences,
+        stored: coalesceStoredSyncPreferences(storedPreferences, storedConfig),
+        preferencesFromMemory: true,
+        memoryKeys,
+      });
+      this.saveToStorage(SYNC_STORAGE_KEYS.SYNC_PREFERENCES, nextPreferences);
+      return;
+    }
+
+    const storedPreferences = this.loadFromStorage?.(SYNC_STORAGE_KEYS.SYNC_PREFERENCES) as
+      | StoredPrefs
+      | null
+      | undefined;
+    const storedConfig = this.loadFromStorage?.(SYNC_STORAGE_KEYS.SYNC_CONFIG) as
+      | StoredConfig
+      | null
+      | undefined;
+    const hasSeparatePreferences = Boolean(
+      storedPreferences && typeof storedPreferences === 'object',
+    );
+
+    const nextVersions = resolveSyncVersionsForPersist({
       localVersion: this.state.localVersion,
       localUpdatedAt: this.state.localUpdatedAt,
       remoteVersion: this.state.remoteVersion,
       remoteUpdatedAt: this.state.remoteUpdatedAt,
-      syncStrategy: this.state.syncStrategy,
     });
+
+    // Version-only saves never write SYNC_PREFERENCES. The dedicated key is
+    // created only by preference writers (setAutoSync / setSyncStrategy).
+    // A check-then-write migrate here can overwrite a concurrent
+    // autoSync=false from another window (#2976).
+    if (hasSeparatePreferences || !hasSyncPreferenceFields(storedConfig)) {
+      this.saveToStorage(SYNC_STORAGE_KEYS.SYNC_CONFIG, nextVersions);
+    } else {
+      // Keep legacy preference fields in SYNC_CONFIG until a preference
+      // writer splits them out. Take those fields from storage, never
+      // from this window's possibly stale memory.
+      const preservedPreferences = resolveSyncPreferencesForPersist({
+        memory: memoryPreferences,
+        stored: coalesceStoredSyncPreferences(null, storedConfig),
+        preferencesFromMemory: false,
+      });
+      this.saveToStorage(SYNC_STORAGE_KEYS.SYNC_CONFIG, {
+        ...preservedPreferences,
+        ...nextVersions,
+      });
+    }
+
+    // Re-read preferences after the version write so a toggle that landed
+    // during the version persist window is adopted into this process.
+    const latestPreferences = resolveSyncPreferencesForPersist({
+      memory: memoryPreferences,
+      stored: coalesceStoredSyncPreferences(
+        this.loadFromStorage?.(SYNC_STORAGE_KEYS.SYNC_PREFERENCES) as StoredPrefs | null | undefined,
+        this.loadFromStorage?.(SYNC_STORAGE_KEYS.SYNC_CONFIG) as StoredConfig | null | undefined,
+      ),
+      preferencesFromMemory: false,
+    });
+    const shouldNotifyPreferenceAdopt = adoptPreferences(latestPreferences);
+    if (shouldNotifyPreferenceAdopt) {
+      this.notifyStateChange?.();
+    }
   }
 
 export function syncBaseKeyImpl(this: any,provider?: CloudProvider): string {
@@ -780,7 +931,18 @@ export function clearSyncBaseImpl(this: any): void {
     if (typeof this.syncSnapshotsKey === 'function') {
       this.removeFromStorage(this.syncSnapshotsKey());
     }
-    for (const p of ['github', 'google', 'onedrive', 'webdav', 's3'] as const) {
+    const providers = new Set<CloudProvider>([
+      'github', 'google', 'onedrive', 'webdav', 's3',
+    ]);
+    for (const id of Object.keys(this.state?.providers ?? {})) {
+      providers.add(id as CloudProvider);
+    }
+    if (typeof this.listRegisteredPluginProviderIds === 'function') {
+      for (const id of this.listRegisteredPluginProviderIds()) {
+        providers.add(id as CloudProvider);
+      }
+    }
+    for (const p of providers) {
       this.removeFromStorage(this.syncBaseKey(p));
       this.removeFromStorage(this.convergentProviderBaselineKey(p));
       if (typeof this.syncSnapshotsKey === 'function') {

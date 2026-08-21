@@ -23,8 +23,8 @@ type HighlightRange = { x: number; width: number };
 
 /**
  * Highlights the buffer row under the cursor without tinting its glyphs.
- * ANSI-colored cells keep their own background; only default-background cells
- * receive the opaque theme color.
+ * Explicit ANSI backgrounds remain untouched. Foreground-only colors still
+ * receive the opaque theme background so colored text does not leave holes.
  */
 export class CursorLineHighlighter implements IDisposable {
   private enabled = false;
@@ -118,10 +118,21 @@ export class CursorLineHighlighter implements IDisposable {
       return;
     }
 
-    this.clear();
+    // Register the next marker/decorations before disposing the previous set so
+    // Enter / cursor moves never leave an empty frame (clear-then-create flash).
+    const previousMarker = this.marker;
+    const previousDecorations = this.decorations;
+    const previousDisposeListeners = this.decorationDisposeListeners;
 
     const marker = this.term.registerMarker(0);
-    if (!marker) return;
+    if (!marker) {
+      this.clearOwned(
+        previousMarker,
+        previousDecorations,
+        previousDisposeListeners,
+      );
+      return;
+    }
 
     const decorations: IDecoration[] = [];
     for (const range of ranges) {
@@ -164,6 +175,12 @@ export class CursorLineHighlighter implements IDisposable {
     this.activeColor = color;
     this.activeRanges = ranges;
     this.activeTailRanges = tailRanges;
+
+    this.clearOwned(
+      previousMarker,
+      previousDecorations,
+      previousDisposeListeners,
+    );
   }
 
   dispose(): void {
@@ -194,9 +211,7 @@ export class CursorLineHighlighter implements IDisposable {
       }
       const isHighlightable =
         currentCell === undefined ||
-        (currentCell.isBgDefault() &&
-          currentCell.isFgDefault() &&
-          !currentCell.isInverse());
+        (currentCell.isBgDefault() && !currentCell.isInverse());
       if (isHighlightable && rangeStart === null) rangeStart = x;
       if ((!isHighlightable || x === cols - 1) && rangeStart !== null) {
         const end = isHighlightable && x === cols - 1 ? x + 1 : x;
@@ -221,17 +236,29 @@ export class CursorLineHighlighter implements IDisposable {
   }
 
   private clear(): void {
-    for (const disposable of this.decorationDisposeListeners) disposable.dispose();
-    this.decorationDisposeListeners = [];
-    for (const decoration of this.decorations) decoration.dispose();
-    this.decorations = [];
-    this.marker?.dispose();
+    this.clearOwned(
+      this.marker,
+      this.decorations,
+      this.decorationDisposeListeners,
+    );
     this.marker = null;
+    this.decorations = [];
+    this.decorationDisposeListeners = [];
     this.activeLine = null;
     this.activeCols = null;
     this.activeColor = null;
     this.activeRanges = [];
     this.activeTailRanges = [];
+  }
+
+  private clearOwned(
+    marker: IMarker | null,
+    decorations: IDecoration[],
+    disposeListeners: IDisposable[],
+  ): void {
+    for (const disposable of disposeListeners) disposable.dispose();
+    for (const decoration of decorations) decoration.dispose();
+    marker?.dispose();
   }
 
   private markPendingRefresh(): void {

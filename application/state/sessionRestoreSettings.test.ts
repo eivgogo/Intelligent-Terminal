@@ -86,7 +86,13 @@ test("session restore persistence can be disabled for non-main windows", () => {
   assert.match(hookSource, /payload: persistSessionRestore \? sessionRestoreStorage\.read\(\) : null/);
   assert.match(hookSource, /if \(!persistSessionRestore\) return;/);
   assert.match(appSource, /window\.location\.hash\.startsWith\('#\/session-window'\)/);
-  assert.match(appSource, /persistSessionRestore: !isPeerSessionWindow/);
+  // App no longer calls useSessionState; SessionPublisher owns the hook and
+  // App passes the peer-window flag down to it.
+  assert.match(appSource, /<SessionPublisher persistSessionRestore=\{!isPeerSessionWindow\}>/);
+  assert.match(
+    readFileSync(new URL("../app/publishers/SessionPublisher.tsx", import.meta.url), "utf8"),
+    /useSessionState\(\{ persistSessionRestore \}\)/,
+  );
   assert.match(indexSource, /hash === '#\/session-window'/);
   assert.match(registerBridgesSource, /route: "session-window"/);
   assert.match(registerBridgesSource, /registerAsMainWindow: false/);
@@ -98,10 +104,13 @@ test("session restore persistence can be disabled for non-main windows", () => {
 });
 
 test("session peer windows do not run main-window startup effects", () => {
-  const appSource = readFileSync(new URL("../../App.tsx", import.meta.url), "utf8");
+  const appSource = readFileSync(new URL("../app/AppSideEffects.tsx", import.meta.url), "utf8");
+  const appRootSource = readFileSync(new URL("../../App.tsx", import.meta.url), "utf8");
   const autoSyncSource = readFileSync(new URL("./useAutoSync.ts", import.meta.url), "utf8");
   const startupEffectsSource = readFileSync(new URL("../app/useAppStartupEffects.ts", import.meta.url), "utf8");
   const updateCheckSource = readFileSync(new URL("./useUpdateCheck.ts", import.meta.url), "utf8");
+  const appLockGateSource = readFileSync(new URL("../../components/AppLockGate.tsx", import.meta.url), "utf8");
+  const indexSource = readFileSync(new URL("../../index.tsx", import.meta.url), "utf8");
   const settingsStateSource = readFileSync(new URL("./useSettingsState.ts", import.meta.url), "utf8");
   const settingsIpcSyncSource = readFileSync(new URL("./settingsIpcSync.ts", import.meta.url), "utf8");
   const storageSyncSource = readFileSync(new URL("./settingsStorageSync.ts", import.meta.url), "utf8");
@@ -109,7 +118,18 @@ test("session peer windows do not run main-window startup effects", () => {
   const trayPanelConnectIndex = appSource.indexOf("onTrayPanelConnectToHost");
 
   assert.match(appSource, /const isPeerSessionWindow = typeof window !== 'undefined' && window\.location\.hash\.startsWith\('#\/session-window'\)/);
-  assert.match(appSource, /useSettingsState\(\{[^}]*enableSettingsSync: !isPeerSessionWindow[^}]*enableSystemEffects: !isPeerSessionWindow/s);
+  assert.match(appLockGateSource, /settingsOptions\?: Parameters<typeof useSettingsState>\[0\]/);
+  assert.match(appLockGateSource, /deps\.useSettingsState\(settingsOptions\)/);
+  assert.match(indexSource, /const isPeerSessionWindow = window\.location\.hash\.startsWith\('#\/session-window'\)/);
+  assert.match(indexSource, /const settingsOptions = isPeerSessionWindow\s*\?\s*\{ enableSettingsSync: false, enableSystemEffects: false \}/);
+  assert.match(indexSource, /<AppLockGate settingsOptions=\{settingsOptions\}>/);
+  // AppLockGate owns useSettingsState; App forwards the gate's instance into
+  // SettingsPublisher so the runtime slot/context still publish it.
+  assert.match(appRootSource, /<SettingsPublisher settings=\{settings\}>/);
+  assert.doesNotMatch(
+    readFileSync(new URL("../app/publishers/SettingsPublisher.tsx", import.meta.url), "utf8"),
+    /useSettingsState\(/,
+  );
   assert.match(appSource, /useAppStartupEffects\(\{[^}]*enabled: !isPeerSessionWindow/s);
   assert.match(appSource, /useUpdateCheck\(\{[^}]*enabled: !isPeerSessionWindow/s);
   assert.match(appSource, /if \(isPeerSessionWindow \|\| !isVaultInitialized \|\| versionBackupAttemptedRef\.current\) return;/);
@@ -155,7 +175,7 @@ test("restore-only settings do not bump the cloud sync settings version", () => 
   const settingsVersionSource = settingsSource.slice(settingsVersionIndex);
 
   assert.notEqual(settingsVersionIndex, -1);
-  assert.doesNotMatch(settingsVersionSource, /restorePreviousSession|restoreTerminalCwd/);
+  assert.doesNotMatch(settingsVersionSource, /restorePreviousSession|restoreTerminalCwd|startupLanding/);
 });
 
 test("restore previous session re-arms after cross-window settings ipc sync", () => {

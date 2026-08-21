@@ -58,7 +58,7 @@ test('disabled or absent plugin hosts do not receive terminal completion request
   const autocompleteSource = readFileSync(new URL('./TerminalAutocomplete.tsx', import.meta.url), 'utf8');
   assert.match(
     autocompleteSource,
-    /const pluginRegistry = isPluginCompletionProviderAvailable\?\.\(\) === false[\s\S]*?shouldUsePluginTerminalCompletionProvider[\s\S]*?\? null\s*\n\s*: getWindowPluginTerminalProviderRegistry\(\)/,
+    /const pluginRegistry = isPluginCompletionProviderAvailable\?\.\(\) === false[\s\S]*?options\.allowExternalProviders === false[\s\S]*?shouldUsePluginTerminalCompletionProvider[\s\S]*?\? null\s*\n\s*: getWindowPluginTerminalProviderRegistry\(\)/,
   );
   assert.match(
     terminalSource,
@@ -126,7 +126,7 @@ test('session launch paths use the same effective protocol as Provider snapshots
   );
   assert.match(
     effectsSource,
-    /else if \(effectiveTerminalProtocol === "mosh"\)[\s\S]*?sessionStarters\.startMosh\(term\)[\s\S]*?else if \(effectiveTerminalProtocol === "et"\)/,
+    /else if \(effectiveTerminalProtocol === "mosh"\)[\s\S]*?sessionStarters\.startMosh\(term, bootStartOptions\)[\s\S]*?else if \(effectiveTerminalProtocol === "et"\)/,
   );
   assert.match(
     terminalSource,

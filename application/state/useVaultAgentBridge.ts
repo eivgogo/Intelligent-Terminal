@@ -15,6 +15,11 @@ import {
   rememberKeyPassphrase,
   resolveDefaultKeyPassphraseAliases,
 } from '../defaultKeyPassphrases';
+import { getNotesActions, getNotesSnapshot, subscribeNotes } from './notesStore';
+import type {
+  VaultGroupMutationResult,
+  VaultGroupMutationState,
+} from '../../domain/vaultGroupMutation';
 
 export interface UseVaultAgentBridgeInput {
   hosts: Host[];
@@ -28,15 +33,22 @@ export interface UseVaultAgentBridgeInput {
   terminalSettings?: Pick<TerminalSettings, 'keepaliveInterval' | 'keepaliveCountMax'>;
   updateHosts: (hosts: Host[]) => void;
   updateKeys: (keys: SSHKey[]) => Promise<unknown> | unknown;
-  updateSnippets: (snippets: Snippet[]) => void;
+  updateSnippets: (
+    snippets: Snippet[] | ((current: Snippet[]) => Snippet[]),
+  ) => void;
   customGroups: string[];
   updateCustomGroups: (groups: string[]) => void;
   groupConfigs: GroupConfig[];
   updateGroupConfigs: (configs: GroupConfig[]) => void;
   updateManagedSources: (sources: ManagedSource[]) => void;
+  commitVaultGroupMutation: (
+    mutate: (current: VaultGroupMutationState) => VaultGroupMutationResult,
+  ) => Promise<VaultGroupMutationResult | { ok: false; superseded: true }>;
   updatePortForwardingRules: (rules: PortForwardingRule[]) => void;
-  notes: VaultNote[];
-  updateNotes: (notes: VaultNote[]) => void;
+  /** Optional override; defaults to notesStore so App need not subscribe to notes. */
+  notes?: VaultNote[];
+  /** Optional override; defaults to notesStore actions. */
+  updateNotes?: (notes: VaultNote[]) => void;
   startTunnel: VaultAgentApiDeps['startTunnel'];
   stopTunnel: VaultAgentApiDeps['stopTunnel'];
   stopRuleTunnels: VaultAgentApiDeps['stopRuleTunnels'];
@@ -59,13 +71,23 @@ type VaultAgentSnapshot = {
 const selectVaultAgentSnapshot = (input: UseVaultAgentBridgeInput): VaultAgentSnapshot => ({
   hosts: input.hosts,
   keys: input.keys,
-  notes: input.notes,
+  notes: input.notes ?? (getNotesSnapshot().notes as VaultNote[]),
   snippets: input.snippets,
   customGroups: input.customGroups,
   groupConfigs: input.groupConfigs,
   portForwardingRules: input.portForwardingRules,
   managedSources: input.managedSources,
 });
+
+/** Resolve notes for agent ops: live store wins when App omitted the prop. */
+export function resolveVaultAgentNotes(
+  notesOverride: VaultNote[] | undefined,
+  snapshotNotes: VaultNote[],
+): VaultNote[] {
+  return notesOverride !== undefined
+    ? snapshotNotes
+    : (getNotesSnapshot().notes as VaultNote[]);
+}
 
 export const haveSameVaultAgentSnapshot = (
   left: VaultAgentSnapshot,
@@ -102,12 +124,34 @@ export function useVaultAgentBridge(input: UseVaultAgentBridgeInput): void {
     lastSyncedVaultInputRef.current = selectedSnapshot;
   }
 
+  // Keep notes fresh without forcing App to re-render on every note edit.
+  // Write in place: this object is also `lastSyncedVaultInputRef.current`, and
+  // the agent op handlers below rely on that aliasing so their writes survive
+  // the render-time comparison above. Replacing the object would break it.
+  useEffect(() => {
+    if (input.notes !== undefined) return;
+    const syncNotes = () => {
+      vaultSnapshotRef.current.notes = getNotesSnapshot().notes as VaultNote[];
+    };
+    syncNotes();
+    return subscribeNotes(syncNotes);
+  }, [input.notes]);
+
   useEffect(() => {
     registerVaultAgentHandler(async (op, params) => {
       const current = inputRef.current;
+      const applyUpdateNotes = current.updateNotes
+        ?? getNotesActions()?.updateNotes
+        ?? ((notes: VaultNote[]) => {
+          console.warn('[useVaultAgentBridge] updateNotes unavailable');
+          void notes;
+        });
       return handleVaultAgentOp(op, params, {
         getHosts: () => vaultSnapshotRef.current.hosts,
-        getNotes: () => vaultSnapshotRef.current.notes,
+        getNotes: () => resolveVaultAgentNotes(
+          current.notes,
+          vaultSnapshotRef.current.notes,
+        ),
         getCustomGroups: () => vaultSnapshotRef.current.customGroups,
         getGroupConfigs: () => vaultSnapshotRef.current.groupConfigs,
         getPortForwardingRules: () => vaultSnapshotRef.current.portForwardingRules,
@@ -150,6 +194,17 @@ export function useVaultAgentBridge(input: UseVaultAgentBridgeInput): void {
           vaultSnapshotRef.current.hosts = hosts;
           current.updateHosts(hosts);
         },
+        commitVaultGroupMutation: async (mutate) => {
+          const result = await current.commitVaultGroupMutation(mutate);
+          if (result.ok) {
+            vaultSnapshotRef.current.customGroups = result.state.groups;
+            vaultSnapshotRef.current.groupConfigs = result.state.configs;
+            vaultSnapshotRef.current.hosts = result.state.hosts;
+            vaultSnapshotRef.current.managedSources = result.state.managedSources;
+            vaultSnapshotRef.current.snippets = result.state.snippets;
+          }
+          return result;
+        },
         saveKeyPassphrase: (keyPath, passphrase) => rememberKeyPassphrase({
           keyPath,
           passphrase,
@@ -185,11 +240,13 @@ export function useVaultAgentBridge(input: UseVaultAgentBridgeInput): void {
         }),
         updateNotes: (notes) => {
           vaultSnapshotRef.current.notes = notes;
-          current.updateNotes(notes);
+          applyUpdateNotes(notes);
         },
-        updateSnippets: (nextSnippets) => {
-          vaultSnapshotRef.current.snippets = nextSnippets;
-          current.updateSnippets(nextSnippets);
+        updateSnippets: (snippetUpdate) => {
+          vaultSnapshotRef.current.snippets = typeof snippetUpdate === 'function'
+            ? snippetUpdate(vaultSnapshotRef.current.snippets)
+            : snippetUpdate;
+          current.updateSnippets(snippetUpdate);
         },
         startTunnel: current.startTunnel,
         stopTunnel: current.stopTunnel,

@@ -5,7 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { DatabaseSync } = require("node:sqlite");
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 3;
 const MAX_SECURITY_AUDIT_DETAILS_BYTES = 16 * 1024;
 const MAX_SECURITY_AUDIT_RECORDS_PER_PLUGIN = 1_000;
 const REQUIRED_SCHEMA_COLUMNS = Object.freeze({
@@ -19,6 +19,10 @@ const REQUIRED_SCHEMA_COLUMNS = Object.freeze({
   plugin_permission_grants: ["plugin_id", "permission", "resource", "resource_kind", "declaration_hash", "granted_at"],
   plugin_secrets: ["plugin_id", "key", "secret_ref", "ciphertext", "created_at", "updated_at"],
   plugin_security_audit: ["id", "plugin_id", "event", "details_json", "created_at"],
+  // User-owned encrypted-sync sidecars: no FK cascade on package uninstall.
+  plugin_sync_sidecars: ["plugin_id", "kind", "key", "value_json", "updated_at"],
+  // Host-owned sync provider→plugin bindings (not plugin-writable secrets).
+  plugin_sync_provider_bindings: ["provider_id", "plugin_id", "created_at", "updated_at"],
 });
 
 function parseJson(text, label) {
@@ -152,11 +156,67 @@ class PluginDatabase {
           );
           CREATE INDEX plugin_security_audit_lookup
             ON plugin_security_audit(plugin_id, created_at DESC);
-          PRAGMA user_version = 1;
+          CREATE TABLE plugin_sync_sidecars (
+            plugin_id TEXT NOT NULL,
+            kind TEXT NOT NULL CHECK (kind IN ('settings', 'account_baseline', 'crdt_baseline')),
+            key TEXT NOT NULL,
+            value_json TEXT NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (plugin_id, kind, key)
+          );
+          CREATE INDEX plugin_sync_sidecars_lookup
+            ON plugin_sync_sidecars(plugin_id, kind, key);
+          CREATE TABLE plugin_sync_provider_bindings (
+            provider_id TEXT PRIMARY KEY,
+            plugin_id TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+          );
+          PRAGMA user_version = 3;
+        `);
+      });
+    } else if (version === 1) {
+      // Pre-sidecar schema-1 databases only created the original tables.
+      // Migrate in place to schema 3 with sidecar + provider binding tables.
+      this.transaction(() => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS plugin_sync_sidecars (
+            plugin_id TEXT NOT NULL,
+            kind TEXT NOT NULL CHECK (kind IN ('settings', 'account_baseline', 'crdt_baseline')),
+            key TEXT NOT NULL,
+            value_json TEXT NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (plugin_id, kind, key)
+          );
+          CREATE INDEX IF NOT EXISTS plugin_sync_sidecars_lookup
+            ON plugin_sync_sidecars(plugin_id, kind, key);
+          CREATE TABLE IF NOT EXISTS plugin_sync_provider_bindings (
+            provider_id TEXT PRIMARY KEY,
+            plugin_id TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+          );
+          PRAGMA user_version = 3;
+        `);
+      });
+    } else if (version === 2) {
+      this.transaction(() => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS plugin_sync_provider_bindings (
+            provider_id TEXT PRIMARY KEY,
+            plugin_id TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+          );
+          PRAGMA user_version = 3;
         `);
       });
     }
     this.#assertSchemaLayout();
+    // Legacy-map backfill is deferred until PackageStore.recover() has finished
+    // (hostService seeds after package initialize). Running here would promote
+    // sole map candidates before recovered manifests are visible, then skip
+    // re-evaluation because bindings already exist (Codex P2 on cded4c8a).
   }
 
   #assertSchemaLayout() {
@@ -270,6 +330,20 @@ class PluginDatabase {
         AND r.plugin_version = p.active_version
       ORDER BY p.id COLLATE BINARY
     `).all().map((row) => this.#mapPlugin(row));
+  }
+
+  /**
+   * Every installed package version (active and inactive), with parsed manifests.
+   * Used for ownership recovery when an older version still identifies a sync
+   * provider that the active manifest no longer contributes.
+   */
+  listInstalledVersions() {
+    return this.db.prepare(`
+      SELECT plugin_id, version, manifest_json, archive_sha256,
+             package_relative_path, installed_at
+      FROM plugin_versions
+      ORDER BY plugin_id COLLATE BINARY, installed_at DESC, version COLLATE BINARY
+    `).all().map((row) => this.#mapVersion(row));
   }
 
   #mapVersion(row) {
@@ -455,16 +529,17 @@ class PluginDatabase {
     return row ? parseJson(row.value_json, "setting value") : undefined;
   }
 
-  setSetting(pluginId, settingId, scope, scopeId, value) {
+  setSetting(pluginId, settingId, scope, scopeId, value, updatedAt = this.clock()) {
     const serialized = JSON.stringify(value);
     if (serialized === undefined) throw new TypeError("Plugin setting value must be JSON serializable");
+    const stamp = Number.isFinite(Number(updatedAt)) ? Number(updatedAt) : this.clock();
     this.db.prepare(`
       INSERT INTO plugin_settings(plugin_id, setting_id, scope, scope_id, value_json, updated_at)
       VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(plugin_id, setting_id, scope, scope_id) DO UPDATE SET
         value_json = excluded.value_json,
         updated_at = excluded.updated_at
-    `).run(pluginId, settingId, scope, scopeId, serialized, this.clock());
+    `).run(pluginId, settingId, scope, scopeId, serialized, stamp);
   }
 
   deleteSetting(pluginId, settingId, scope, scopeId) {
@@ -486,6 +561,107 @@ class PluginDatabase {
       value: parseJson(row.value_json, "setting value"),
       updatedAt: Number(row.updated_at),
     }));
+  }
+
+  listAllSettings() {
+    return this.db.prepare(`
+      SELECT plugin_id, setting_id, scope, scope_id, value_json, updated_at
+      FROM plugin_settings
+      ORDER BY plugin_id COLLATE BINARY, setting_id COLLATE BINARY, scope COLLATE BINARY, scope_id COLLATE BINARY
+    `).all().map((row) => ({
+      pluginId: row.plugin_id,
+      settingId: row.setting_id,
+      scope: row.scope,
+      scopeId: row.scope_id,
+      value: parseJson(row.value_json, "setting value"),
+      updatedAt: Number(row.updated_at),
+    }));
+  }
+
+  getSyncSidecar(pluginId, kind, key) {
+    const row = this.db.prepare(`
+      SELECT value_json, updated_at FROM plugin_sync_sidecars
+      WHERE plugin_id = ? AND kind = ? AND key = ?
+    `).get(pluginId, kind, key);
+    if (!row) return undefined;
+    return {
+      pluginId,
+      kind,
+      key,
+      value: parseJson(row.value_json, "sync sidecar value"),
+      updatedAt: Number(row.updated_at),
+    };
+  }
+
+  setSyncSidecar(pluginId, kind, key, value, updatedAt = this.clock()) {
+    const serialized = JSON.stringify(value);
+    if (serialized === undefined) throw new TypeError("Plugin sync sidecar value must be JSON serializable");
+    this.db.prepare(`
+      INSERT INTO plugin_sync_sidecars(plugin_id, kind, key, value_json, updated_at)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(plugin_id, kind, key) DO UPDATE SET
+        value_json = excluded.value_json,
+        updated_at = excluded.updated_at
+    `).run(pluginId, kind, key, serialized, updatedAt);
+  }
+
+  deleteSyncSidecar(pluginId, kind, key) {
+    this.db.prepare(`
+      DELETE FROM plugin_sync_sidecars
+      WHERE plugin_id = ? AND kind = ? AND key = ?
+    `).run(pluginId, kind, key);
+  }
+
+  listSyncSidecars(pluginId) {
+    return this.db.prepare(`
+      SELECT plugin_id, kind, key, value_json, updated_at
+      FROM plugin_sync_sidecars
+      WHERE plugin_id = ?
+      ORDER BY kind COLLATE BINARY, key COLLATE BINARY
+    `).all(pluginId).map((row) => ({
+      pluginId: row.plugin_id,
+      kind: row.kind,
+      key: row.key,
+      value: parseJson(row.value_json, "sync sidecar value"),
+      updatedAt: Number(row.updated_at),
+    }));
+  }
+
+  listAllSyncSidecars() {
+    return this.db.prepare(`
+      SELECT plugin_id, kind, key, value_json, updated_at
+      FROM plugin_sync_sidecars
+      ORDER BY plugin_id COLLATE BINARY, kind COLLATE BINARY, key COLLATE BINARY
+    `).all().map((row) => ({
+      pluginId: row.plugin_id,
+      kind: row.kind,
+      key: row.key,
+      value: parseJson(row.value_json, "sync sidecar value"),
+      updatedAt: Number(row.updated_at),
+    }));
+  }
+
+  replaceAllSyncSidecars(entries) {
+    this.transaction(() => {
+      this.db.prepare("DELETE FROM plugin_sync_sidecars").run();
+      const insert = this.db.prepare(`
+        INSERT INTO plugin_sync_sidecars(plugin_id, kind, key, value_json, updated_at)
+        VALUES (?, ?, ?, ?, ?)
+      `);
+      for (const entry of entries) {
+        const serialized = JSON.stringify(entry.value);
+        if (serialized === undefined) {
+          throw new TypeError("Plugin sync sidecar value must be JSON serializable");
+        }
+        insert.run(
+          entry.pluginId,
+          entry.kind,
+          entry.key,
+          serialized,
+          Number(entry.updatedAt) || this.clock(),
+        );
+      }
+    });
   }
 
   getViewState(pluginId, viewId, scopeId) {
@@ -611,6 +787,235 @@ class PluginDatabase {
   deleteSecret(pluginId, key) {
     this.db.prepare("DELETE FROM plugin_secrets WHERE plugin_id = ? AND key = ?")
       .run(pluginId, key);
+  }
+
+  /** Delete all secrets whose key equals prefix or starts with `${prefix}:`. */
+  deleteSecretsByKeyPrefix(pluginId, prefix) {
+    const result = this.db.prepare(`
+      DELETE FROM plugin_secrets
+      WHERE plugin_id = ?
+        AND (key = ? OR key LIKE ? ESCAPE '\\')
+    `).run(
+      pluginId,
+      prefix,
+      `${String(prefix).replace(/[%_\\]/g, (ch) => `\\${ch}`)}:%`,
+    );
+    return Number(result?.changes) || 0;
+  }
+
+  /** Find secret rows by exact key across all plugins (sync provider cleanup). */
+  findSecretsByKey(key) {
+    return this.db.prepare(`
+      SELECT plugin_id, key, secret_ref, ciphertext, created_at, updated_at
+      FROM plugin_secrets WHERE key = ?
+    `).all(key).map((row) => this.#mapSecret(row));
+  }
+
+  upsertSyncProviderBinding(providerId, pluginId) {
+    const now = this.clock();
+    this.db.prepare(`
+      INSERT INTO plugin_sync_provider_bindings(provider_id, plugin_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(provider_id) DO UPDATE SET
+        plugin_id = excluded.plugin_id,
+        updated_at = excluded.updated_at
+    `).run(providerId, pluginId, now, now);
+  }
+
+  getSyncProviderBinding(providerId) {
+    const row = this.db.prepare(`
+      SELECT provider_id, plugin_id, created_at, updated_at
+      FROM plugin_sync_provider_bindings WHERE provider_id = ?
+    `).get(providerId);
+    if (!row) return null;
+    return {
+      providerId: row.provider_id,
+      pluginId: row.plugin_id,
+      createdAt: Number(row.created_at),
+      updatedAt: Number(row.updated_at),
+    };
+  }
+
+  deleteSyncProviderBinding(providerId) {
+    const result = this.db.prepare(`
+      DELETE FROM plugin_sync_provider_bindings WHERE provider_id = ?
+    `).run(providerId);
+    return Number(result?.changes) || 0;
+  }
+
+  /** Distinct plugin ids that own secrets with key === prefix or key LIKE prefix:%. */
+  listPluginIdsWithSecretKeyPrefix(prefix) {
+    const escaped = String(prefix).replace(/[%_\\]/g, (ch) => `\\${ch}`);
+    return this.db.prepare(`
+      SELECT DISTINCT plugin_id
+      FROM plugin_secrets
+      WHERE key = ? OR key LIKE ? ESCAPE '\\'
+    `).all(prefix, `${escaped}:%`).map((row) => row.plugin_id);
+  }
+
+  /**
+   * Promote leftover sync-provider-map:* secret rows into the host-owned binding
+   * table. Idempotent.
+   *
+   * Host map keys under this prefix are migration markers from an intermediate
+   * build (pluginId-namespaced provider ids only). After a successful promote,
+   * those map rows are deleted so constructor-time backfill cannot resurrect a
+   * binding after the user disconnects/unbinds. Multiple plugins may hold map
+   * rows for the same provider (parent + nested id): group by provider, never
+   * overwrite an existing host binding (including empty-plugin_id unbind
+   * tombstones). Among candidates, only plugins that still hold sync-credential*
+   * secrets are eligible. Auto-bind only when exactly one distinct
+   * credential-backed candidate exists; if several credential-backed plugins
+   * map the same provider (e.g. com.example and com.example.sync both hold
+   * credentials), skip entirely — longest pluginId is not a reliable owner
+   * signal (the shorter parent can be the legitimate owner). Map-only leftovers
+   * never invent ownership (validation only requires
+   * providerId.startsWith(pluginId + ".")).
+   */
+  backfillSyncProviderBindingsFromLegacySecrets() {
+    const legacyPrefix = "sync-provider-map:";
+    const escaped = legacyPrefix.replace(/[%_\\]/g, (ch) => `\\${ch}`);
+    const legacyRows = this.db.prepare(`
+      SELECT plugin_id, key
+      FROM plugin_secrets
+      WHERE key LIKE ? ESCAPE '\\'
+    `).all(`${escaped}%`);
+    /** @type {Map<string, Array<{ pluginId: string, key: string }>>} */
+    const byProvider = new Map();
+    for (const row of legacyRows) {
+      const pluginId = row.plugin_id;
+      const key = row.key;
+      if (typeof pluginId !== "string" || typeof key !== "string") continue;
+      if (!key.startsWith(legacyPrefix)) continue;
+      const providerId = key.slice(legacyPrefix.length);
+      if (!providerId || providerId.includes("\0")) continue;
+      if (!providerId.startsWith(`${pluginId}.`)) {
+        continue;
+      }
+      const list = byProvider.get(providerId) || [];
+      list.push({ pluginId, key });
+      byProvider.set(providerId, list);
+    }
+    // Credential presence is the signal for real ownership. A longer nested map
+    // row without credentials must not steal bind from a parent that still owns
+    // sync-credential* secrets for the provider namespace.
+    const credentialOwners = new Set(
+      this.listPluginIdsWithSecretKeyPrefix("sync-credential")
+        .filter((id) => typeof id === "string" && id.length > 0),
+    );
+    // Same single-provider guard as live backfill: one shared sync-credential*
+    // row must not seed bindings for every historical map provider under that
+    // plugin (disconnecting a stale provider would wipe the live credentials).
+    // Count both legacy map rows and installed-manifest sync providers so a
+    // stale map cannot promote when the live manifest also declares another
+    // provider under the same credential owner (Codex P2 on 8ae60205).
+    /** @type {Map<string, Set<string>>} */
+    const providersByCredentialOwner = new Map();
+    for (const [providerId, candidates] of byProvider) {
+      for (const c of candidates) {
+        if (!credentialOwners.has(c.pluginId)) continue;
+        const set = providersByCredentialOwner.get(c.pluginId) || new Set();
+        set.add(providerId);
+        providersByCredentialOwner.set(c.pluginId, set);
+      }
+    }
+    try {
+      const versions = typeof this.listInstalledVersions === "function"
+        ? this.listInstalledVersions()
+        : [];
+      for (const version of versions) {
+        const pluginId = version?.pluginId;
+        if (typeof pluginId !== "string" || !credentialOwners.has(pluginId)) continue;
+        for (const provider of version.manifest?.contributes?.providers ?? []) {
+          if (provider?.kind !== "sync") continue;
+          if (typeof provider.id !== "string" || provider.id.length < 1) continue;
+          const set = providersByCredentialOwner.get(pluginId) || new Set();
+          set.add(provider.id);
+          providersByCredentialOwner.set(pluginId, set);
+        }
+      }
+    } catch {
+      /* ignore catalog probe failures */
+    }
+    let promoted = 0;
+    for (const [providerId, candidates] of byProvider) {
+      // Any host row means a prior decision: active bind or explicit unbind
+      // tombstone (empty plugin_id). Never resurrect from leftover map secrets.
+      if (this.getSyncProviderBinding(providerId)) {
+        continue;
+      }
+      // Only credential-backed map candidates may win; map-only leftovers stay
+      // unbound rather than inventing ownership from namespace length alone.
+      // Multiple distinct credential-backed candidates is ambiguous (parent vs
+      // nested can both hold credentials for the same provider namespace) — skip
+      // entirely rather than picking longest pluginId.
+      const uniqueCredentialOwners = [
+        ...new Set(
+          candidates
+            .filter((c) => credentialOwners.has(c.pluginId))
+            .map((c) => c.pluginId),
+        ),
+      ];
+      if (uniqueCredentialOwners.length !== 1) {
+        continue;
+      }
+      const chosenOwner = uniqueCredentialOwners[0];
+      if ((providersByCredentialOwner.get(chosenOwner)?.size ?? 0) !== 1) {
+        continue;
+      }
+      // Constructor-time map promote runs before hostService's installed-manifest
+      // conflict check. Skip when another installed package would also claim this
+      // provider (live nested plugin without credentials yet) so we do not bind
+      // a legacy parent that later disconnect cannot clear (Codex P2 on 5bc1b60d).
+      let hasManifestConflict = false;
+      try {
+        const versions = typeof this.listInstalledVersions === "function"
+          ? this.listInstalledVersions()
+          : [];
+        for (const version of versions) {
+          const pluginId = version?.pluginId;
+          if (typeof pluginId !== "string" || pluginId === chosenOwner) continue;
+          for (const provider of version.manifest?.contributes?.providers ?? []) {
+            if (provider?.kind !== "sync") continue;
+            if (provider.id === providerId) {
+              hasManifestConflict = true;
+              break;
+            }
+          }
+          if (hasManifestConflict) break;
+        }
+      } catch {
+        /* ignore catalog probe failures */
+      }
+      if (hasManifestConflict) {
+        continue;
+      }
+      this.upsertSyncProviderBinding(providerId, chosenOwner);
+      // Consume legacy map markers for this provider so a later unbind + reopen
+      // cannot re-promote from leftover secrets. Only delete namespaced map keys
+      // we accepted as candidates (not arbitrary plugin secrets). Consume all
+      // candidate maps (including map-only losers) once a credential-backed
+      // owner is bound, so orphans cannot re-run later.
+      for (const candidate of candidates) {
+        this.deleteSecret(candidate.pluginId, candidate.key);
+      }
+      promoted += 1;
+    }
+    return promoted;
+  }
+
+  /**
+   * Credential-row prefix inference is intentionally not used.
+   *
+   * A shorter parent plugin id (e.g. com.example with sync-credential rows) can
+   * namespace-prefix a provider owned by a different/removed plugin
+   * (com.example.backup.sync). Falling back to that parent would let
+   * syncDeleteSecrets wipe unrelated credentials. Ownership must come from the
+   * host binding table (including rows promoted by
+   * backfillSyncProviderBindingsFromLegacySecrets) or a live contribution.
+   */
+  inferPluginIdForSyncProvider(_providerId) {
+    return undefined;
   }
 
   recordSecurityAudit(pluginId, event, details) {

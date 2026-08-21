@@ -2,7 +2,8 @@
 
 let bridgesRegistered = false;
 let cloudSyncSessionPassword = null;
-const { readClipboardFiles, readClipboardImage } = require("../bridges/clipboardFiles.cjs");
+const { readClipboardFiles, readClipboardImage, hasClipboardImage } = require("../bridges/clipboardFiles.cjs");
+const { registerSystemNotificationHandlers } = require("../bridges/systemNotification.cjs");
 
 const excludedFigSpecPrefixes = ["aws", "gcloud", "az"];
 
@@ -40,6 +41,25 @@ function waitForApplicationSpawn(child, requireCleanLauncherExit = false) {
     child.once("error", onError);
     if (requireCleanLauncherExit) child.once("close", onClose);
   });
+}
+
+function createCloudSyncSessionPasswordReader({
+  getAppLockController,
+  getCachedPassword,
+  setCachedPassword,
+  readPersistedPassword,
+}) {
+  return async function readCloudSyncSessionPassword() {
+    const controller = getAppLockController?.();
+    if (controller?.getRuntimeState?.()?.locked === true) {
+      return null;
+    }
+    const cached = getCachedPassword();
+    if (cached) return cached;
+    const persisted = readPersistedPassword();
+    setCachedPassword(persisted);
+    return persisted;
+  };
 }
 
 function createBridgeRegistrar(context) {
@@ -87,6 +107,7 @@ function createBridgeRegistrar(context) {
     getHttpNetworkProxyBridge,
     getWindowManager,
     getVaultBackupBridge,
+    getAppLockController,
     isPathInside,
   } = context;
 
@@ -116,6 +137,7 @@ function createBridgeRegistrar(context) {
     const aiBridge = getAiBridge();
     const httpNetworkProxyBridge = getHttpNetworkProxyBridge();
     const vaultBackupBridge = getVaultBackupBridge();
+    const appLockController = getAppLockController?.();
     const {
       createTrustedPluginBridgeSender,
       registerPluginBridge,
@@ -188,7 +210,9 @@ function createBridgeRegistrar(context) {
       terminalProviderService: pluginHostService?.terminalProviderService,
       terminalDataPipelineService: pluginHostService?.terminalDataPipelineService,
       extensionProviderService: pluginHostService?.extensionProviderService,
+      syncSidecarService: pluginHostService?.syncSidecarService,
       credentialResolver: pluginHostService?.credentialResolver,
+      secretStore: pluginHostService?.secretStore,
       getTerminalWorkerManager: () => terminalWorkerManager,
       selectImporterFile: async (event) => {
         const owner = electronModule.BrowserWindow.fromWebContents(event.sender);
@@ -415,7 +439,10 @@ function createBridgeRegistrar(context) {
     transferBridge.init(deps);
     terminalBridge.init(deps);
     fileWatcherBridge.init(deps);
-    globalShortcutBridge.init(deps);
+    globalShortcutBridge.init({
+      ...deps,
+      getAppLockController,
+    });
     aiBridge.init(deps);
     crashLogBridge.init(deps);
   
@@ -471,6 +498,7 @@ function createBridgeRegistrar(context) {
     httpNetworkProxyBridge.registerHandlers(ipcMain, electronModule);
     crashLogBridge.registerHandlers(ipcMain);
     vaultBackupBridge.registerHandlers(ipcMain, electronModule);
+    appLockController?.registerHandlers?.(ipcMain);
   
     // ZMODEM cancel handler
     ipcMain.on("netcatty:zmodem:cancel", (event, payload) => {
@@ -534,7 +562,7 @@ function createBridgeRegistrar(context) {
         session.zmodemSentry.queueDragDropUpload({
           filePaths,
           remoteNames,
-          uploadCommand: uploadCommand || "rz\r",
+          uploadCommand: uploadCommand || "rz -y\r",
           tempPaths,
         });
         return { success: true };
@@ -682,10 +710,15 @@ function createBridgeRegistrar(context) {
           registerAsMainWindow: false,
           onRegisterBridge: registerBridges,
         });
-        try {
-          win.setTitle(title);
-        } catch {
-          // ignore
+        const appLockController = getAppLockController?.();
+        if (typeof appLockController?.setWindowTitle === "function") {
+          appLockController.setWindowTitle(win, title);
+        } else {
+          try {
+            win.setTitle(title);
+          } catch {
+            // ignore
+          }
         }
         const delivery = await getWindowManager().sendWhenRendererReady(
           win,
@@ -762,12 +795,14 @@ function createBridgeRegistrar(context) {
       return true;
     });
   
-    ipcMain.handle("netcatty:cloudSync:session:getPassword", async () => {
-      if (cloudSyncSessionPassword) return cloudSyncSessionPassword;
-      const persisted = readPersistedCloudSyncPassword();
-      cloudSyncSessionPassword = persisted;
-      return persisted;
-    });
+    ipcMain.handle("netcatty:cloudSync:session:getPassword", createCloudSyncSessionPasswordReader({
+      getAppLockController,
+      getCachedPassword: () => cloudSyncSessionPassword,
+      setCachedPassword: (password) => {
+        cloudSyncSessionPassword = password;
+      },
+      readPersistedPassword: readPersistedCloudSyncPassword,
+    }));
   
     ipcMain.handle("netcatty:cloudSync:session:clearPassword", async () => {
       cloudSyncSessionPassword = null;
@@ -845,6 +880,9 @@ function createBridgeRegistrar(context) {
       },
     );
   
+    // OSC 9/777/99 desktop notifications (Codex, iTerm2, kitty, rxvt)
+    registerSystemNotificationHandlers(ipcMain, { electronModule, BrowserWindow });
+
     // Clipboard helpers for renderer fallback paths (e.g. Monaco paste in Electron)
     ipcMain.handle("netcatty:clipboard:readText", async () => {
       try {
@@ -870,6 +908,10 @@ function createBridgeRegistrar(context) {
 
     ipcMain.handle("netcatty:clipboard:readImage", async () => {
       return readClipboardImage({ clipboard, fsImpl: fs, tempDirBridge });
+    });
+
+    ipcMain.handle("netcatty:clipboard:hasImage", async () => {
+      return hasClipboardImage({ clipboard });
     });
   
     // Select an application from system file picker
@@ -1066,6 +1108,8 @@ function createBridgeRegistrar(context) {
       };
   
       try {
+        // Omit totalBytes so transferBridge STATs the remote size. Explicit 0
+        // means a planned empty snapshot and skips the remote body (#2787).
         const payload = {
           transferId,
           sourcePath: remotePath,
@@ -1074,7 +1118,6 @@ function createBridgeRegistrar(context) {
           targetType: "local",
           sourceSftpId: sftpId,
           sourceEncoding: encoding,
-          totalBytes: 0,
         };
   
         const result = terminalWorkerManager
@@ -1135,6 +1178,7 @@ function createBridgeRegistrar(context) {
 }
 
 module.exports = {
+  createCloudSyncSessionPasswordReader,
   createBridgeRegistrar,
   filterExcludedFigSpecs,
   isExcludedFigSpec,

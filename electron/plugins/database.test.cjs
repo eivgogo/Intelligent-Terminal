@@ -59,6 +59,127 @@ test("obsolete unpublished v1 layouts fail with an explicit reset instruction", 
   );
 });
 
+test("complete schema-1 databases migrate in place to schema 3 with sidecar and binding tables", (context) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-plugin-v1-migrate-"));
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, "plugins.sqlite");
+  const v1 = new DatabaseSync(file);
+  // Full pre-sidecar schema-1 layout (all tables except plugin_sync_sidecars).
+  v1.exec(`
+    PRAGMA foreign_keys = ON;
+    CREATE TABLE plugins (
+      id TEXT PRIMARY KEY,
+      enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+      active_version TEXT,
+      installed_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE plugin_versions (
+      plugin_id TEXT NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
+      version TEXT NOT NULL,
+      manifest_json TEXT NOT NULL,
+      archive_sha256 TEXT NOT NULL,
+      package_relative_path TEXT NOT NULL,
+      installed_at INTEGER NOT NULL,
+      PRIMARY KEY (plugin_id, version)
+    );
+    CREATE TABLE plugin_runtime_state (
+      plugin_id TEXT NOT NULL,
+      plugin_version TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'stopped',
+      runtime_kind TEXT,
+      last_error TEXT,
+      quarantined_at INTEGER,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (plugin_id, plugin_version),
+      FOREIGN KEY (plugin_id, plugin_version)
+        REFERENCES plugin_versions(plugin_id, version) ON DELETE CASCADE
+    );
+    CREATE TABLE plugin_crashes (
+      plugin_id TEXT NOT NULL,
+      plugin_version TEXT NOT NULL,
+      crashed_at INTEGER NOT NULL,
+      FOREIGN KEY (plugin_id, plugin_version)
+        REFERENCES plugin_versions(plugin_id, version) ON DELETE CASCADE
+    );
+    CREATE TABLE plugin_kv (
+      plugin_id TEXT NOT NULL REFERENCES plugins(id) ON DELETE CASCADE,
+      key TEXT NOT NULL,
+      value_json TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (plugin_id, key)
+    );
+    CREATE TABLE plugin_settings (
+      plugin_id TEXT NOT NULL,
+      setting_id TEXT NOT NULL,
+      scope TEXT NOT NULL CHECK (scope IN ('application', 'workspace', 'host', 'session', 'device')),
+      scope_id TEXT NOT NULL,
+      value_json TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (plugin_id, setting_id, scope, scope_id)
+    );
+    CREATE TABLE plugin_view_state (
+      plugin_id TEXT NOT NULL,
+      view_id TEXT NOT NULL,
+      scope_id TEXT NOT NULL,
+      state_json TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (plugin_id, view_id, scope_id)
+    );
+    CREATE TABLE plugin_permission_grants (
+      plugin_id TEXT NOT NULL,
+      permission TEXT NOT NULL,
+      resource TEXT NOT NULL,
+      resource_kind TEXT NOT NULL CHECK (resource_kind IN ('exact', 'directory')),
+      declaration_hash TEXT NOT NULL,
+      granted_at INTEGER NOT NULL,
+      PRIMARY KEY (plugin_id, permission, resource)
+    );
+    CREATE TABLE plugin_secrets (
+      plugin_id TEXT NOT NULL,
+      key TEXT NOT NULL,
+      secret_ref TEXT NOT NULL UNIQUE,
+      ciphertext BLOB NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (plugin_id, key)
+    );
+    CREATE TABLE plugin_security_audit (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      plugin_id TEXT NOT NULL,
+      event TEXT NOT NULL,
+      details_json TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    PRAGMA user_version = 1;
+  `);
+  v1.prepare(
+    "INSERT INTO plugins(id, enabled, active_version, installed_at, updated_at) VALUES (?, 1, ?, 1, 1)",
+  ).run("com.example.v1", "1.0.0");
+  v1.close();
+
+  const database = new PluginDatabase(file);
+  assert.equal(database.db.prepare("PRAGMA user_version").get().user_version, SCHEMA_VERSION);
+  assert.deepEqual(
+    database.db.prepare("PRAGMA table_info(plugin_sync_sidecars)").all().map(({ name }) => name),
+    ["plugin_id", "kind", "key", "value_json", "updated_at"],
+  );
+  assert.deepEqual(
+    database.db.prepare("PRAGMA table_info(plugin_sync_provider_bindings)").all().map(({ name }) => name),
+    ["provider_id", "plugin_id", "created_at", "updated_at"],
+  );
+  // Existing rows survive the in-place migration.
+  assert.equal(database.db.prepare("SELECT id FROM plugins").get().id, "com.example.v1");
+  database.setSyncSidecar("com.example.v1", "settings", "theme\0application\0application", "dark", 2);
+  assert.equal(
+    database.getSyncSidecar("com.example.v1", "settings", "theme\0application\0application")?.value,
+    "dark",
+  );
+  database.upsertSyncProviderBinding("com.example.v1.sync", "com.example.v1");
+  assert.equal(database.getSyncProviderBinding("com.example.v1.sync")?.pluginId, "com.example.v1");
+  database.close();
+});
+
 test("initial schema scopes runtime and crash state to immutable plugin versions", (context) => {
   const database = createDatabase(context);
   assert.deepEqual(
@@ -93,8 +214,17 @@ test("initial schema scopes runtime and crash state to immutable plugin versions
     database.db.prepare("PRAGMA table_info(plugin_view_state)").all().map(({ name }) => name),
     ["plugin_id", "view_id", "scope_id", "state_json", "updated_at"],
   );
+  assert.deepEqual(
+    database.db.prepare("PRAGMA table_info(plugin_sync_sidecars)").all().map(({ name }) => name),
+    ["plugin_id", "kind", "key", "value_json", "updated_at"],
+  );
+  assert.deepEqual(
+    database.db.prepare("PRAGMA table_info(plugin_sync_provider_bindings)").all().map(({ name }) => name),
+    ["provider_id", "plugin_id", "created_at", "updated_at"],
+  );
   assert.deepEqual(database.db.prepare("PRAGMA foreign_key_list(plugin_settings)").all(), []);
   assert.deepEqual(database.db.prepare("PRAGMA foreign_key_list(plugin_view_state)").all(), []);
+  assert.deepEqual(database.db.prepare("PRAGMA foreign_key_list(plugin_sync_sidecars)").all(), []);
   database.close();
 });
 
@@ -342,5 +472,364 @@ test("activating a new version resets runtime quarantine without forgiving the s
   });
   assert.equal(database.getActivePlugin(first.id).runtime.status, "quarantined");
   assert.equal(database.getActivePlugin(first.id).runtime.quarantinedAt, 1_000);
+  database.close();
+});
+
+test("schema upgrade backfills bindings from legacy sync-provider-map secrets", (context) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-plugin-v2-backfill-"));
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, "plugins.sqlite");
+  // Bootstrap a schema-2 DB then open with PluginDatabase to migrate to v3.
+  const seed = new PluginDatabase(file);
+  // Force downgrade-like state: empty bindings + a legacy map secret row.
+  seed.db.exec("DELETE FROM plugin_sync_provider_bindings");
+  const now = Date.now();
+  seed.db.prepare(`
+    INSERT INTO plugin_secrets(plugin_id, key, secret_ref, ciphertext, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    "com.example",
+    "sync-provider-map:com.example.sync",
+    "ref-legacy-map",
+    Buffer.from("sealed"),
+    now,
+    now,
+  );
+  seed.db.prepare(`
+    INSERT INTO plugin_secrets(plugin_id, key, secret_ref, ciphertext, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    "com.example",
+    "sync-credential",
+    "ref-cred",
+    Buffer.from("sealed-cred"),
+    now,
+    now,
+  );
+  seed.close();
+
+  const database = new PluginDatabase(file);
+  // Constructor no longer promotes; hostService seeds after package recovery.
+  assert.equal(database.backfillSyncProviderBindingsFromLegacySecrets(), 1);
+  assert.equal(database.getSyncProviderBinding("com.example.sync")?.pluginId, "com.example");
+  // Consumed map marker so later unbind + reopen cannot re-promote.
+  assert.equal(
+    database.getSecretByKey("com.example", "sync-provider-map:com.example.sync"),
+    null,
+    "promoted map markers must be deleted",
+  );
+  assert.ok(database.getSecretByKey("com.example", "sync-credential"));
+  database.close();
+});
+
+test("legacy map backfill does not overwrite an existing host binding", (context) => {
+  const database = createDatabase(context);
+  const now = Date.now();
+  // Correct owner already bound.
+  database.upsertSyncProviderBinding("com.example.sync.foo", "com.example.sync");
+  // Stale parent leftover map secret that would steal ownership if upserted.
+  database.db.prepare(`
+    INSERT INTO plugin_secrets(plugin_id, key, secret_ref, ciphertext, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    "com.example",
+    "sync-provider-map:com.example.sync.foo",
+    "ref-stale-parent-map",
+    Buffer.from("sealed"),
+    now,
+    now,
+  );
+  const promoted = database.backfillSyncProviderBindingsFromLegacySecrets();
+  assert.equal(promoted, 0, "must not promote over an existing binding");
+  assert.equal(
+    database.getSyncProviderBinding("com.example.sync.foo")?.pluginId,
+    "com.example.sync",
+    "existing binding must be preserved",
+  );
+  // Skipped promote leaves non-winning map rows in place (only winners are consumed).
+  assert.ok(
+    database.getSecretByKey("com.example", "sync-provider-map:com.example.sync.foo"),
+    "non-promoted leftover map rows stay until unbind consumes them",
+  );
+  database.close();
+});
+
+test("legacy map backfill skips when no candidate holds sync credentials", (context) => {
+  const database = createDatabase(context);
+  const now = Date.now();
+  // Map-only leftovers: longest namespace must not invent ownership without
+  // sync-credential* evidence (parent may be the true owner later).
+  for (const [pluginId, key] of [
+    ["com.example", "sync-provider-map:com.example.sync.foo"],
+    ["com.example.sync", "sync-provider-map:com.example.sync.foo"],
+  ]) {
+    database.db.prepare(`
+      INSERT INTO plugin_secrets(plugin_id, key, secret_ref, ciphertext, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(pluginId, key, `ref-${pluginId}`, Buffer.from("sealed"), now, now);
+  }
+  const promoted = database.backfillSyncProviderBindingsFromLegacySecrets();
+  assert.equal(promoted, 0, "map-only candidates must not bind without credentials");
+  assert.equal(database.getSyncProviderBinding("com.example.sync.foo"), null);
+  // Unbound maps stay so a later credential-backed promote or live put can resolve.
+  assert.ok(database.getSecretByKey("com.example", "sync-provider-map:com.example.sync.foo"));
+  assert.ok(database.getSecretByKey("com.example.sync", "sync-provider-map:com.example.sync.foo"));
+  database.close();
+});
+
+test("legacy map backfill binds sole credential-backed owner when maps conflict", (context) => {
+  const database = createDatabase(context);
+  const now = Date.now();
+  // Parent has leftover map only; nested owner still holds credentials.
+  for (const [pluginId, key, ciphertext] of [
+    ["com.example", "sync-provider-map:com.example.sync.foo", "map-parent"],
+    ["com.example.sync", "sync-provider-map:com.example.sync.foo", "map-nested"],
+    ["com.example.sync", "sync-credential", "real-secret"],
+  ]) {
+    database.db.prepare(`
+      INSERT INTO plugin_secrets(plugin_id, key, secret_ref, ciphertext, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(pluginId, key, `ref-${pluginId}-${key}`, Buffer.from(ciphertext), now, now);
+  }
+  const promoted = database.backfillSyncProviderBindingsFromLegacySecrets();
+  assert.equal(promoted, 1);
+  assert.equal(
+    database.getSyncProviderBinding("com.example.sync.foo")?.pluginId,
+    "com.example.sync",
+    "sole credential-backed owner must win over map-only parent",
+  );
+  // All candidate map markers for the promoted provider are consumed.
+  assert.equal(database.getSecretByKey("com.example", "sync-provider-map:com.example.sync.foo"), null);
+  assert.equal(database.getSecretByKey("com.example.sync", "sync-provider-map:com.example.sync.foo"), null);
+  assert.ok(database.getSecretByKey("com.example.sync", "sync-credential"));
+  database.close();
+});
+
+test("legacy map backfill does not let longest map override credential-backed parent", (context) => {
+  const database = createDatabase(context);
+  const now = Date.now();
+  // True owner is the shorter parent (still has credentials). Nested plugin has
+  // only a stale map row - longest map alone must not steal the binding.
+  for (const [pluginId, key, ciphertext] of [
+    ["com.example", "sync-provider-map:com.example.sync.foo", "map-parent"],
+    ["com.example", "sync-credential", "parent-secret"],
+    ["com.example.sync", "sync-provider-map:com.example.sync.foo", "map-nested"],
+  ]) {
+    database.db.prepare(`
+      INSERT INTO plugin_secrets(plugin_id, key, secret_ref, ciphertext, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(pluginId, key, `ref-${pluginId}-${key}`, Buffer.from(ciphertext), now, now);
+  }
+  const promoted = database.backfillSyncProviderBindingsFromLegacySecrets();
+  assert.equal(promoted, 1);
+  assert.equal(
+    database.getSyncProviderBinding("com.example.sync.foo")?.pluginId,
+    "com.example",
+    "credential-backed parent must win over longer map-only nested id",
+  );
+  assert.equal(database.getSecretByKey("com.example", "sync-provider-map:com.example.sync.foo"), null);
+  assert.equal(database.getSecretByKey("com.example.sync", "sync-provider-map:com.example.sync.foo"), null);
+  assert.ok(database.getSecretByKey("com.example", "sync-credential"));
+  database.close();
+});
+
+test("legacy map backfill skips when multiple credential-backed candidates exist", (context) => {
+  const database = createDatabase(context);
+  const now = Date.now();
+  // Both parent and nested hold credentials + map for the same provider.
+  // Longest pluginId is not a reliable owner signal — the shorter parent may
+  // be the legitimate owner — so leave unbound rather than guessing.
+  for (const [pluginId, key, ciphertext] of [
+    ["com.example", "sync-provider-map:com.example.sync.foo", "map-parent"],
+    ["com.example", "sync-credential", "parent-secret"],
+    ["com.example.sync", "sync-provider-map:com.example.sync.foo", "map-nested"],
+    ["com.example.sync", "sync-credential", "nested-secret"],
+  ]) {
+    database.db.prepare(`
+      INSERT INTO plugin_secrets(plugin_id, key, secret_ref, ciphertext, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(pluginId, key, `ref-${pluginId}-${key}`, Buffer.from(ciphertext), now, now);
+  }
+  const promoted = database.backfillSyncProviderBindingsFromLegacySecrets();
+  assert.equal(promoted, 0, "ambiguous credential-backed candidates must not auto-bind");
+  assert.equal(database.getSyncProviderBinding("com.example.sync.foo"), null);
+  // Maps stay so a live put / explicit bind can resolve ownership later.
+  assert.ok(database.getSecretByKey("com.example", "sync-provider-map:com.example.sync.foo"));
+  assert.ok(database.getSecretByKey("com.example.sync", "sync-provider-map:com.example.sync.foo"));
+  assert.ok(database.getSecretByKey("com.example", "sync-credential"));
+  assert.ok(database.getSecretByKey("com.example.sync", "sync-credential"));
+  database.close();
+});
+
+test("legacy map backfill still consumes maps after unbind tombstone blocks promote", (context) => {
+  // Verify prior fix: explicit unbind tombstone blocks re-promote; maps may remain
+  // until unbind/delete paths consume them (backfill itself skips and does not
+  // delete when promote is blocked).
+  const database = createDatabase(context);
+  const now = Date.now();
+  database.upsertSyncProviderBinding("com.example.sync.foo", "");
+  database.db.prepare(`
+    INSERT INTO plugin_secrets(plugin_id, key, secret_ref, ciphertext, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    "com.example",
+    "sync-provider-map:com.example.sync.foo",
+    "ref-tombstone-map",
+    Buffer.from("sealed"),
+    now,
+    now,
+  );
+  database.db.prepare(`
+    INSERT INTO plugin_secrets(plugin_id, key, secret_ref, ciphertext, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    "com.example",
+    "sync-credential",
+    "ref-cred",
+    Buffer.from("secret"),
+    now,
+    now,
+  );
+  assert.equal(database.backfillSyncProviderBindingsFromLegacySecrets(), 0);
+  assert.equal(
+    database.getSyncProviderBinding("com.example.sync.foo")?.pluginId,
+    "",
+    "unbind tombstone must block credential-backed map promote",
+  );
+  // Map row stays; disconnect/unbind consumption is responsible for cleanup.
+  assert.ok(
+    database.getSecretByKey("com.example", "sync-provider-map:com.example.sync.foo"),
+    "skipped promote leaves map markers for unbind to consume",
+  );
+  database.close();
+});
+
+test("legacy map backfill deletes promoted map markers so unbind cannot resurrect", (context) => {
+  const database = createDatabase(context);
+  const now = Date.now();
+  database.db.prepare(`
+    INSERT INTO plugin_secrets(plugin_id, key, secret_ref, ciphertext, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    "com.example",
+    "sync-provider-map:com.example.custom",
+    "ref-plugin-owned",
+    Buffer.from("plugin-owned-payload"),
+    now,
+    now,
+  );
+  // Credential evidence required to promote; non-map secrets must survive map consume.
+  database.db.prepare(`
+    INSERT INTO plugin_secrets(plugin_id, key, secret_ref, ciphertext, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    "com.example",
+    "sync-credential",
+    "ref-cred-keep",
+    Buffer.from("cred"),
+    now,
+    now,
+  );
+  assert.equal(database.backfillSyncProviderBindingsFromLegacySecrets(), 1);
+  assert.equal(database.getSyncProviderBinding("com.example.custom")?.pluginId, "com.example");
+  assert.equal(
+    database.getSecretByKey("com.example", "sync-provider-map:com.example.custom"),
+    null,
+    "promoted map markers must be deleted to stop post-unbind resurrection",
+  );
+  assert.ok(database.getSecretByKey("com.example", "sync-credential"));
+  database.close();
+});
+
+test("legacy map backfill does not resurrect after explicit unbind tombstone", (context) => {
+  const database = createDatabase(context);
+  const now = Date.now();
+  // Pre-seed a leftover map after an explicit empty-plugin_id unbind tombstone.
+  database.upsertSyncProviderBinding("com.example.sync", "");
+  database.db.prepare(`
+    INSERT INTO plugin_secrets(plugin_id, key, secret_ref, ciphertext, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    "com.example",
+    "sync-provider-map:com.example.sync",
+    "ref-leftover-map",
+    Buffer.from("sealed"),
+    now,
+    now,
+  );
+  assert.equal(database.backfillSyncProviderBindingsFromLegacySecrets(), 0);
+  assert.equal(
+    database.getSyncProviderBinding("com.example.sync")?.pluginId,
+    "",
+    "empty-plugin_id unbind tombstone must block re-promotion",
+  );
+  database.close();
+});
+
+
+test("listInstalledVersions includes inactive package manifests", (context) => {
+  const database = createDatabase(context);
+  const now = Date.now();
+  // Install two versions under one plugin id via raw rows if helpers are heavy.
+  database.db.prepare(`
+    INSERT INTO plugins(id, enabled, active_version, installed_at, updated_at)
+    VALUES (?, 1, ?, ?, ?)
+  `).run("com.example", "2.0.0", now, now);
+  for (const [version, providerId] of [
+    ["1.0.0", "com.example.legacy-sync"],
+    ["2.0.0", "com.example.sync"],
+  ]) {
+    database.db.prepare(`
+      INSERT INTO plugin_versions(
+        plugin_id, version, manifest_json, archive_sha256, package_relative_path, installed_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      "com.example",
+      version,
+      JSON.stringify({
+        id: "com.example",
+        version,
+        contributes: { providers: [{ id: providerId, kind: "sync", label: providerId }] },
+      }),
+      "a".repeat(64),
+      `com.example/${version}/package`,
+      now,
+    );
+  }
+  const versions = database.listInstalledVersions();
+  assert.equal(versions.length, 2);
+  const providerIds = new Set();
+  for (const v of versions) {
+    for (const p of v.manifest?.contributes?.providers ?? []) {
+      if (p.kind === "sync") providerIds.add(p.id);
+    }
+  }
+  assert.ok(providerIds.has("com.example.legacy-sync"));
+  assert.ok(providerIds.has("com.example.sync"));
+  // Active list only has 2.0.0
+  assert.equal(database.listPlugins()[0]?.activeVersion, "2.0.0");
+  database.close();
+});
+
+test("inferPluginIdForSyncProvider never guesses from credential key prefixes", (context) => {
+  const database = createDatabase(context);
+  const now = Date.now();
+  for (const [pluginId, key] of [
+    ["com.example", "sync-credential"],
+    ["com.example.backup", "sync-credential"],
+    ["com.other", "sync-credential"],
+    ["com.example.sync", "sync-credential"],
+  ]) {
+    database.db.prepare(`
+      INSERT INTO plugin_secrets(plugin_id, key, secret_ref, ciphertext, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(pluginId, key, `ref-${pluginId}`, Buffer.from("x"), now, now);
+  }
+  // Parent prefix alone is not enough: a removed plugin may have owned
+  // com.example.backup.sync while only com.example still has credentials.
+  assert.equal(database.inferPluginIdForSyncProvider("com.example.backup.sync"), undefined);
+  assert.equal(database.inferPluginIdForSyncProvider("com.example.sync"), undefined);
+  assert.equal(database.inferPluginIdForSyncProvider("com.other.cloud"), undefined);
+  assert.equal(database.inferPluginIdForSyncProvider("com.missing.sync"), undefined);
   database.close();
 });

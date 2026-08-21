@@ -214,7 +214,9 @@ function createStreamEntry(sessionId, opts) {
     format,
     isRaw,
     isHtml,
-    renderer: isRaw ? null : createTerminalTextRenderer(),
+    renderer: isRaw ? null : createTerminalTextRenderer({
+      alternateScreenActive: opts.alternateScreenActive === true,
+    }),
     renderedTimestampPrefixer: !isRaw && opts.timestampsEnabled
       ? createRenderedLineTimestampPrefixer({ timestampProvider: opts.timestampProvider })
       : null,
@@ -266,6 +268,7 @@ function startStreamToFile(sessionId, opts = {}) {
       timestampsEnabled: opts.timestampsEnabled,
       timestampProvider: opts.timestampProvider,
       stopRequiresToken: opts.stopRequiresToken,
+      alternateScreenActive: opts.alternateScreenActive === true,
     });
     if (typeof initialLine === "string" && initialLine.length > 0) {
       appendData(sessionId, initialLine);
@@ -484,6 +487,20 @@ function hasStream(sessionId) {
 }
 
 /**
+ * Absolute paths of files currently open by active log streams.
+ * Used by clear-all so it never unlinks a live write target.
+ * @returns {string[]}
+ */
+function getActiveLogPaths() {
+  const paths = [];
+  for (const entry of activeStreams.values()) {
+    if (!entry?.filePath || entry.disabled) continue;
+    paths.push(path.resolve(entry.filePath));
+  }
+  return paths;
+}
+
+/**
  * Cleanup all active streams (called on app quit).
  */
 async function cleanupAll() {
@@ -500,5 +517,6 @@ module.exports = {
   registerProgrammaticCommandLogRewrite,
   stopStream,
   hasStream,
+  getActiveLogPaths,
   cleanupAll,
 };

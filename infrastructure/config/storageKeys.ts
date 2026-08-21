@@ -30,6 +30,8 @@ export const STORAGE_KEY_HOTKEY_RECORDING = 'netcatty_hotkey_recording_v1';
 export const STORAGE_KEY_CUSTOM_CSS = 'netcatty_custom_css_v1';
 export const STORAGE_KEY_UI_LANGUAGE = 'netcatty_ui_language_v1';
 export const STORAGE_KEY_PORT_FORWARDING = 'netcatty_port_forwarding_v1';
+/** Width (px) shared by port forwarding edit, wizard, and host picker panels. */
+export const STORAGE_KEY_PORT_FORWARDING_PANEL_WIDTH = 'netcatty_port_forwarding_panel_width_v1';
 export const STORAGE_KEY_PF_PREFER_FORM_MODE = 'netcatty_pf_prefer_form_mode_v1';
 export const STORAGE_KEY_PF_VIEW_MODE = 'netcatty_pf_view_mode_v1';
 export const STORAGE_KEY_KNOWN_HOSTS = 'netcatty_known_hosts_v1';
@@ -40,6 +42,8 @@ export const STORAGE_KEY_CONNECTION_LOG_TERMINAL_DATA = 'netcatty_connection_log
 export const STORAGE_KEY_SESSION_RESTORE = 'netcatty_session_restore_v1';
 export const STORAGE_KEY_RESTORE_PREVIOUS_SESSION = 'netcatty_restore_previous_session_v1';
 export const STORAGE_KEY_RESTORE_TERMINAL_CWD = 'netcatty_restore_terminal_cwd_v1';
+/** Cold-start landing: vault (home) or local terminal when nothing is restored. */
+export const STORAGE_KEY_STARTUP_LANDING = 'netcatty_startup_landing_v1';
 export const STORAGE_KEY_IDENTITIES = 'netcatty_identities_v1';
 export const STORAGE_KEY_PROXY_PROFILES = 'netcatty_proxy_profiles_v1';
 export const STORAGE_KEY_VAULT_HOSTS_VIEW_MODE = 'netcatty_vault_hosts_view_mode_v1';
@@ -134,6 +138,8 @@ export const STORAGE_KEY_TERMINAL_HOST_TREE_TOOLBAR_LAYOUT =
   'netcatty_terminal_host_tree_toolbar_layout_v1';
 /** Side-panel tab strip: show / collapse / hide + order (supersedes order-only key when present). */
 export const STORAGE_KEY_TERMINAL_SIDE_PANEL_TAB_LAYOUT = 'netcatty_terminal_side_panel_tab_layout_v1';
+/** System Manager sub-tabs (Overview / Processes / …): show / collapse / hide + order. */
+export const STORAGE_KEY_SYSTEM_MANAGER_TAB_LAYOUT = 'netcatty_system_manager_tab_layout_v1';
 export const STORAGE_KEY_SFTP_TRANSFER_PANEL_HEIGHT = 'netcatty_sftp_transfer_panel_height_v1';
 export const STORAGE_KEY_SFTP_TRANSFER_CHILD_NAME_WIDTH = 'netcatty_sftp_transfer_child_name_width_v1';
 
@@ -183,6 +189,8 @@ export const STORAGE_KEY_AI_SESSIONS = 'netcatty_ai_sessions_v1';
 export const STORAGE_KEY_AI_ACTIVE_SESSION_MAP = 'netcatty_ai_active_session_map_v1';
 export const STORAGE_KEY_AI_AGENT_MODEL_MAP = 'netcatty_ai_agent_model_map_v1';
 export const STORAGE_KEY_AI_AGENT_PROVIDER_MAP = 'netcatty_ai_agent_provider_map_v1';
+export const STORAGE_KEY_AI_AGENT_THINKING_MAP = 'netcatty_ai_agent_thinking_map_v1';
+export const STORAGE_KEY_AI_COMPOSER_MODEL_PREFS = 'netcatty_ai_composer_model_prefs_v1';
 export const STORAGE_KEY_AI_WEB_SEARCH = 'netcatty_ai_web_search_v1';
 export const STORAGE_KEY_AI_QUICK_MESSAGES = 'netcatty_ai_quick_messages_v1';
 /** Confirm-mode permission grant memory (capability + session/command patterns). */
@@ -200,9 +208,20 @@ export const STORAGE_KEY_AI_EXTERNAL_MCP_FOCUS_ON_HOST_OPEN = 'netcatty_ai_exter
 export const STORAGE_KEY_AI_SESSION_IDLE_TIMEOUT_MINUTES = 'netcatty_ai_session_idle_timeout_minutes_v1';
 /** External MCP: whether host_open sessions stay hidden from the tab bar (default false). */
 export const STORAGE_KEY_AI_EXTERNAL_MCP_SILENT_SESSIONS = 'netcatty_ai_external_mcp_silent_sessions_v1';
+/** AI panel diagnostic hide list (comma-separated part names). */
+export const STORAGE_KEY_AI_PANEL_DIAGNOSTIC_HIDE = 'netcatty.aiDebug.hide';
+/** AI panel React profiler toggle. */
+export const STORAGE_KEY_AI_PANEL_DIAGNOSTIC_PROFILE = 'netcatty.aiDebug.profile';
 
 // SFTP Transfer Concurrency
 export const STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY = 'netcatty_sftp_transfer_concurrency_v1';
+/**
+ * Legacy key only. Folder full-tree pre-scan was removed; values are ignored
+ * so old localStorage / sync payloads do not resurrect a live setting.
+ */
+export const STORAGE_KEY_SFTP_FOLDER_PRESCAN = 'netcatty_sftp_folder_prescan_v1';
+/** Skip files when target size + mtime already match the source (rsync-like). */
+export const STORAGE_KEY_SFTP_SKIP_UNCHANGED = 'netcatty_sftp_skip_unchanged_v1';
 /**
  * @deprecated Legacy transfer-pool idle TTL. No longer read; SSH keep-alive uses
  * STORAGE_KEY_SSH_TRANSPORT_IDLE_TTL_MS. Kept so old localStorage entries are ignored safely.
@@ -225,6 +244,9 @@ export const STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR = 'netcatty_show_host_tree_sideb
 
 // Shortcuts: Cmd/Ctrl+[1...9] and Ctrl+Tab skip pinned Vault/SFTP tabs
 export const STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS = 'netcatty_shell_only_tab_number_shortcuts_v1';
+
+// Shortcuts: show 1...9 badge on tabs that match number switch shortcuts
+export const STORAGE_KEY_SHOW_TAB_NUMBER_BADGES = 'netcatty_show_tab_number_badges_v1';
 
 // Shortcuts: disable terminal font zoom shortcuts
 export const STORAGE_KEY_DISABLE_TERMINAL_FONT_ZOOM = 'netcatty_disable_terminal_font_zoom_v1';
@@ -255,6 +277,12 @@ export const STORAGE_KEY_PF_RECONNECT_CANCEL = '__netcatty_pf_cancel_reconnect';
 
 // Default SSH Key Passphrases (for ~/.ssh keys not managed in the vault)
 export const STORAGE_KEY_DEFAULT_KEY_PASSPHRASES = 'netcatty_default_key_passphrases_v1';
+
+// Plugin sync sidecars / availability. Literals MUST match domain/sync
+// SYNC_STORAGE_KEYS (PLUGIN_SIDECARS_* / AVAILABLE_PLUGIN_SYNC_PROVIDERS).
+export const STORAGE_KEY_PLUGIN_SIDECARS_LAST_KNOWN = 'netcatty_plugin_sidecars_last_known_v1';
+export const STORAGE_KEY_PLUGIN_SIDECARS_PENDING_REMOTE = 'netcatty_plugin_sidecars_pending_remote_v1';
+export const STORAGE_KEY_AVAILABLE_PLUGIN_SYNC_PROVIDERS = 'netcatty_available_plugin_sync_providers_v1';
 
 // Debug Flags (no _v1 suffix — developer-only, not persisted data)
 export const STORAGE_KEY_DEBUG_HOTKEYS = 'debug.hotkeys';

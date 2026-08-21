@@ -51,6 +51,7 @@ const {
 } = require("./ai/shellUtils.cjs");
 
 const { detectClaudeAuthPresence, expandHomePath } = require("./ai/claudeAuth.cjs");
+const { extractSseDataPayload } = require("./ai/sseDataLine.cjs");
 
 const CLAUDE_AUTH_HELP_MESSAGE =
   "Claude Code has no usable authentication. Open Settings -> AI -> Claude Code and set a Config directory (point it at a folder where you've run `claude` login) or add an ANTHROPIC_API_KEY under Environment variables. Alternatively, run `claude` in a terminal to log in.";
@@ -520,6 +521,13 @@ function safeReadJson(filePath) {
   }
 }
 
+// Hard cap for a single model HTTP stream. Matches Catty's 30-minute floor so
+// long reasoning can finish; runaway bodies are still bounded by time + size.
+const DEFAULT_AI_STREAM_TOTAL_TIMEOUT_MS = 30 * 60 * 1000;
+// Abort only after this much silence. Thinking tokens re-arm the timer, so an
+// active reasoning stream is not cut off at two minutes (issue #3051).
+const DEFAULT_AI_STREAM_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
+
 /**
  * Start a streaming HTTP request. The returned promise resolves as soon as
  * the HTTP response headers arrive (with { statusCode, statusText }) so the
@@ -553,22 +561,49 @@ function raceAgainstAbort(promise, signal) {
   });
 }
 
+/**
+ * Node's http.request falls back to `Transfer-Encoding: chunked` when no
+ * Content-Length header is present. Some HTTP proxies mishandle large chunked
+ * request bodies — Xray's HTTP inbound drops the connection above ~8KB, which
+ * surfaces to the renderer as an opaque "socket hang up". The body is always a
+ * fully-buffered string here, so send an explicit Content-Length instead.
+ */
+function withContentLength(headers, body) {
+  if (body == null || body === "") return headers;
+  const alreadySet = Object.keys(headers).some(
+    (k) => k.toLowerCase() === "content-length",
+  );
+  if (alreadySet) return headers;
+  return { ...headers, "content-length": String(Buffer.byteLength(body)) };
+}
+
 async function streamRequest(url, options, event, requestId, skipTLS) {
   const parsedUrl = new URL(url);
   // Register cancellation before any await so Stop during PAC/proxy lookup works.
   const controller = new AbortController();
-  const totalTimeoutMs = Math.max(1, Number(options.totalTimeoutMs) || 120_000);
+  const totalTimeoutMs = Math.max(1, Number(options.totalTimeoutMs) || DEFAULT_AI_STREAM_TOTAL_TIMEOUT_MS);
+  const idleTimeoutMs = Math.max(1, Number(options.idleTimeoutMs) || DEFAULT_AI_STREAM_IDLE_TIMEOUT_MS);
   const maxErrorBodyBytes = Math.max(1, Number(options.maxErrorBodyBytes) || 64 * 1024);
   let lifecycleFinished = false;
+  let idleTimer;
   const finishLifecycle = () => {
     if (lifecycleFinished) return;
     lifecycleFinished = true;
     clearTimeout(totalTimer);
+    clearTimeout(idleTimer);
     activeStreams.delete(requestId);
+  };
+  const noteStreamActivity = () => {
+    if (lifecycleFinished) return;
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      controller.abort(new Error(`AI stream idle deadline exceeded after ${idleTimeoutMs} ms`));
+    }, idleTimeoutMs);
   };
   const totalTimer = setTimeout(() => {
     controller.abort(new Error(`AI stream total deadline exceeded after ${totalTimeoutMs} ms`));
   }, totalTimeoutMs);
+  noteStreamActivity();
   activeStreams.set(requestId, controller);
   if (controller.signal.aborted) {
     finishLifecycle();
@@ -651,7 +686,7 @@ async function streamRequest(url, options, event, requestId, skipTLS) {
 
     const reqOpts = {
         method: options.method || "POST",
-        headers: options.headers || {},
+        headers: withContentLength(options.headers || {}, options.body),
         timeout: 120000, // 2 min connection timeout
     };
     if (skipTLS && isHttps) reqOpts.rejectUnauthorized = false;
@@ -664,6 +699,7 @@ async function streamRequest(url, options, event, requestId, skipTLS) {
           res.destroy?.();
           return;
         }
+        noteStreamActivity();
         // Decode the response as one continuous UTF-8 stream. Calling
         // Buffer#toString() on each network chunk corrupts multi-byte
         // characters when a chunk boundary falls in the middle of one.
@@ -677,6 +713,7 @@ async function streamRequest(url, options, event, requestId, skipTLS) {
           let errorBodyBytes = 0;
           res.on("data", (chunk) => {
             if (streamFinished) return;
+            noteStreamActivity();
             const text = chunk.toString();
             errorBodyBytes += Buffer.byteLength(text);
             if (errorBodyBytes > maxErrorBodyBytes) {
@@ -717,6 +754,7 @@ async function streamRequest(url, options, event, requestId, skipTLS) {
         const MAX_BUFFER_SIZE = 10 * 1024 * 1024; // 10MB safety limit
 
         res.on("data", (chunk) => {
+          noteStreamActivity();
           const previousBufferLength = buffer.length;
           buffer += chunk.toString();
           // Guard against unbounded buffer growth
@@ -731,14 +769,11 @@ async function streamRequest(url, options, event, requestId, skipTLS) {
             const line = buffer.slice(consumedUntil, newlineIndex);
             consumedUntil = newlineIndex + 1;
             searchFrom = consumedUntil;
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-
-            // Forward raw SSE data line to renderer
-            if (trimmed.startsWith("data: ")) {
+            const payload = extractSseDataPayload(line);
+            if (payload != null) {
               safeSend(event.sender, "netcatty:ai:stream:data", {
                 requestId,
-                data: trimmed.slice(6),
+                data: payload,
               });
             }
           }
@@ -748,10 +783,11 @@ async function streamRequest(url, options, event, requestId, skipTLS) {
         res.on("end", () => {
           if (streamFinished) return;
           // Flush any remaining buffer
-          if (buffer.trim().startsWith("data: ")) {
+          const trailingPayload = extractSseDataPayload(buffer);
+          if (trailingPayload != null) {
             safeSend(event.sender, "netcatty:ai:stream:data", {
               requestId,
-              data: buffer.trim().slice(6),
+              data: trailingPayload,
             });
           }
           safeSend(event.sender, "netcatty:ai:stream:end", { requestId });
@@ -800,6 +836,7 @@ function createHandlerContext(ipcMain) {
     fs,
     existsSync,
     mcpServerBridge,
+    withContentLength,
     getExternalMcpController: () => externalMcpController,
     getCliLauncherPath,
     TOOL_CLI_DISCOVERY_ENV_VAR,
@@ -987,5 +1024,7 @@ module.exports = {
   buildExternalAgentContextualPrompt,
   _streamRequestForTests: streamRequest,
   _getActiveStreamCountForTests: () => activeStreams.size,
+  DEFAULT_AI_STREAM_TOTAL_TIMEOUT_MS,
+  DEFAULT_AI_STREAM_IDLE_TIMEOUT_MS,
   getExternalMcpController: () => externalMcpController,
 };

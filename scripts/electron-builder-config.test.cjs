@@ -91,8 +91,35 @@ test("asarUnpack keeps Cursor SDK runtime deps unpacked", () => {
   assert.ok(config.asarUnpack.includes("node_modules/sqlite3/**/*"));
 });
 
-test("beforePack installs missing Cursor SDK platform runtime packages", () => {
+test("beforePack installs missing Cursor SDK packages and builds Windows Hello helper", () => {
   assert.equal(config.beforePack, "./scripts/beforePackCursorSdk.cjs");
+});
+
+test("Windows packaging includes the Windows Hello helper executable", () => {
+  assert.ok(
+    Array.isArray(config.win.extraResources),
+    "win.extraResources must be an array",
+  );
+  assert.ok(
+    config.win.extraResources.some((entry) => (
+      entry &&
+      entry.from === "electron/bridges/windowsHelloHelper/build/${arch}/NetcattyWindowsHello.exe" &&
+      entry.to === "windowsHello/NetcattyWindowsHello.exe"
+    )),
+    "Windows package must include the Windows Hello helper executable for the target arch",
+  );
+  assert.ok(
+    config.files.includes("!electron/bridges/windowsHelloHelper/build/**/*"),
+    "Windows Hello build output must not also be copied into app.asar",
+  );
+});
+
+test("Windows package arch is controlled by pack script CLI flags", () => {
+  assert.deepEqual(
+    config.win.target,
+    ["nsis", "portable", "zip"],
+    "win.target must not hard-code x64 and arm64 or pack:win-x64 will still invoke arm64 beforePack hooks",
+  );
 });
 
 test("packaged app declares ssh, telnet, and jms URL protocol support", () => {
@@ -125,6 +152,37 @@ test("build.files trims release-only dependency payloads", () => {
     "!node_modules/**/benchmarks/**/*",
   ]) {
     assert.ok(files.includes(glob), `build.files must exclude release-only payload: ${glob}`);
+  }
+});
+
+test("build.files excludes Vite-bundled renderer-only packages", () => {
+  const files = config.files;
+  for (const glob of [
+    "!node_modules/react/**/*",
+    "!node_modules/react-dom/**/*",
+    "!node_modules/@radix-ui/**/*",
+    "!node_modules/ai/**/*",
+    "!node_modules/@ai-sdk/**/*",
+    "!node_modules/@mdxeditor/**/*",
+    "!node_modules/streamdown/**/*",
+    "!node_modules/@streamdown/**/*",
+    "!node_modules/@tanstack/react-virtual/**/*",
+    "!node_modules/pinyin-pro/**/*",
+    "!node_modules/re2js/**/*",
+    "!node_modules/@eslint-community/regexpp/**/*",
+    "!node_modules/clsx/**/*",
+    "!node_modules/tailwind-merge/**/*",
+    "!node_modules/use-stick-to-bottom/**/*",
+    "!node_modules/lexical/**/*",
+    "!node_modules/@lexical/**/*",
+    "!node_modules/@codemirror/**/*",
+    "!node_modules/shiki/**/*",
+    "!node_modules/@shiki/**/*",
+  ]) {
+    assert.ok(
+      files.includes(glob),
+      `build.files must exclude Vite-bundled renderer package: ${glob}`,
+    );
   }
 });
 
@@ -193,10 +251,17 @@ test("rpm packaging uses gzip compression for RHEL-family package hosts", () => 
   );
 });
 
+test("Windows package arch is controlled by pack script CLI flags", () => {
+  assert.deepEqual(
+    config.win.target,
+    ["nsis", "portable", "zip"],
+    "win.target must not hard-code x64 and arm64 or pack:win-x64 will still emit broken arm64 installers",
+  );
+});
+
 test("windows packaging includes a zip archive target", () => {
-  const winTargets = config.win.target.map((entry) => entry.target);
   assert.ok(
-    winTargets.includes("zip"),
+    config.win.target.includes("zip"),
     "windows package builds must publish a zip archive for no-install environments",
   );
 });
@@ -244,13 +309,15 @@ test("windows zip follows the requested build architecture", () => {
     Platform.WINDOWS,
   );
 
-  assert.ok(
-    targetsByArch.get(Arch.x64)?.includes("zip"),
-    "pack:win-x64 must publish an x64 zip archive",
+  assert.deepEqual(
+    targetsByArch.get(Arch.x64)?.slice().sort(),
+    ["nsis", "portable", "zip"].sort(),
+    "pack:win-x64 must publish x64 nsis, portable, and zip",
   );
-  assert.ok(
-    !targetsByArch.get(Arch.arm64)?.includes("zip"),
-    "pack:win-x64 must not publish an arm64 zip archive without arm64 bundled binaries",
+  assert.equal(
+    targetsByArch.has(Arch.arm64),
+    false,
+    "pack:win-x64 must not publish arm64 nsis/portable/zip without a dedicated arm64 job",
   );
 });
 

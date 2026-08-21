@@ -23,6 +23,12 @@ export type LinkModifier = 'none' | 'ctrl' | 'alt' | 'meta';
 export type TerminalEmulationType = 'xterm-256color' | 'xterm-16color' | 'xterm';
 export type DynamicTabTitleMode = 'off' | 'agent' | 'all';
 /**
+ * What the terminal host info bar shows as its primary title (#2708).
+ * - address: user@host:port when available (historical default)
+ * - label: vault host label / display name
+ */
+export type HostInfoBarTitleMode = 'address' | 'label';
+/**
  * How to assist when a sudo/su password prompt appears (#2156).
  * - off: no assist
  * - hint: ghost "press Enter" fill of the host session password
@@ -35,6 +41,13 @@ export type PasswordPromptAssistMode = 'off' | 'hint' | 'picker';
  * - global: commands recorded across all hosts
  */
 export type AutocompleteHistoryScope = 'host' | 'global';
+/**
+ * When remote programs emit OSC 9 / 777 / 99 desktop-notification sequences.
+ * - off: ignore
+ * - unfocused: notify only when this session is not the focused pane or the window is in the background
+ * - always: honor every notification (default; matches iTerm2 / Ghostty / Codex osc9)
+ */
+export type OscNotificationMode = 'off' | 'unfocused' | 'always';
 
 export const DEFAULT_TERMINAL_WORD_SEPARATORS = ' ()[]{}\'"';
 
@@ -129,6 +142,8 @@ export interface TerminalSettings {
 
   // Server Stats Display (Linux only)
   showHostInfoBar: boolean; // Show host identity and server stats above the terminal
+  /** Primary title in the host info bar: connection address or vault label. */
+  hostInfoBarTitleMode: HostInfoBarTitleMode;
   showServerStats: boolean; // Show CPU/Memory/Disk in terminal statusbar
   serverStatsRefreshInterval: number; // Seconds between stats refresh (default: 30)
 
@@ -140,6 +155,11 @@ export interface TerminalSettings {
 
   // Paste
   disableBracketedPaste: boolean; // Disable bracketed paste mode (avoid ^[[200~ artifacts)
+
+  // When true, pasting while the clipboard holds an image automatically runs
+  // the "Upload clipboard image" action (SFTP upload + remote-path paste)
+  // instead of falling back to a text paste. Remote SSH sessions only.
+  autoUploadClipboardImageOnPaste: boolean;
 
   // Shell `clear` command behavior — controls whether CSI 3 J (erase scrollback)
   // from the shell is honored. Default true matches POSIX/ncurses since 2013:
@@ -160,6 +180,9 @@ export interface TerminalSettings {
 
   // Clipboard
   osc52Clipboard: 'off' | 'write-only' | 'read-write' | 'prompt'; // OSC-52 clipboard access: off, write-only (default), read-write, or prompt on read
+
+  // Desktop notifications from OSC 9 / OSC 777 notify / OSC 99
+  oscNotifications: OscNotificationMode;
 
   // Tab titles
   dynamicTabTitleMode: DynamicTabTitleMode; // off, agent-only, or all shell-reported titles
@@ -331,6 +354,11 @@ const isDynamicTabTitleMode = (value: unknown): value is DynamicTabTitleMode => 
   value === 'all'
 );
 
+const isHostInfoBarTitleMode = (value: unknown): value is HostInfoBarTitleMode => (
+  value === 'address' ||
+  value === 'label'
+);
+
 const isPasswordPromptAssistMode = (value: unknown): value is PasswordPromptAssistMode => (
   value === 'off' ||
   value === 'hint' ||
@@ -340,6 +368,12 @@ const isPasswordPromptAssistMode = (value: unknown): value is PasswordPromptAssi
 const isAutocompleteHistoryScope = (value: unknown): value is AutocompleteHistoryScope => (
   value === 'host' ||
   value === 'global'
+);
+
+const isOscNotificationMode = (value: unknown): value is OscNotificationMode => (
+  value === 'off' ||
+  value === 'unfocused' ||
+  value === 'always'
 );
 
 export const normalizeTerminalSettings = (
@@ -362,12 +396,18 @@ export const normalizeTerminalSettings = (
     dynamicTabTitleMode: isDynamicTabTitleMode(settings?.dynamicTabTitleMode)
       ? settings.dynamicTabTitleMode
       : DEFAULT_TERMINAL_SETTINGS.dynamicTabTitleMode,
+    hostInfoBarTitleMode: isHostInfoBarTitleMode(settings?.hostInfoBarTitleMode)
+      ? settings.hostInfoBarTitleMode
+      : DEFAULT_TERMINAL_SETTINGS.hostInfoBarTitleMode,
     passwordPromptAssist: isPasswordPromptAssistMode(settings?.passwordPromptAssist)
       ? settings.passwordPromptAssist
       : DEFAULT_TERMINAL_SETTINGS.passwordPromptAssist,
     autocompleteHistoryScope: isAutocompleteHistoryScope(settings?.autocompleteHistoryScope)
       ? settings.autocompleteHistoryScope
       : DEFAULT_TERMINAL_SETTINGS.autocompleteHistoryScope,
+    oscNotifications: isOscNotificationMode(settings?.oscNotifications)
+      ? settings.oscNotifications
+      : DEFAULT_TERMINAL_SETTINGS.oscNotifications,
   };
 
   // Migrate legacy 'canvas' renderer to 'dom' (canvas removed in xterm.js 6.0)
@@ -375,9 +415,16 @@ export const normalizeTerminalSettings = (
     ? 'dom' as const
     : mergedSettings.rendererType;
 
+  // Persisted installs wrote the old default (8) into localStorage with no UI
+  // to change it; bump that sentinel to the new default while keeping custom caps.
+  const autocompleteMaxSuggestions = mergedSettings.autocompleteMaxSuggestions === 8
+    ? DEFAULT_TERMINAL_SETTINGS.autocompleteMaxSuggestions
+    : mergedSettings.autocompleteMaxSuggestions;
+
   return {
     ...mergedSettings,
     rendererType,
+    autocompleteMaxSuggestions,
     hibernateHiddenTabsDelaySec: normalizeHibernateHiddenTabsDelaySec(
       mergedSettings.hibernateHiddenTabsDelaySec,
     ),
@@ -459,6 +506,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   x11Display: '', // Empty = use DISPLAY/default local X server
   moshClientPath: '', // Legacy mosh-client override; normal UI uses bundled mosh-client
   showHostInfoBar: true, // Preserve the existing host information bar by default
+  hostInfoBarTitleMode: 'address', // Historical default: prefer user@host:port
   showServerStats: true, // Show server stats by default
   serverStatsRefreshInterval: 5, // Refresh every 5 seconds
   systemManagerProcessRefreshInterval: 3,
@@ -466,10 +514,12 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   systemManagerDockerListRefreshInterval: 5,
   systemManagerDockerStatsRefreshInterval: 3,
   disableBracketedPaste: false, // Bracketed paste enabled by default
+  autoUploadClipboardImageOnPaste: false, // Opt-in: image in clipboard auto-uploads on paste (remote sessions)
   clearWipesScrollback: true, // POSIX-standard: shell `clear` clears scrollback too
   preserveSelectionOnInput: false, // Opt-in: keep selection alive when typing
   forcePromptNewLine: false, // Opt-in: keep the next shell prompt visually separated from unterminated final output lines
   osc52Clipboard: 'write-only', // OSC-52: allow remote programs to write clipboard by default
+  oscNotifications: 'always', // Honor OSC 9/777/99 desktop notifications by default
   dynamicTabTitleMode: 'agent',
   rendererType: 'auto', // Auto-detect best renderer based on hardware
   hibernateHiddenTabs: false,
@@ -494,7 +544,7 @@ const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   autocompletePopupMenu: true, // Popup menu enabled by default
   autocompleteDebounceMs: 100, // 100ms debounce
   autocompleteMinChars: 1, // Start suggesting after 1 character
-  autocompleteMaxSuggestions: 8, // Show up to 8 suggestions
+  autocompleteMaxSuggestions: 50, // Show up to 50 suggestions (popup scrolls)
   autocompleteHistoryScope: 'host', // Per-host history suggestions by default (#2595)
   passwordPromptAssist: 'hint', // Historical sudo confirm-to-fill; picker is opt-in (#2156)
 };

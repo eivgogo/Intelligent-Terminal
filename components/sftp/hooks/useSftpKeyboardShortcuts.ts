@@ -10,12 +10,13 @@ import type { MutableRefObject } from "react";
 import { KeyBinding, matchesKeyBinding } from "../../../domain/models";
 import { getParentPath, joinPath, resolveSftpWindowsPathOptions } from "../../../application/state/sftp/utils";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
-import { sftpClipboardStore, SftpClipboardFile } from "./useSftpClipboard";
-import { sftpFocusStore } from "./useSftpFocusedPane";
-import { sftpDialogActionStore } from "./useSftpDialogAction";
-import { sftpTreeSelectionStore } from "./useSftpTreeSelectionStore";
+import { sftpClipboardStore, SftpClipboardFile } from "../../../application/state/sftp/sftpClipboardStore";
+import { sftpFocusStore } from "../../../application/state/sftp/sftpFocusStore";
+import { sftpDialogActionStore } from "../../../application/state/sftp/sftpDialogActionStore";
+import { sftpTreeSelectionStore } from "../../../application/state/sftp/sftpTreeSelectionStore";
 import { sftpListOrderStore } from "./useSftpListOrderStore";
 import { sftpPaneViewModeStore } from "../../../application/state/sftp/sftpPaneViewModeStore";
+import { sftpFilterFocusStore } from "../../../application/state/sftp/sftpFilterFocusStore";
 import { keepOnlyPaneSelections } from "./selectionScope";
 import type { SftpStateApi } from "../../../application/state/useSftpState";
 import type { UploadEndpointPin } from "../../../application/state/sftp/uploadTargetPin";
@@ -23,6 +24,7 @@ import { filterHiddenFiles, isNavigableDirectory } from "../utils";
 import type { SftpFileEntry } from "../../../types";
 import { extractDropEntries, type DropEntry } from "../../../lib/sftpFileUtils";
 import { toast } from "../../ui/toast";
+import { isAppLockOverlayActive } from '../../../infrastructure/appLockOverlayDom';
 import {
   createDropEntriesFromClipboardFiles,
   getSftpClipboardSystemTextPaths,
@@ -463,7 +465,7 @@ export const useSftpKeyboardShortcuts = ({
       const hasClipboardItems = (dataTransfer?.items?.length ?? 0) > 0;
       // webkitGetAsEntry must be invoked synchronously during the paste event.
       const dropEntriesPromise = dataTransfer?.items?.length
-        ? extractDropEntries(dataTransfer)
+        ? extractDropEntries(dataTransfer).catch(() => [])
         : null;
       const pastedFileSnapshot = dataTransfer?.files?.length
         ? Array.from(dataTransfer.files).filter((file) => file.name)
@@ -545,15 +547,39 @@ export const useSftpKeyboardShortcuts = ({
       // even if the user has disabled global/custom hotkeys.
       if (!isActive) return;
 
-      // Skip if focus is on an input element
       const target = e.target as HTMLElement;
-      if (isEditableShortcutTarget(target)) {
-        return;
-      }
 
       // Skip when a dialog or overlay is open to prevent SFTP shortcuts from
       // firing while interacting with unrelated dialogs (e.g. settings, confirm).
       if (hasOpenDialog()) {
+        return;
+      }
+
+      const isEditableTarget = isEditableShortcutTarget(target);
+      const isSftpSearchTarget = Boolean(target.closest?.(
+        '[data-section="terminal-sftp-path"], [data-section="terminal-sftp-filter-bar"]',
+      ));
+      if (isEditableTarget && !isSftpSearchTarget) {
+        return;
+      }
+
+      if (hotkeyScheme !== "disabled") {
+        const isMac = hotkeyScheme === "mac";
+        const searchBinding = keyBindings.find((binding) => binding.action === "searchTerminal");
+        const searchKey = searchBinding ? (isMac ? searchBinding.mac : searchBinding.pc) : null;
+        if (searchKey && matchesKeyBinding(e, searchKey, isMac)) {
+          const { pane } = getFocusedPane();
+          if (!pane?.connection) return;
+
+          e.preventDefault();
+          e.stopPropagation();
+          sftpFilterFocusStore.request(pane.id);
+          return;
+        }
+      }
+
+      // Path/filter inputs may handle search above, but no other SFTP shortcut.
+      if (isEditableTarget) {
         return;
       }
 
@@ -992,8 +1018,12 @@ export const useSftpKeyboardShortcuts = ({
   useEffect(() => {
     if (!isActive) return;
     // Use capture phase to intercept before other handlers
-    window.addEventListener("keydown", handleKeyDown, true);
-    return () => window.removeEventListener("keydown", handleKeyDown, true);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (isAppLockOverlayActive()) return;
+      handleKeyDown(event);
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [handleKeyDown, isActive]);
 
   useEffect(() => {

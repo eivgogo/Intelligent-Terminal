@@ -43,13 +43,17 @@ const {
   applySyncPayload,
   buildLocalVaultPayload,
   buildCloudSyncPayload,
+  withPluginSyncSidecars,
   buildSyncPayload,
   hasCloudSyncEntityData,
   hasMeaningfulCloudSyncData,
+  hasMeaningfulSyncData,
   shouldPromptCloudVaultRecovery,
   SYNCABLE_SETTING_STORAGE_KEYS,
 } = await import("./syncPayload.ts");
 const storageKeys = await import("../infrastructure/config/storageKeys.ts");
+const { SYNC_STORAGE_KEYS } = await import("../domain/sync.ts");
+const { localStorageAdapter } = await import("../infrastructure/persistence/localStorageAdapter.ts");
 
 const knownHost = (id = "kh-1"): KnownHost => ({
   id,
@@ -135,6 +139,56 @@ test("sync payloads preserve opaque plugin hosts without requiring the plugin to
   assert.deepEqual(imported?.hosts, [pluginHost]);
 });
 
+test("applySyncPayload preserves host startup command and appearance overrides (#2757)", async () => {
+  const host = {
+    id: "host-1",
+    label: "Prod",
+    hostname: "prod.example",
+    username: "root",
+    port: 22,
+    protocol: "ssh" as const,
+    tags: [],
+    os: "linux" as const,
+    startupCommand: "tmux attach || tmux",
+    startupCommandRunMode: "lineDelay" as const,
+    theme: "solarized-dark",
+    themeOverride: true,
+  };
+  const groupConfigs = [
+    {
+      path: "prod",
+      startupCommand: "cd /srv && exec bash -l",
+      theme: "solarized-dark",
+      themeOverride: true,
+    },
+  ];
+  const payload = buildSyncPayload({
+    ...vault(),
+    hosts: [host],
+    groupConfigs,
+  });
+
+  assert.equal(payload.hosts[0]?.startupCommand, "tmux attach || tmux");
+  assert.equal(payload.hosts[0]?.theme, "solarized-dark");
+  assert.equal(payload.hosts[0]?.themeOverride, true);
+  assert.equal(payload.groupConfigs?.[0]?.startupCommand, "cd /srv && exec bash -l");
+
+  let imported: Record<string, unknown> | null = null;
+  await applySyncPayload(payload, {
+    importVaultData: (json) => { imported = JSON.parse(json); },
+  });
+
+  const importedHosts = imported?.hosts as typeof payload.hosts;
+  assert.equal(importedHosts?.[0]?.startupCommand, "tmux attach || tmux");
+  assert.equal(importedHosts?.[0]?.startupCommandRunMode, "lineDelay");
+  assert.equal(importedHosts?.[0]?.theme, "solarized-dark");
+  assert.equal(importedHosts?.[0]?.themeOverride, true);
+  assert.equal(
+    (imported?.groupConfigs as typeof groupConfigs)?.[0]?.startupCommand,
+    "cd /srv && exec bash -l",
+  );
+});
+
 test("buildCloudSyncPayload includes notes and note groups", async () => {
   const payload = await buildCloudSyncPayload({
     ...vault([]),
@@ -158,13 +212,13 @@ test("buildSyncPayload includes AI configuration settings", () => {
     id: "openai-main",
     providerId: "openai",
     name: "OpenAI",
-    apiKey: "enc:v1:test",
+    apiKey: "enc:v1:djEwdGVzdAAAAAAAAAAAAAAAAA==",
     defaultModel: "gpt-test",
     enabled: true,
   }];
   const webSearch = {
     providerId: "tavily",
-    apiKey: "enc:v1:web",
+    apiKey: "enc:v1:djEwd2ViAAAAAAAAAAAAAAAAAA==",
     enabled: true,
     maxResults: 7,
   };
@@ -180,13 +234,17 @@ test("buildSyncPayload includes AI configuration settings", () => {
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_MAX_ITERATIONS, "10");
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_MODEL_MAP, JSON.stringify({ codex: "gpt-test" }));
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_PROVIDER_MAP, JSON.stringify({ catty: "openai-main" }));
+  localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_THINKING_MAP, JSON.stringify({ catty: "high" }));
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH, JSON.stringify(webSearch));
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION, "false");
 
   const payload = buildSyncPayload(vault([]));
 
+  // Device-bound enc:v1 apiKeys are stripped from portable sync settings.
+  const { apiKey: _providerKey, ...providerWithoutKey } = providers[0]!;
+  const { apiKey: _webKey, ...webSearchWithoutKey } = webSearch;
   assert.deepEqual(payload.settings?.ai, {
-    providers,
+    providers: [providerWithoutKey],
     activeProviderId: "openai-main",
     activeModelId: "gpt-test",
     globalPermissionMode: "auto",
@@ -197,7 +255,8 @@ test("buildSyncPayload includes AI configuration settings", () => {
     maxIterations: 10,
     agentModelMap: { codex: "gpt-test" },
     agentProviderMap: { catty: "openai-main" },
-    webSearchConfig: webSearch,
+    agentThinkingMap: { catty: "high" },
+    webSearchConfig: webSearchWithoutKey,
     showTerminalSelectionAction: false,
   });
 });
@@ -286,12 +345,12 @@ test("buildSyncPayload omits device-bound encrypted AI API keys", () => {
     id: "openai-main",
     providerId: "openai",
     name: "OpenAI",
-    apiKey: "enc:v1:djEwAAAA",
+    apiKey: "enc:v1:djEwQUFBQQAAAAAAAAAAAAAAAA==",
     enabled: true,
   }]));
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH, JSON.stringify({
     providerId: "tavily",
-    apiKey: "enc:v1:djEwAAAA",
+    apiKey: "enc:v1:djEwQUFBQQAAAAAAAAAAAAAAAA==",
     enabled: true,
   }));
 
@@ -306,8 +365,8 @@ test("buildCloudSyncPayload includes decrypted AI API keys for portable cloud sy
     value: {
       netcatty: {
         credentialsDecrypt: async (value: string) => {
-          if (value === "enc:v1:djEwPROVIDER") return "sk-provider";
-          if (value === "enc:v1:djEwWEB") return "sk-web";
+          if (value === "enc:v1:djEwUFJPVklERVIAAAAAAAAAAA==") return "sk-provider";
+          if (value === "enc:v1:djEwV0VCAAAAAAAAAAAAAAAAAA==") return "sk-web";
           return value;
         },
       },
@@ -319,12 +378,12 @@ test("buildCloudSyncPayload includes decrypted AI API keys for portable cloud sy
     id: "openai-main",
     providerId: "openai",
     name: "OpenAI",
-    apiKey: "enc:v1:djEwPROVIDER",
+    apiKey: "enc:v1:djEwUFJPVklERVIAAAAAAAAAAA==",
     enabled: true,
   }]));
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH, JSON.stringify({
     providerId: "tavily",
-    apiKey: "enc:v1:djEwWEB",
+    apiKey: "enc:v1:djEwV0VCAAAAAAAAAAAAAAAAAA==",
     enabled: true,
   }));
 
@@ -348,7 +407,7 @@ test("buildCloudSyncPayload fails instead of deleting API keys when decrypt fail
     id: "openai-main",
     providerId: "openai",
     name: "OpenAI",
-    apiKey: "enc:v1:djEwPROVIDER",
+    apiKey: "enc:v1:djEwUFJPVklERVIAAAAAAAAAAA==",
     enabled: true,
   }]));
 
@@ -363,12 +422,12 @@ test("applySyncPayload restores AI configuration settings", async () => {
     id: "anthropic-main",
     providerId: "anthropic",
     name: "Anthropic",
-    apiKey: "enc:v1:test",
+    apiKey: "enc:v1:djEwdGVzdAAAAAAAAAAAAAAAAA==",
     enabled: true,
   }];
   const webSearch = {
     providerId: "exa",
-    apiKey: "enc:v1:web",
+    apiKey: "enc:v1:djEwd2ViAAAAAAAAAAAAAAAAAA==",
     enabled: true,
   };
 
@@ -419,7 +478,12 @@ test("applySyncPayload encrypts synced plaintext AI API keys before saving local
   Object.defineProperty(globalThis, "window", {
     value: {
       netcatty: {
-        credentialsEncrypt: async (value: string) => `enc:v1:djEwLOCAL_${value}`,
+        credentialsEncrypt: async (value: string) => {
+          const body = Buffer.alloc(19, 0);
+          Buffer.from("v10", "utf8").copy(body, 0);
+          Buffer.from(`LOCAL_${value}`.slice(0, 16), "utf8").copy(body, 3);
+          return `enc:v1:${body.toString("base64")}`;
+        },
       },
       dispatchEvent: () => true,
     },
@@ -447,8 +511,20 @@ test("applySyncPayload encrypts synced plaintext AI API keys before saving local
 
   const provider = JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_PROVIDERS)!)[0];
   const webSearch = JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH)!);
-  assert.equal(provider.apiKey, "enc:v1:djEwLOCAL_sk-provider");
-  assert.equal(webSearch.apiKey, "enc:v1:djEwLOCAL_sk-web");
+  const expectedProviderKey = (() => {
+    const body = Buffer.alloc(19, 0);
+    Buffer.from("v10", "utf8").copy(body, 0);
+    Buffer.from("LOCAL_sk-provider".slice(0, 16), "utf8").copy(body, 3);
+    return `enc:v1:${body.toString("base64")}`;
+  })();
+  const expectedWebKey = (() => {
+    const body = Buffer.alloc(19, 0);
+    Buffer.from("v10", "utf8").copy(body, 0);
+    Buffer.from("LOCAL_sk-web".slice(0, 16), "utf8").copy(body, 3);
+    return `enc:v1:${body.toString("base64")}`;
+  })();
+  assert.equal(provider.apiKey, expectedProviderKey);
+  assert.equal(webSearch.apiKey, expectedWebKey);
 });
 
 test("applySyncPayload restores host tree sidebar visibility setting", async () => {
@@ -604,14 +680,14 @@ test("applySyncPayload preserves local AI provider apiKeys when synced payload o
       id: "openai-main",
       providerId: "openai",
       name: "OpenAI",
-      apiKey: "enc:v1:djEwLOCAL",
+      apiKey: "enc:v1:djEwTE9DQUwAAAAAAAAAAAAAAA==",
       enabled: true,
     },
     {
       id: "anthropic-main",
       providerId: "anthropic",
       name: "Anthropic",
-      apiKey: "enc:v1:djEwANTHROPIC",
+      apiKey: "enc:v1:djEwQU5USFJPUElDAAAAAAAAAA==",
       enabled: true,
     },
   ];
@@ -642,14 +718,14 @@ test("applySyncPayload preserves local AI provider apiKeys when synced payload o
       id: "openai-main",
       providerId: "openai",
       name: "OpenAI (renamed)",
-      apiKey: "enc:v1:djEwLOCAL",
+      apiKey: "enc:v1:djEwTE9DQUwAAAAAAAAAAAAAAA==",
       enabled: true,
     },
     {
       id: "anthropic-main",
       providerId: "anthropic",
       name: "Anthropic",
-      apiKey: "enc:v1:djEwANTHROPIC",
+      apiKey: "enc:v1:djEwQU5USFJPUElDAAAAAAAAAA==",
       enabled: false,
     },
   ]);
@@ -657,7 +733,7 @@ test("applySyncPayload preserves local AI provider apiKeys when synced payload o
 
 test("applySyncPayload prefers explicit synced apiKey over local apiKey", async () => {
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_PROVIDERS, JSON.stringify([
-    { id: "openai-main", providerId: "openai", name: "OpenAI", apiKey: "enc:v1:djEwLOCAL", enabled: true },
+    { id: "openai-main", providerId: "openai", name: "OpenAI", apiKey: "enc:v1:djEwTE9DQUwAAAAAAAAAAAAAAA==", enabled: true },
   ]));
 
   const payload: SyncPayload = {
@@ -685,7 +761,7 @@ test("applySyncPayload prefers explicit synced apiKey over local apiKey", async 
 test("applySyncPayload preserves local web-search apiKey when synced config omits it", async () => {
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH, JSON.stringify({
     providerId: "tavily",
-    apiKey: "enc:v1:djEwWEB",
+    apiKey: "enc:v1:djEwV0VCAAAAAAAAAAAAAAAAAA==",
     enabled: true,
     maxResults: 7,
   }));
@@ -709,7 +785,7 @@ test("applySyncPayload preserves local web-search apiKey when synced config omit
   const stored = JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH)!);
   assert.deepEqual(stored, {
     providerId: "tavily",
-    apiKey: "enc:v1:djEwWEB",
+    apiKey: "enc:v1:djEwV0VCAAAAAAAAAAAAAAAAAA==",
     enabled: false,
     maxResults: 12,
   });
@@ -718,7 +794,7 @@ test("applySyncPayload preserves local web-search apiKey when synced config omit
 test("applySyncPayload drops local web-search apiKey when synced config switches provider", async () => {
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH, JSON.stringify({
     providerId: "tavily",
-    apiKey: "enc:v1:djEwWEB",
+    apiKey: "enc:v1:djEwV0VCAAAAAAAAAAAAAAAAAA==",
     enabled: true,
   }));
 
@@ -791,6 +867,164 @@ test("hasMeaningfulCloudSyncData ignores legacy cloud known hosts", () => {
   );
 });
 
+test("buildLocalVaultPayload includes last-known plugin sidecars for protective backups", () => {
+  localStorage.setItem(
+    "netcatty_plugin_sidecars_last_known_v1",
+    JSON.stringify({
+      version: 1,
+      entries: [{
+        pluginId: "com.example.p",
+        kind: "settings",
+        key: "com.example.p.theme\0application\0application",
+        value: "dark",
+        updatedAt: 1,
+      }],
+    }),
+  );
+  try {
+    const payload = buildLocalVaultPayload(vault([]));
+    assert.equal(payload.pluginSidecars?.entries?.length, 1);
+    assert.equal(payload.pluginSidecars?.entries?.[0].value, "dark");
+    assert.equal(hasMeaningfulSyncData(payload), true);
+  } finally {
+    localStorage.removeItem("netcatty_plugin_sidecars_last_known_v1");
+  }
+});
+
+test("buildLocalVaultPayloadAsync prefers live empty over last-known for backups", async () => {
+  const previousWindow = (globalThis as { window?: unknown }).window;
+  Object.defineProperty(globalThis, "window", {
+    value: {
+      netcatty: {
+        collectPluginSyncSidecars: async () => ({ version: 1, entries: [] }),
+        pluginHostReady: () => true,
+      },
+      dispatchEvent: () => true,
+    },
+    configurable: true,
+  });
+  localStorage.setItem(
+    "netcatty_plugin_sidecars_last_known_v1",
+    JSON.stringify({
+      version: 1,
+      entries: [{
+        pluginId: "com.example.p",
+        kind: "settings",
+        key: "com.example.p.theme\0application\0application",
+        value: "dark",
+        updatedAt: 1,
+      }],
+    }),
+  );
+  try {
+    const { buildLocalVaultPayloadAsync } = await import("./syncPayload.ts");
+    const payload = await buildLocalVaultPayloadAsync(vault([]));
+    assert.equal(payload.pluginSidecars?.entries?.length, 0);
+  } finally {
+    localStorage.removeItem("netcatty_plugin_sidecars_last_known_v1");
+    Object.defineProperty(globalThis, "window", {
+      value: previousWindow,
+      configurable: true,
+    });
+  }
+});
+
+test("hasMeaningfulCloudSyncData treats non-empty plugin sidecars as meaningful", () => {
+  assert.equal(
+    hasMeaningfulCloudSyncData({
+      hosts: [],
+      keys: [],
+      identities: [],
+      snippets: [],
+      customGroups: [],
+      syncedAt: 1,
+      pluginSidecars: {
+        version: 1,
+        entries: [{
+          pluginId: "com.example.p",
+          kind: "settings",
+          key: "com.example.p.theme\0application\0application",
+          value: "dark",
+          updatedAt: 1,
+        }],
+      },
+    }),
+    true,
+  );
+  // Empty bundle alone must not bypass the empty-vault upload guard.
+  assert.equal(
+    hasMeaningfulCloudSyncData({
+      hosts: [],
+      keys: [],
+      identities: [],
+      snippets: [],
+      customGroups: [],
+      syncedAt: 1,
+      pluginSidecars: { version: 1, entries: [] },
+    }),
+    false,
+  );
+  assert.equal(
+    hasMeaningfulCloudSyncData({
+      hosts: [],
+      keys: [],
+      identities: [],
+      snippets: [],
+      customGroups: [],
+      syncedAt: 1,
+    }),
+    false,
+  );
+});
+
+test("hasMeaningfulCloudSyncData does not treat last-known-only empty sidecars as meaningful", () => {
+  const previous = localStorageAdapter.read(SYNC_STORAGE_KEYS.PLUGIN_SIDECARS_LAST_KNOWN);
+  try {
+    localStorageAdapter.write(SYNC_STORAGE_KEYS.PLUGIN_SIDECARS_LAST_KNOWN, {
+      version: 1,
+      entries: [{
+        pluginId: "com.example.p",
+        kind: "settings",
+        key: "k",
+        value: 1,
+        updatedAt: 1,
+      }],
+    });
+    // Empty vault + empty sidecar entries must stay blocked even when last-known
+    // still remembers prior plugin settings (empty-vault upload guard).
+    assert.equal(
+      hasMeaningfulCloudSyncData({
+        hosts: [],
+        keys: [],
+        identities: [],
+        snippets: [],
+        customGroups: [],
+        syncedAt: 1,
+        pluginSidecars: { version: 1, entries: [] },
+      }),
+      false,
+    );
+  } finally {
+    if (previous == null) localStorageAdapter.remove(SYNC_STORAGE_KEYS.PLUGIN_SIDECARS_LAST_KNOWN);
+    else localStorageAdapter.write(SYNC_STORAGE_KEYS.PLUGIN_SIDECARS_LAST_KNOWN, previous);
+  }
+});
+
+test("plugin sidecar storage keys stay aligned between sync domain and storageKeys registry", () => {
+  assert.equal(
+    storageKeys.STORAGE_KEY_PLUGIN_SIDECARS_LAST_KNOWN,
+    SYNC_STORAGE_KEYS.PLUGIN_SIDECARS_LAST_KNOWN,
+  );
+  assert.equal(
+    storageKeys.STORAGE_KEY_PLUGIN_SIDECARS_PENDING_REMOTE,
+    SYNC_STORAGE_KEYS.PLUGIN_SIDECARS_PENDING_REMOTE,
+  );
+  assert.equal(
+    storageKeys.STORAGE_KEY_AVAILABLE_PLUGIN_SYNC_PROVIDERS,
+    SYNC_STORAGE_KEYS.AVAILABLE_PLUGIN_SYNC_PROVIDERS,
+  );
+});
+
 test("hasCloudSyncEntityData ignores settings-only payloads for empty-vault recovery", () => {
   assert.equal(
     hasCloudSyncEntityData({
@@ -834,19 +1068,19 @@ test("buildLocalVaultPayload preserves local AI API keys for protective backups"
     id: "openai-main",
     providerId: "openai",
     name: "OpenAI",
-    apiKey: "enc:v1:djEwPROVIDER",
+    apiKey: "enc:v1:djEwUFJPVklERVIAAAAAAAAAAA==",
     enabled: true,
   }]));
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH, JSON.stringify({
     providerId: "tavily",
-    apiKey: "enc:v1:djEwWEB",
+    apiKey: "enc:v1:djEwV0VCAAAAAAAAAAAAAAAAAA==",
     enabled: true,
   }));
 
   const payload = buildLocalVaultPayload(vault([]));
 
-  assert.equal(payload.settings?.ai?.providers?.[0]?.apiKey, "enc:v1:djEwPROVIDER");
-  assert.equal(payload.settings?.ai?.webSearchConfig?.apiKey, "enc:v1:djEwWEB");
+  assert.equal(payload.settings?.ai?.providers?.[0]?.apiKey, "enc:v1:djEwUFJPVklERVIAAAAAAAAAAA==");
+  assert.equal(payload.settings?.ai?.webSearchConfig?.apiKey, "enc:v1:djEwV0VCAAAAAAAAAAAAAAAAAA==");
 });
 
 test("applySyncPayload ignores legacy cloud known hosts", async () => {
@@ -1285,6 +1519,51 @@ test("prepareLocalVaultPayloadApply does not import until the prepared callback 
   assert.deepEqual(calls, ["prepare", "import", "commit"]);
 });
 
+test("prepareLocalVaultPayloadApply sanitizes enc:v1 before convergent prepare and apply", async () => {
+  const completeBlob = Buffer.alloc(31, 0);
+  Buffer.from("v10", "utf8").copy(completeBlob, 0);
+  const ENC = `enc:v1:${completeBlob.toString("base64")}`;
+  const preparedPayloads: SyncPayload[] = [];
+  const imported: Array<Record<string, unknown>> = [];
+
+  const applyPreparedPayload = await prepareLocalVaultPayloadApply({
+    hosts: [{
+      id: "h1",
+      label: "prod",
+      hostname: "prod.example",
+      username: "root",
+      password: ENC,
+      port: 22,
+      os: "linux",
+      group: "",
+      tags: [],
+      protocol: "ssh",
+    }],
+    keys: [],
+    identities: [],
+    snippets: [],
+    customGroups: [],
+    syncedAt: 1,
+  }, {
+    importVaultData: (json) => {
+      imported.push(JSON.parse(json) as Record<string, unknown>);
+    },
+  }, {
+    prepareConvergentRestore: async (payload) => {
+      preparedPayloads.push(payload);
+      return async () => undefined;
+    },
+  });
+
+  await applyPreparedPayload();
+
+  assert.equal(preparedPayloads.length, 1);
+  assert.equal(preparedPayloads[0]?.hosts[0]?.password, undefined);
+  assert.equal(imported.length, 1);
+  const hosts = imported[0]?.hosts as Array<{ password?: string }> | undefined;
+  assert.equal(hosts?.[0]?.password, undefined);
+});
+
 test("applyLocalVaultPayload leaves local data untouched when convergent preparation fails", async () => {
   let imported = false;
   const payload: SyncPayload = {
@@ -1337,4 +1616,79 @@ test("applyLocalVaultPayload does not commit convergent writes when local import
   );
 
   assert.equal(committed, false);
+});
+
+test("withPluginSyncSidecars attaches non-empty plugin sidecar bundles", () => {
+  const base = buildSyncPayload({
+    hosts: [],
+    keys: [],
+    identities: [],
+    snippets: [],
+    customGroups: [],
+  });
+  const withEmpty = withPluginSyncSidecars(base, { version: 1, entries: [] });
+  assert.deepEqual(withEmpty.pluginSidecars, { version: 1, entries: [] });
+
+  const withData = withPluginSyncSidecars(base, {
+    version: 1,
+    entries: [{
+      pluginId: "com.example.sync",
+      kind: "settings",
+      key: "com.example.sync.theme\0application\0application",
+      value: "dark",
+      updatedAt: 1,
+    }],
+  });
+  assert.equal(withData.pluginSidecars?.entries.length, 1);
+  assert.equal(withData.pluginSidecars?.entries[0].value, "dark");
+});
+
+test("buildCloudSyncPayload includes plugin sidecars from the production collector hook", async () => {
+  const payload = await buildCloudSyncPayload(vault([]), [], {
+    collectPluginSidecars: async () => ({
+      version: 1,
+      entries: [{
+        pluginId: "com.example.sync",
+        kind: "account_baseline",
+        key: "account",
+        value: { id: "acct-1" },
+        updatedAt: 9,
+      }],
+    }),
+  });
+  assert.equal(payload.pluginSidecars?.entries.length, 1);
+  assert.equal(payload.pluginSidecars?.entries[0].kind, "account_baseline");
+  assert.deepEqual(payload.pluginSidecars?.entries[0].value, { id: "acct-1" });
+});
+
+test("applySyncPayload applies pluginSidecars through the production applier hook", async () => {
+  let applied: unknown = null;
+  const payload: SyncPayload = {
+    hosts: [],
+    keys: [],
+    identities: [],
+    snippets: [],
+    customGroups: [],
+    syncedAt: 1,
+    pluginSidecars: {
+      version: 1,
+      entries: [{
+        pluginId: "com.missing.plugin",
+        kind: "crdt_baseline",
+        key: "replica",
+        value: { clock: 3 },
+        updatedAt: 2,
+      }],
+    },
+  };
+
+  await applySyncPayload(payload, {
+    importVaultData: () => {},
+  }, {
+    applyPluginSidecars: async (sidecars) => {
+      applied = sidecars;
+    },
+  });
+
+  assert.equal((applied as SyncPayload["pluginSidecars"])?.entries[0].value.clock, 3);
 });

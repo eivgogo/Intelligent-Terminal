@@ -301,3 +301,273 @@ test("credential lease resolution cannot return plaintext after operation cancel
   leaseStore.shutdown();
   database.close();
 });
+
+test("overwrite stash restores previous plaintext and discard clears it", (context) => {
+  const database = createDatabase(context);
+  let random = 0;
+  const store = new PluginSecretStore({
+    database,
+    safeStorage: fakeSafeStorage(),
+    randomBytes: () => Buffer.alloc(24, ++random),
+  });
+  const first = store.set("com.example.one", "sync-credential", "good-password");
+  assert.equal(store.resolve("com.example.one", first), "good-password");
+  const second = store.set("com.example.one", "sync-credential", "bad-password", { stashPrevious: true });
+  assert.equal(store.resolve("com.example.one", second), "bad-password");
+  assert.equal(store.restoreOverwrite("com.example.one", "sync-credential"), true);
+  const restored = store.getReference("com.example.one", "sync-credential");
+  assert.equal(restored.id, first.id, "restore must keep the prior SecretRef id");
+  assert.equal(store.resolve("com.example.one", first), "good-password");
+  assert.equal(store.restoreOverwrite("com.example.one", "sync-credential"), false);
+
+  store.set("com.example.one", "sync-credential", "another-bad", { stashPrevious: true });
+  store.clearOverwriteStash("com.example.one", "sync-credential");
+  assert.equal(store.restoreOverwrite("com.example.one", "sync-credential"), false);
+  assert.equal(
+    store.resolve("com.example.one", store.getReference("com.example.one", "sync-credential")),
+    "another-bad",
+  );
+  // Ordinary secrets.set-style overwrites must not stash plaintext by default.
+  store.set("com.example.one", "api-key", "one");
+  store.set("com.example.one", "api-key", "two");
+  assert.equal(store.restoreOverwrite("com.example.one", "api-key"), false);
+  database.close();
+});
+
+test("failed overwrite clears stashed plaintext", (context) => {
+  const database = createDatabase(context);
+  let failEncrypt = false;
+  const safeStorage = {
+    isEncryptionAvailable: () => true,
+    encryptString: (value) => {
+      if (failEncrypt) return Buffer.alloc(0);
+      return Buffer.from(`sealed:${Buffer.from(value).toString("base64")}`);
+    },
+    decryptString: (value) => {
+      const encoded = value.toString().slice("sealed:".length);
+      return Buffer.from(encoded, "base64").toString();
+    },
+  };
+  const store = new PluginSecretStore({ database, safeStorage });
+  store.set("com.example", "sync-credential", "good-password");
+  failEncrypt = true;
+  assert.throws(
+    () => store.set("com.example", "sync-credential", "bad-password", { stashPrevious: true }),
+    (error) => error.code === RPC_ERRORS.unavailable,
+  );
+  assert.equal(store.restoreOverwrite("com.example", "sync-credential"), false);
+  failEncrypt = false;
+  const ref = store.getReference("com.example", "sync-credential");
+  assert.equal(store.resolve("com.example", ref), "good-password");
+  database.close();
+});
+
+test("sync provider bindings live outside plugin secrets and reject namespace mismatches", (context) => {
+  const database = createDatabase(context);
+  const store = new PluginSecretStore({
+    database,
+    safeStorage: fakeSafeStorage(),
+  });
+  store.bindSyncProviderPlugin("com.example", "com.example.sync");
+  assert.equal(store.resolveSyncProviderPlugin("com.example.sync"), "com.example");
+  assert.throws(
+    () => store.bindSyncProviderPlugin("com.example", "com.other.sync"),
+    /outside the plugin namespace/,
+  );
+  store.set("com.attacker", "sync-provider-map:com.example.sync", "com.attacker");
+  assert.equal(store.resolveSyncProviderPlugin("com.example.sync"), "com.example");
+  store.unbindSyncProviderPlugin("com.example", "com.example.sync");
+  assert.equal(store.resolveSyncProviderPlugin("com.example.sync"), undefined);
+  // Tombstone remains so legacy map backfill cannot resurrect after disconnect.
+  assert.equal(database.getSyncProviderBinding("com.example.sync")?.pluginId, "");
+  // Unbind also consumes map markers (including attacker leftovers).
+  assert.equal(
+    database.getSecretByKey("com.attacker", "sync-provider-map:com.example.sync"),
+    null,
+  );
+  assert.equal(database.backfillSyncProviderBindingsFromLegacySecrets(), 0);
+  assert.equal(store.resolveSyncProviderPlugin("com.example.sync"), undefined);
+  // Reconnect clears the tombstone.
+  store.bindSyncProviderPlugin("com.example", "com.example.sync");
+  assert.equal(store.resolveSyncProviderPlugin("com.example.sync"), "com.example");
+  database.close();
+});
+
+test("unbind deletes owner map markers and blocks legacy re-promotion", (context) => {
+  const database = createDatabase(context);
+  const store = new PluginSecretStore({
+    database,
+    safeStorage: fakeSafeStorage(),
+  });
+  // Credential evidence is required for map promote; simulate a real owner plus
+  // an intermediate-build map row that backfill would otherwise promote.
+  store.set("com.example", "sync-credential", "secret");
+  store.set("com.example", "sync-provider-map:com.example.sync", "com.example");
+  assert.equal(database.backfillSyncProviderBindingsFromLegacySecrets(), 1);
+  assert.equal(store.resolveSyncProviderPlugin("com.example.sync"), "com.example");
+  assert.equal(
+    database.getSecretByKey("com.example", "sync-provider-map:com.example.sync"),
+    null,
+    "promote consumes the map marker",
+  );
+  // User disconnects; reintroduce a map row as if something wrote it back.
+  // Tombstone still blocks re-promotion even with credentials + map present.
+  store.unbindSyncProviderPlugin("com.example", "com.example.sync");
+  store.set("com.example", "sync-provider-map:com.example.sync", "com.example");
+  assert.equal(database.backfillSyncProviderBindingsFromLegacySecrets(), 0);
+  assert.equal(store.resolveSyncProviderPlugin("com.example.sync"), undefined);
+  assert.equal(database.getSyncProviderBinding("com.example.sync")?.pluginId, "");
+  database.close();
+});
+
+test("failed restoreOverwrite keeps stash for retry", (context) => {
+  const database = createDatabase(context);
+  let failEncrypt = false;
+  const safeStorage = {
+    isEncryptionAvailable: () => true,
+    encryptString: (value) => {
+      if (failEncrypt) return Buffer.alloc(0);
+      return Buffer.from(`sealed:${Buffer.from(value).toString("base64")}`);
+    },
+    decryptString: (value) => {
+      const encoded = value.toString().slice("sealed:".length);
+      return Buffer.from(encoded, "base64").toString();
+    },
+  };
+  const store = new PluginSecretStore({ database, safeStorage });
+  const first = store.set("com.example", "sync-credential", "good-password");
+  store.set("com.example", "sync-credential", "bad-password", { stashPrevious: true });
+  failEncrypt = true;
+  assert.throws(
+    () => store.restoreOverwrite("com.example", "sync-credential"),
+    (error) => error.code === RPC_ERRORS.unavailable,
+  );
+  failEncrypt = false;
+  assert.equal(store.restoreOverwrite("com.example", "sync-credential"), true);
+  assert.equal(store.resolve("com.example", first), "good-password");
+  database.close();
+});
+
+test("existing overwrite stash is preserved across retry puts and cleared by prefix delete", (context) => {
+  const database = createDatabase(context);
+  let failEncrypt = false;
+  const safeStorage = {
+    isEncryptionAvailable: () => true,
+    encryptString: (value) => {
+      if (failEncrypt) return Buffer.alloc(0);
+      return Buffer.from(`sealed:${Buffer.from(value).toString("base64")}`);
+    },
+    decryptString: (value) => {
+      const encoded = value.toString().slice("sealed:".length);
+      return Buffer.from(encoded, "base64").toString();
+    },
+  };
+  const store = new PluginSecretStore({ database, safeStorage });
+  const first = store.set("com.example", "sync-credential", "good-password");
+  store.set("com.example", "sync-credential", "bad-password", { stashPrevious: true });
+  failEncrypt = true;
+  assert.throws(
+    () => store.restoreOverwrite("com.example", "sync-credential"),
+    (error) => error.code === RPC_ERRORS.unavailable,
+  );
+  failEncrypt = false;
+  // Retry put must not replace the original good-password stash with bad-password.
+  store.set("com.example", "sync-credential", "worse-password", { stashPrevious: true });
+  assert.equal(store.restoreOverwrite("com.example", "sync-credential"), true);
+  assert.equal(store.resolve("com.example", first), "good-password");
+
+  store.set("com.example", "sync-credential", "temp", { stashPrevious: true });
+  store.deleteByKeyPrefix("com.example", "sync-credential");
+  assert.equal(store.restoreOverwrite("com.example", "sync-credential"), false);
+  assert.equal(store.getReference("com.example", "sync-credential"), undefined);
+  database.close();
+});
+
+test("resolveSyncProviderPlugin does not infer ownership from credential prefixes alone", (context) => {
+  const database = createDatabase(context);
+  const store = new PluginSecretStore({
+    database,
+    safeStorage: fakeSafeStorage(),
+  });
+  store.set("com.example", "sync-credential", "pw");
+  assert.equal(database.getSyncProviderBinding("com.example.sync"), null);
+  // Without a binding (or live-provider backfill), credentials alone are not enough.
+  assert.equal(store.resolveSyncProviderPlugin("com.example.sync"), undefined);
+  // Explicit bind still works for disconnect cleanup.
+  store.bindSyncProviderPlugin("com.example", "com.example.sync");
+  assert.equal(store.resolveSyncProviderPlugin("com.example.sync"), "com.example");
+  database.close();
+});
+
+test("live provider backfill seeds bindings for v2 credential-only upgrades", (context) => {
+  const database = createDatabase(context);
+  const store = new PluginSecretStore({
+    database,
+    safeStorage: fakeSafeStorage(),
+  });
+  // Real schema-2 path: credentials exist, binding table empty, no map rows.
+  store.set("com.example", "sync-credential", "pw");
+  store.set("com.disabled", "sync-credential", "pw2");
+  assert.equal(database.getSyncProviderBinding("com.example.sync"), null);
+  // Host should pass installed manifests including disabled plugins.
+  const promoted = store.backfillSyncProviderBindingsFromLiveProviders([
+    { pluginId: "com.example", provider: { id: "com.example.sync" } },
+    { pluginId: "com.disabled", provider: { id: "com.disabled.sync" } },
+    // No credentials under this plugin — skip.
+    { pluginId: "com.other", provider: { id: "com.other.cloud" } },
+    // Wrong namespace alone would be multi with sync below — still skip evil.
+  ]);
+  assert.equal(promoted, 2);
+  assert.equal(store.resolveSyncProviderPlugin("com.example.sync"), "com.example");
+  assert.equal(store.resolveSyncProviderPlugin("com.disabled.sync"), "com.disabled");
+  assert.equal(store.resolveSyncProviderPlugin("com.other.cloud"), undefined);
+  // Idempotent when binding already exists.
+  assert.equal(
+    store.backfillSyncProviderBindingsFromLiveProviders([
+      { pluginId: "com.example", provider: { id: "com.example.sync" } },
+    ]),
+    0,
+  );
+  // Multi-provider plugins must not all bind from one shared credential row.
+  store.set("com.multi", "sync-credential", "shared");
+  assert.equal(
+    store.backfillSyncProviderBindingsFromLiveProviders([
+      { pluginId: "com.multi", provider: { id: "com.multi.old" } },
+      { pluginId: "com.multi", provider: { id: "com.multi.new" } },
+    ]),
+    0,
+  );
+  assert.equal(store.resolveSyncProviderPlugin("com.multi.old"), undefined);
+  assert.equal(store.resolveSyncProviderPlugin("com.multi.new"), undefined);
+  // Cross-plugin claim on the same providerId must not bind the first writer.
+  store.set("com.example.sync", "sync-credential", "nested");
+  assert.equal(
+    store.backfillSyncProviderBindingsFromLiveProviders([
+      { pluginId: "com.example", provider: { id: "com.example.sync.foo" } },
+      { pluginId: "com.example.sync", provider: { id: "com.example.sync.foo" } },
+    ]),
+    0,
+  );
+  assert.equal(store.resolveSyncProviderPlugin("com.example.sync.foo"), undefined);
+  database.close();
+});
+
+test("live provider backfill does not resurrect explicit unbind tombstones", (context) => {
+  const database = createDatabase(context);
+  const store = new PluginSecretStore({
+    database,
+    safeStorage: fakeSafeStorage(),
+  });
+  store.set("com.example", "sync-credential", "pw");
+  store.bindSyncProviderPlugin("com.example", "com.example.sync");
+  store.unbindSyncProviderPlugin("com.example", "com.example.sync");
+  assert.equal(database.getSyncProviderBinding("com.example.sync")?.pluginId, "");
+  assert.equal(
+    store.backfillSyncProviderBindingsFromLiveProviders([
+      { pluginId: "com.example", provider: { id: "com.example.sync" } },
+    ]),
+    0,
+  );
+  assert.equal(store.resolveSyncProviderPlugin("com.example.sync"), undefined);
+  database.close();
+});

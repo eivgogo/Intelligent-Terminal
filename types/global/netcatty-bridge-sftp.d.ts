@@ -4,7 +4,7 @@ declare global {
   interface NetcattyBridge {
     // SFTP operations
     openSftp(options: NetcattySSHOptions): Promise<string>;
-    openSftpForSession?(sessionId: string, expectedEndpoint?: NetcattySSHOptions): Promise<string>;
+    openSftpForSession?(sessionId: string, options?: NetcattySSHOptions): Promise<string>;
     listSftp(sftpId: string, path: string, encoding?: SftpFilenameEncoding): Promise<RemoteFile[]>;
     realpathSftp?(sftpId: string, path: string, encoding?: SftpFilenameEncoding): Promise<string>;
     readSftp(sftpId: string, path: string, encoding?: SftpFilenameEncoding): Promise<string>;
@@ -15,10 +15,19 @@ declare global {
     retainSftpTransferSession?(sftpId: string, leaseId: string): Promise<{ success: boolean; reason?: string }>;
     releaseSftpTransferSession?(sftpId: string, leaseId: string): Promise<{ success: boolean; reason?: string }>;
     mkdirSftp(sftpId: string, path: string, encoding?: SftpFilenameEncoding): Promise<void>;
-    deleteSftp?(sftpId: string, path: string, encoding?: SftpFilenameEncoding): Promise<void>;
+    deleteSftp?(
+      sftpId: string,
+      path: string,
+      encoding?: SftpFilenameEncoding,
+      expectedType?: SftpStatResult["type"],
+    ): Promise<void>;
     renameSftp?(sftpId: string, oldPath: string, newPath: string, encoding?: SftpFilenameEncoding): Promise<void>;
     statSftp?(sftpId: string, path: string, encoding?: SftpFilenameEncoding): Promise<SftpStatResult>;
+    /** No-follow remote metadata for conflict detection (symlink vs target). Missing path → null. */
+    lstatSftp?(sftpId: string, path: string, encoding?: SftpFilenameEncoding): Promise<SftpStatResult | null>;
     chmodSftp?(sftpId: string, path: string, mode: string, encoding?: SftpFilenameEncoding): Promise<void>;
+    /** Extract a remote archive into its parent directory via SSH exec. */
+    extractSftpArchive?(sftpId: string, path: string, encoding?: SftpFilenameEncoding): Promise<{ success: boolean }>;
     getSftpHomeDir?(sftpId: string, encoding?: SftpFilenameEncoding): Promise<{ success: boolean; homeDir?: string; error?: string }>;
 
     // Transfer with progress
@@ -139,17 +148,44 @@ declare global {
     listLocalDir?(path: string): Promise<RemoteFile[]>;
     readLocalFile?(path: string, options?: { maxBytes?: number }): Promise<ArrayBuffer>;
     writeLocalFile?(path: string, content: ArrayBuffer): Promise<void>;
-    deleteLocalFile?(path: string): Promise<void>;
+    deleteLocalFile?(path: string, expectedType?: SftpStatResult["type"]): Promise<void>;
     renameLocalFile?(oldPath: string, newPath: string): Promise<void>;
+    extractLocalArchive?(path: string): Promise<{ success: boolean }>;
     mkdirLocal?(path: string): Promise<void>;
     statLocal?(path: string): Promise<SftpStatResult>;
-    listLocalTree?(path: string): Promise<Array<{
+    /** No-follow local metadata for conflict detection (symlink vs target). */
+    lstatLocal?(path: string): Promise<SftpStatResult>;
+    listLocalTree?(
+      path: string,
+      options?: {
+        onProgress?: (progress: {
+          fileCount: number;
+          directoryCount: number;
+          entryCount: number;
+        }) => void;
+        /** Stream discovered rows while the walk continues (edge-scan/upload). */
+        onEntries?: (entries: Array<{
+          localPath: string;
+          relativePath: string;
+          type: 'file' | 'directory';
+          size: number;
+          lastModified: number;
+        }>) => void;
+        /** Renderer-generated ID used by cancelLocalTreeScan. */
+        scanId?: string;
+        limits?: {
+          maxDirectories?: number;
+          maxEntries?: number;
+        };
+      },
+    ): Promise<Array<{
       localPath: string;
       relativePath: string;
       type: 'file' | 'directory';
       size: number;
       lastModified: number;
-    }>>;
+      }>>;
+    cancelLocalTreeScan?(scanId: string): Promise<void>;
     getHomeDir?(): Promise<string>;
     listDrives?(): Promise<string[]>;
     getSystemInfo?(): Promise<{ username: string; hostname: string }>;

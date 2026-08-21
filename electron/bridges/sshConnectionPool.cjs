@@ -30,6 +30,7 @@ const { randomUUID, createHash } = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { remoteAllowsIdleParkedShellReuse } = require("./sshIdleParkPolicy.cjs");
 
 /**
  * Default idle park after last lease returns (5 minutes).
@@ -73,6 +74,38 @@ let timerApi = {
 };
 let nowFn = () => Date.now();
 let nextLeaseSeq = 0;
+/** Endpoint keys whose parked transports cannot host a later interactive shell. */
+const noIdleParkEndpointKeys = new Set();
+
+function markEndpointNoIdlePark(endpointOrKey) {
+  const key = typeof endpointOrKey === "string"
+    ? endpointOrKey
+    : buildEndpointKey(endpointOrKey);
+  if (!key) return false;
+  noIdleParkEndpointKeys.add(key);
+  return true;
+}
+
+function endpointAllowsIdlePark(endpointOrKey, remoteSshVersion) {
+  if (!remoteAllowsIdleParkedShellReuse(remoteSshVersion)) return false;
+  const key = typeof endpointOrKey === "string"
+    ? endpointOrKey
+    : buildEndpointKey(endpointOrKey);
+  if (key && noIdleParkEndpointKeys.has(key)) return false;
+  return true;
+}
+
+function applyIdleParkPolicy(transport, remoteSshVersion) {
+  if (!transport) return false;
+  const remoteVer = remoteSshVersion
+    || (typeof transport.conn?._remoteVer === "string" ? transport.conn._remoteVer : "");
+  const allowed = endpointAllowsIdlePark(transport.endpointKey || transport.endpoint, remoteVer);
+  transport.allowIdlePark = allowed;
+  if (!allowed && transport.endpointKey) {
+    noIdleParkEndpointKeys.add(transport.endpointKey);
+  }
+  return allowed;
+}
 
 function removePendingDial(record) {
   if (!record?.endpointKey) return;
@@ -607,6 +640,25 @@ function sameEndpoint(a, b) {
     && left.keepaliveCountMax === right.keepaliveCountMax;
 }
 
+function sameTransportEndpoint(a, b) {
+  const left = normalizeEndpoint(a);
+  const right = normalizeEndpoint(b);
+  if (!left || !right) return false;
+  // SFTP sudo changes the channel/subsystem setup, not the authenticated SSH
+  // transport. Channel borrowers (SFTP/port forwarding) may reuse the terminal
+  // connection and apply sudo when opening their own channel.
+  if (left.hostId && right.hostId && left.hostId !== right.hostId) return false;
+  return left.hostname === right.hostname
+    && left.port === right.port
+    && left.username === right.username
+    && left.protocol === right.protocol
+    && left.jumpFingerprint === right.jumpFingerprint
+    && left.proxyFingerprint === right.proxyFingerprint
+    && left.authFingerprint === right.authFingerprint
+    && left.keepaliveIntervalMs === right.keepaliveIntervalMs
+    && left.keepaliveCountMax === right.keepaliveCountMax;
+}
+
 /**
  * True when a requested open can reuse an existing transport/session endpoint.
  *
@@ -619,7 +671,11 @@ function sameEndpoint(a, b) {
  *     transport; cannot use a nofwd transport when the request needs ForwardAgent.
  */
 function endpointAllowsReuse(requested, existing, kind = "channel") {
-  if (!sameEndpoint(requested, existing)) return false;
+  if (kind === "shell") {
+    if (!sameEndpoint(requested, existing)) return false;
+  } else if (!sameTransportEndpoint(requested, existing)) {
+    return false;
+  }
   const req = normalizeEndpoint(requested);
   const have = normalizeEndpoint(existing);
   if (!req || !have) return false;
@@ -786,6 +842,12 @@ function scheduleIdleEnd(transport, opts = {}) {
     endTransport(transport, "unhealthy-last-lease");
     return { ended: true, idle: false };
   }
+  // Bastions such as 齐治 TERM-SSHD accept a later session channel on a parked
+  // transport and then immediately exit 0 (#2923). End instead of parking.
+  if (transport.allowIdlePark === false) {
+    endTransport(transport, "no-idle-park");
+    return { ended: true, idle: false };
+  }
   const ttl = Number.isFinite(transport.idleTtlMs) ? transport.idleTtlMs : defaultIdleTtlMs;
   const now = nowFn();
 
@@ -884,11 +946,23 @@ function createTransport({
     idleSince: null,
     idleDeadlineAt: null,
     createdAt: nowFn(),
+    pendingShellReconnectRisk: null,
+    closedShellPids: new Set(),
+    closedShellPidUnknown: false,
+    shellCloseGeneration: 0,
+    allowIdlePark: endpointAllowsIdlePark(
+      normalized,
+      typeof conn?._remoteVer === "string" ? conn._remoteVer : "",
+    ),
+    allowShellReuse: true,
     meta: meta || null,
     endedReason: null,
     _poolOnConnectionClose: null,
     _poolOnConnectionError: null,
   };
+  if (transport.allowIdlePark === false && transport.endpointKey) {
+    noIdleParkEndpointKeys.add(transport.endpointKey);
+  }
 
   transportsById.set(transport.id, transport);
   attachEndpointIndex(transport);
@@ -963,6 +1037,9 @@ function transferConnectionRef(fromHolder, toHolder) {
   if (!lease) return false;
 
   lease.holder = toHolder;
+  if (lease.kind === LEASE_KINDS.shell && toHolder?.stream) {
+    lease.meta = { ...(lease.meta || {}), activeShellChannel: true };
+  }
   leasesById.set(leaseId, { transport, holder: toHolder });
 
   fromHolder.connRef = null;
@@ -1014,9 +1091,41 @@ function returnTransport(leaseIdOrHolder) {
   }
 
   const { transport } = entry;
+  const releasedLease = transport.leases.get(leaseId);
   leasesById.delete(leaseId);
   transport.leases.delete(leaseId);
   transport.count = transport.leases.size;
+
+  if (
+    releasedLease?.kind === LEASE_KINDS.shell
+    && releasedLease.meta?.activeShellChannel === true
+  ) {
+    transport.shellCloseGeneration = (transport.shellCloseGeneration || 0) + 1;
+    const releasedPid = String(releasedLease.holder?.shellPid || "");
+    if (/^\d+$/.test(releasedPid)) transport.closedShellPids.add(releasedPid);
+    else transport.closedShellPidUnknown = true;
+    const hasActiveShell = [...transport.leases.values()].some(
+      (lease) => lease.kind === LEASE_KINDS.shell && lease.meta?.activeShellChannel === true,
+    );
+    if (!hasActiveShell) {
+    // A locally closed shell channel can outlive its lease briefly on the
+    // server. Remember that provenance even when SFTP/forward leases keep the
+    // transport live, so the next shell does not guess cwd from the old PID.
+      transport.pendingShellReconnectRisk = {
+        oldShellPids: [...transport.closedShellPids],
+        hasUnknownOldShell: transport.closedShellPidUnknown,
+      };
+      transport.closedShellPids.clear();
+      transport.closedShellPidUnknown = false;
+      // TERM-SSHD cannot host a later interactive shell on this connection
+      // even while SFTP/forward leases keep the socket live (#2923).
+      if (!remoteAllowsIdleParkedShellReuse(
+        typeof transport.conn?._remoteVer === "string" ? transport.conn._remoteVer : "",
+      )) {
+        transport.allowShellReuse = false;
+      }
+    }
+  }
 
   if (entry.holder && typeof entry.holder === "object") {
     if (entry.holder.connRef === transport) entry.holder.connRef = null;
@@ -1042,6 +1151,13 @@ function returnTransport(leaseIdOrHolder) {
     idle: park.idle,
     remaining: 0,
   };
+}
+
+function consumePendingShellReconnectRisk(transport) {
+  if (!transport?.pendingShellReconnectRisk) return false;
+  const risk = transport.pendingShellReconnectRisk;
+  transport.pendingShellReconnectRisk = null;
+  return risk;
 }
 
 function discardTransport(transportOrId, reason = "discard") {
@@ -1100,6 +1216,9 @@ function findTransportByEndpoint(endpoint, opts = {}) {
       continue;
     }
     if (transport.state !== "live" && transport.state !== "idle") continue;
+    // A previous reused shell on this conn died immediately (齐治 TERM-SSHD).
+    // SFTP/forward can keep using the socket; new shells must dial fresh.
+    if (kind === "shell" && transport.allowShellReuse === false) continue;
     // Same route key can still fail agent-forwarding policy.
     if (endpoint && transport.endpoint && !endpointAllowsReuse(endpoint, transport.endpoint, kind)) {
       continue;
@@ -1170,6 +1289,7 @@ function resetSshTransportRegistryForTests(options = {}) {
   leasesById.clear();
   pendingDialsByEndpoint.clear();
   idleTransportsLru.clear();
+  noIdleParkEndpointKeys.clear();
   nextLeaseSeq = 0;
   defaultIdleTtlMs = Number.isFinite(options.defaultIdleTtlMs)
     ? options.defaultIdleTtlMs
@@ -1233,13 +1353,21 @@ function createConnectionRef(session, conn, chainConnections) {
     endpoint,
     idleTtlMs: defaultIdleTtlMs,
   });
+  applyIdleParkPolicy(
+    transport,
+    session?.remoteSshVersion || (typeof conn?._remoteVer === "string" ? conn._remoteVer : ""),
+  );
 
   borrowTransport(transport, {
     kind: LEASE_KINDS.shell,
     holder: session,
     // Unique per connection generation: same sessionId can reconnect while an
     // old lease is still draining (same-session reconnect path).
-    meta: { source: "createConnectionRef", sessionId: session?.id || null },
+    meta: {
+      source: "createConnectionRef",
+      sessionId: session?.id || null,
+      activeShellChannel: true,
+    },
   });
 
   return transport;
@@ -1268,7 +1396,11 @@ function acquireConnectionRef(session, connRef) {
     holder: session,
     // Always allocate a unique lease id — stable session/sftp ids can collide
     // across reconnect generations while old leases drain.
-    meta: { source: "acquireConnectionRef", holderId: session?.id || null },
+    meta: {
+      source: "acquireConnectionRef",
+      holderId: session?.id || null,
+      activeShellChannel: kind === LEASE_KINDS.shell && Boolean(session?.stream),
+    },
   });
 }
 
@@ -1318,6 +1450,11 @@ function findReusableSession(sessions, sourceSessionId, requestedTarget) {
   if (!source.conn || !source.stream || !source.connRef) return null;
   // Registry-managed transports: refuse dead/closing.
   if (source.connRef.state === "dead" || source.connRef.state === "closing") return null;
+  // Last interactive shell already left this conn and the daemon cannot host
+  // another one (TERM-SSHD). The captured Copy Tab pin can still keep the
+  // transport live; refuse so start() dials fresh instead of opening a
+  // channel that will exit 0 immediately.
+  if (source.connRef.allowShellReuse === false) return null;
   // ssh2 Client exposes no public "is connected" flag; rely on the descriptor
   // still being attached (it is nulled out on teardown) plus a non-destroyed
   // underlying socket when ssh2 exposes one.
@@ -1401,5 +1538,9 @@ module.exports = {
   acquireConnectionRef,
   releaseConnectionRef,
   transferConnectionRef,
+  consumePendingShellReconnectRisk,
   findReusableSession,
+  markEndpointNoIdlePark,
+  endpointAllowsIdlePark,
+  applyIdleParkPolicy,
 };

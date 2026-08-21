@@ -18,6 +18,12 @@ import {
 } from '../ai-elements/conversation';
 import { LazyMessageResponse } from '../ai-elements/LazyMessageResponse';
 import { Message, MessageContent } from '../ai-elements/messageShell';
+import {
+  AI_MARKDOWN_WARMUP_INITIAL_DELAY_MS,
+  AI_MARKDOWN_WARMUP_RESUME_DELAY_MS,
+  isAiComposerTyping,
+  scheduleAiMarkdownWarmup,
+} from './aiMarkdownWarmup';
 import { ToolCall } from '../ai-elements/tool-call';
 import ThinkingBlock from './ThinkingBlock';
 import AgentActivityGroup from './AgentActivityGroup';
@@ -67,12 +73,18 @@ import {
   compactionStatusText,
   resolveCompactionStatusText,
   type ActiveCompactionUi,
-} from './hooks/useAgentCompactionUi';
+} from '../../application/state/useAgentCompactionUi';
 import {
   getAIPanelDiagnosticHiddenParts,
   getAIPanelProfilerProps,
   isAIPanelDiagnosticPartHidden,
 } from './aiPanelDiagnostics';
+import {
+  buildChatJumpEntries,
+  chatMessageDomId,
+  resolveTailCountForJumpTarget,
+} from '../../domain/chatJumpNav';
+import ChatJumpNav from './ChatJumpNav';
 
 interface ChatMessageListProps {
   messages: ChatMessage[];
@@ -108,6 +120,8 @@ export function shouldProvideVaultArtifactNavigation({
 export function shouldRenderAssistantAsPlainText(options: {
   hideMarkdown: boolean;
 }): boolean {
+  // Streaming stays on Streamdown with isAnimating so incomplete markdown
+  // updates live. Only diagnostic hideMarkdown forces plain text.
   return options.hideMarkdown;
 }
 
@@ -354,20 +368,77 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
   const hideMarkdown = isAIPanelDiagnosticPartHidden('markdown', hiddenParts);
   const hideToolCalls = isAIPanelDiagnosticPartHidden('toolcalls', hiddenParts);
   const [renderedTailCount, setRenderedTailCount] = useState(MESSAGE_RENDER_BATCH);
+  const [activeJumpMessageId, setActiveJumpMessageId] = useState<string | null>(null);
+  const [pendingJumpMessageId, setPendingJumpMessageId] = useState<string | null>(null);
 
   useEffect(() => {
     setRenderedTailCount(MESSAGE_RENDER_BATCH);
+    setActiveJumpMessageId(null);
+    setPendingJumpMessageId(null);
   }, [activeSessionId]);
+
+  const hasAssistantMarkdown = useMemo(
+    () => messages.some((message) => message.role === 'assistant' && Boolean(message.content)),
+    [messages],
+  );
+
+  // Do not start Streamdown on expand. Import cannot be cancelled, and idle
+  // right after open collides with the first few keystrokes. History stays
+  // plaintext until send, composer blur, or a long unfocused delay.
+  useEffect(() => {
+    if (!hasAssistantMarkdown) return undefined;
+    return scheduleAiMarkdownWarmup({
+      isBusy: isAiComposerTyping,
+      initialDelayMs: AI_MARKDOWN_WARMUP_INITIAL_DELAY_MS,
+      resumeDelayMs: AI_MARKDOWN_WARMUP_RESUME_DELAY_MS,
+    });
+  }, [hasAssistantMarkdown]);
 
   const visibleMessages = useMemo(
     () => messages.filter((message) => message.role !== 'system'),
     [messages],
   );
 
-  const hiddenMessageCount = Math.max(0, visibleMessages.length - renderedTailCount);
+  // While a jump target is active, re-resolve the tail against the current list
+  // so streaming appends cannot slide the window past the selected message.
+  const effectiveTailCount = activeJumpMessageId
+    ? resolveTailCountForJumpTarget(visibleMessages, activeJumpMessageId, renderedTailCount)
+    : renderedTailCount;
+
+  const hiddenMessageCount = Math.max(0, visibleMessages.length - effectiveTailCount);
   const displayedMessages = hiddenMessageCount > 0
-    ? visibleMessages.slice(-renderedTailCount)
+    ? visibleMessages.slice(-effectiveTailCount)
     : visibleMessages;
+
+  const jumpEntries = useMemo(
+    () => buildChatJumpEntries(visibleMessages, {
+      emptyLabel: t('ai.chat.jumpUntitled'),
+    }),
+    [t, visibleMessages],
+  );
+
+  const handleJumpToMessage = useCallback((messageId: string) => {
+    setActiveJumpMessageId(messageId);
+    // Persist the expanded window so releasing the pin (or a spurious isAtBottom
+    // flip) cannot unmount the jump target. Load-earlier progress is preserved
+    // because we never reset renderedTailCount on pin release.
+    setRenderedTailCount((count) =>
+      resolveTailCountForJumpTarget(visibleMessages, messageId, count));
+    setPendingJumpMessageId(messageId);
+  }, [visibleMessages]);
+
+  const handleReleaseJumpPin = useCallback(() => {
+    setActiveJumpMessageId(null);
+    setPendingJumpMessageId(null);
+  }, []);
+
+  useEffect(() => {
+    if (!pendingJumpMessageId) return;
+    const target = document.getElementById(chatMessageDomId(pendingJumpMessageId));
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setPendingJumpMessageId(null);
+  }, [displayedMessages, pendingJumpMessageId]);
 
   const resolvedToolCallIds = new Set(
     displayedMessages
@@ -432,6 +503,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
             args={request.args}
             isInterrupted={false}
             approvalStatus="pending"
+            approvalId={approvalId}
             onApproveOnce={() => handleApproveOnce(approvalId)}
             onAlwaysAllow={request.allowSession === false
               ? undefined
@@ -463,6 +535,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
           isInterrupted={options.historical ? !isPending : undefined}
           isLoading={options.historical ? undefined : Boolean(options.isToolRunning && !isPending)}
           approvalStatus={approvalStatus}
+          approvalId={isPending ? toolCall.id : undefined}
           onApproveOnce={() => handleApproveOnce(toolCall.id)}
           onAlwaysAllow={() => handleAlwaysAllow(toolCall.id, pendingRequest ?? {
             toolCallId: toolCall.id,
@@ -483,7 +556,8 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
         {hiddenMessageCount > 0 && (
           <button
             type="button"
-            onClick={() => setRenderedTailCount((count) => count + MESSAGE_RENDER_STEP)}
+            onClick={() => setRenderedTailCount((count) =>
+              Math.max(count, effectiveTailCount) + MESSAGE_RENDER_STEP)}
             className="w-full py-2 text-center text-[12px] text-muted-foreground/50 hover:text-muted-foreground transition-colors cursor-pointer"
           >
             {t('ai.chat.loadEarlierMessages').replace('{n}', String(hiddenMessageCount))}
@@ -591,7 +665,11 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
           const isThisStreaming = isStreaming && isLastAssistant;
 
           return (
-            <Message key={message.id} from={message.role}>
+            <Message
+              key={message.id}
+              id={chatMessageDomId(message.id)}
+              from={message.role}
+            >
               <MessageContent from={message.role}>
                 {/* Thinking block */}
                 {!isUser && message.thinking && (
@@ -647,9 +725,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
                 {message.content && (
                   isUser
                     ? <div className={ASSISTANT_PLAIN_TEXT_CLASS}>{message.content}</div>
-                    : shouldRenderAssistantAsPlainText({
-                        hideMarkdown,
-                      })
+                    : shouldRenderAssistantAsPlainText({ hideMarkdown })
                       ? (
                           <div
                             className={ASSISTANT_PLAIN_TEXT_CLASS}
@@ -661,7 +737,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
                       : (
                           <React.Profiler {...getAIPanelProfilerProps('AIChatPanel.Markdown')}>
                             <div data-ai-content="markdown">
-                              <LazyMessageResponse isAnimating={!!isThisStreaming}>
+                              <LazyMessageResponse deferUntilWarm isAnimating={!!isThisStreaming}>
                                 {message.content}
                               </LazyMessageResponse>
                             </div>
@@ -762,6 +838,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
                     isLoading={false}
                     isInterrupted={false}
                     approvalStatus={'pending'}
+                    approvalId={id}
                     onApproveOnce={() => handleApproveOnce(id)}
                     onAlwaysAllow={() => handleAlwaysAllow(id, req)}
                     onReject={() => handleReject(id)}
@@ -781,6 +858,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
                   isLoading={false}
                   isInterrupted={false}
                   approvalStatus="pending"
+                  approvalId={approvalId}
                   onApproveOnce={() => handleApproveOnce(approvalId)}
                   onAlwaysAllow={request.allowSession === false
                     ? undefined
@@ -833,7 +911,14 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
           </div>
         )}
       </ConversationContent>
-      <ConversationScrollButton />
+      <ChatJumpNav
+        entries={jumpEntries}
+        activeMessageId={activeJumpMessageId}
+        isStreaming={!!isStreaming}
+        onSelect={handleJumpToMessage}
+        onReleasePin={handleReleaseJumpPin}
+      />
+      <ConversationScrollButton onClick={handleReleaseJumpPin} />
     </Conversation>
 
     {/* Image preview lightbox */}

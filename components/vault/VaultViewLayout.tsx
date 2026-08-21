@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import React from "react";
+import React, { useCallback } from "react";
 import { deleteVaultKey } from "../../application/defaultKeyPassphrases";
 import { usePluginImporterCommit } from "../../application/state/usePluginImporterCommit";
 import { preserveConcurrentHostLineTimestampUpdate } from "../../domain/host";
@@ -18,8 +18,11 @@ import {
   vaultHeaderIconButtonClass,
   vaultHeaderSecondaryButtonClass,
 } from "./VaultPageHeader";
+import { useConnectionLogsStore } from "../../application/state/connectionLogsStore";
+import { useNotesStore } from "../../application/state/notesStore";
 import { LazyLoadBoundary } from "../ui/lazy-load-boundary";
 import { toast } from "../ui/toast";
+import { AppWordmark } from "../AppWordmark";
 
 type VaultViewLayoutContext = Record<string, any>;
 
@@ -30,11 +33,101 @@ const VaultSectionLoading = () => (
   />
 );
 
+/**
+ * Notes section subscribes to notesStore instead of taking notes as VaultView
+ * props, so note edits never invalidate the App vault domain bag.
+ *
+ * While inactive (retained but hidden), freeze hosts and drop the store
+ * subscription so Hosts/Keys churn and note publishes do not reconcile the
+ * heavy NotesManager + MDXEditor tree.
+ */
+function VaultNotesSection({
+  NotesManager,
+  hosts,
+  isActive,
+  openNoteId,
+  onOpenNoteIdHandled,
+  onOpenHost,
+}: {
+  NotesManager: React.ComponentType<any>;
+  hosts: any[];
+  isActive: boolean;
+  openNoteId: string | null;
+  onOpenNoteIdHandled: () => void;
+  onOpenHost: (host: any, source?: { noteId?: string }) => void;
+}) {
+  const { notes, noteGroups, updateNotes, updateNoteGroups } = useNotesStore({
+    enabled: isActive,
+  });
+  return (
+    <NotesManager
+      notes={notes}
+      noteGroups={noteGroups}
+      hosts={hosts}
+      onUpdateNotes={updateNotes}
+      onUpdateNoteGroups={updateNoteGroups}
+      isActive={isActive}
+      openNoteId={openNoteId}
+      onOpenNoteIdHandled={onOpenNoteIdHandled}
+      onOpenHost={onOpenHost}
+    />
+  );
+}
+
+const MemoVaultNotesSection = React.memo(
+  VaultNotesSection,
+  (prev, next) => {
+    if (
+      prev.isActive !== next.isActive
+      || prev.openNoteId !== next.openNoteId
+      || prev.NotesManager !== next.NotesManager
+      || prev.onOpenNoteIdHandled !== next.onOpenNoteIdHandled
+      || prev.onOpenHost !== next.onOpenHost
+    ) {
+      return false;
+    }
+    if (next.isActive && prev.hosts !== next.hosts) return false;
+    return true;
+  },
+);
+
+/**
+ * Logs section subscribes to connectionLogsStore so every session start/exit
+ * append stays out of the App vault/chrome domain bags.
+ */
+function VaultConnectionLogsSection({
+  ConnectionLogsManager,
+  hosts,
+  onOpenLogView,
+}: {
+  ConnectionLogsManager: React.ComponentType<any>;
+  hosts: any[];
+  onOpenLogView: (log: any) => void;
+}) {
+  const {
+    connectionLogs,
+    toggleConnectionLogSaved,
+    deleteConnectionLog,
+    clearUnsavedConnectionLogs,
+  } = useConnectionLogsStore();
+  return (
+    <ConnectionLogsManager
+      logs={connectionLogs}
+      hosts={hosts}
+      onToggleSaved={toggleConnectionLogSaved}
+      onDelete={deleteConnectionLog}
+      onClearUnsaved={clearUnsavedConnectionLogs}
+      onOpenLogView={onOpenLogView}
+    />
+  );
+}
+
 export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
   const {
     Activity,
     allGroupPaths,
     allTags,
+    AppLogo,
     Array,
     Badge,
     BookMarked,
@@ -50,7 +143,6 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
     Clock,
     cn,
     commitInlineGroupRename,
-    connectionLogs,
     connectSelectedHosts,
     ContextMenu,
     ContextMenuContent,
@@ -92,6 +184,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
     groupedDisplayHosts,
     handleConnectClick,
     handleCopyCredentials,
+    handleCopyHostname,
     handleDeleteTag,
     handleDuplicateHost,
     handleEditGroupConfig,
@@ -146,16 +239,13 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
     Network,
     newFolderName,
     newHostGroupPath,
-    onClearUnsavedConnectionLogs,
     onConnectSerial,
     onCreateLocalTerminal,
-    onDeleteConnectionLog,
     onDeleteHost,
     onImportOrReuseKey,
     onOpenLogView,
     onOpenSettings,
     onRunSnippet,
-    onToggleConnectionLogSaved,
     onUpdateCustomGroups,
     onUpdateGroupConfigs,
     onUpdateHosts,
@@ -225,6 +315,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
     setSelectedHostIds,
     setSelectedGroupPaths,
     setSelectedTags,
+    setSidebarCollapsed,
     setSidebarWidth,
     setSortMode,
     setTargetParentPath,
@@ -277,15 +368,11 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
   } = ctx;
   const {
     knownHosts,
-    noteGroups,
     NotebookText,
-    notes,
     NotesManager,
     onOpenHostFromNote,
     onOpenNoteIdHandled,
     onOpenSnippetIdHandled,
-    onUpdateNoteGroups,
-    onUpdateNotes,
     openNoteId,
     openSnippetId,
   } = ctx;
@@ -303,12 +390,19 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
         source.groupName === path || source.groupName.startsWith(path + "/"),
     ),
   );
+  const handleNotesOpenHost = useCallback((host: any, source?: { noteId?: string }) => {
+    if (source?.noteId && onOpenHostFromNote) {
+      onOpenHostFromNote(host, source);
+      return;
+    }
+    handleHostConnect(host);
+  }, [handleHostConnect, onOpenHostFromNote]);
   const visibleTreeGroupPaths = React.useMemo(
     () => collectVisibleVaultGroupPaths(treeViewGroupTree),
     [treeViewGroupTree],
   );
   const visibleSelectableGroupPaths = React.useMemo(
-    () => new globalThis.Set(
+    () => new globalThis.Set<string>(
       viewMode === "tree"
         ? visibleTreeGroupPaths
         : displayedGroups.map((group: { path: string }) => group.path),
@@ -441,6 +535,33 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
           style={{ width: effectiveSidebarWidth }}
           data-section="vault-sidebar"
         >
+          <div
+            className={cn(
+              "pt-5 pb-6 flex items-center",
+              sidebarCollapsed ? "px-2 justify-center" : "px-4",
+            )}
+          >
+            <Tooltip delayDuration={500}>
+              <TooltipTrigger asChild>
+                <button
+                  aria-label={sidebarCollapsed ? t("vault.sidebar.expand") : t("vault.sidebar.collapse")}
+                  onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                  className="flex items-center gap-2.5 hover:opacity-80 transition-opacity"
+                >
+                  <AppLogo className="h-8 w-8 flex-shrink-0" />
+                  {!sidebarCollapsed && (
+                    <AppWordmark className="h-5 w-auto text-foreground" />
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                {sidebarCollapsed
+                  ? t("vault.sidebar.expand")
+                  : t("vault.sidebar.collapse")}
+              </TooltipContent>
+            </Tooltip>
+          </div>
+
           <div
             className={cn("space-y-1", sidebarCollapsed ? "px-1.5" : "px-2.5")}
           >
@@ -1041,6 +1162,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 groupConfigs,
                 groupedDisplayHosts,
                 handleCopyCredentials,
+                handleCopyHostname,
                 handleDuplicateHost,
                 handleEditGroupConfig,
                 handleEditHost,
@@ -1151,21 +1273,13 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
               )}
               data-section="vault-notes-retained"
             >
-              <NotesManager
-                notes={notes}
-                noteGroups={noteGroups}
+              <MemoVaultNotesSection
+                NotesManager={NotesManager}
                 hosts={hosts}
-                onUpdateNotes={onUpdateNotes}
-                onUpdateNoteGroups={onUpdateNoteGroups}
+                isActive={currentSection === "notes"}
                 openNoteId={openNoteId ?? null}
                 onOpenNoteIdHandled={onOpenNoteIdHandled}
-                onOpenHost={(host: any, source: any) => {
-                  if (source?.noteId && onOpenHostFromNote) {
-                    onOpenHostFromNote(host, source);
-                    return;
-                  }
-                  handleHostConnect(host);
-                }}
+                onOpenHost={handleNotesOpenHost}
               />
             </div>
             {currentSection === "keys" && (
@@ -1280,12 +1394,9 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 resetKey="connection-logs"
               >
                 <Suspense fallback={<VaultSectionLoading />}>
-                  <LazyConnectionLogsManager
-                    logs={connectionLogs}
+                  <VaultConnectionLogsSection
+                    ConnectionLogsManager={LazyConnectionLogsManager}
                     hosts={hosts}
-                    onToggleSaved={onToggleConnectionLogSaved}
-                    onDelete={onDeleteConnectionLog}
-                    onClearUnsaved={onClearUnsavedConnectionLogs}
                     onOpenLogView={onOpenLogView}
                   />
                 </Suspense>
@@ -1343,6 +1454,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 groupConfigs={groupConfigs}
                 snippets={snippets}
                 onSnippetsChange={onUpdateSnippets}
+                onHostsChange={onUpdateHosts}
                 onImportKey={onImportOrReuseKey}
                 onSave={(host) => {
                   const latestHost = hosts.find(
@@ -1353,7 +1465,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                     openedHost: editingHost,
                     latestHost,
                   });
-                  onUpdateHosts(upsertHostById(hosts, nextHost));
+                  onUpdateHosts((prevHosts) => upsertHostById(prevHosts, nextHost));
                   setIsHostPanelOpen(false);
                   setEditingHost(null);
                   setNewHostGroupPath(null);
@@ -1573,11 +1685,16 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
               onClick={async () => {
                 if (pendingDeleteGroupPaths.length > 0) {
                   const isBulkDelete = bulkDeleteGroupPaths.length > 0;
-                  await deleteGroupPaths(
-                    pendingDeleteGroupPaths,
-                    deleteGroupWithHosts,
-                    isBulkDelete ? selectedHostIds : new Set(),
-                  );
+                  try {
+                    await deleteGroupPaths(
+                      pendingDeleteGroupPaths,
+                      deleteGroupWithHosts,
+                      isBulkDelete ? selectedHostIds : new Set<string>(),
+                    );
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : t("common.error"));
+                    return;
+                  }
                   if (isBulkDelete) {
                     const deletedItemCount =
                       selectedHostIds.size + selectedGroupPaths.size;

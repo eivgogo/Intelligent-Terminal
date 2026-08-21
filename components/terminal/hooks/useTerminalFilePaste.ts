@@ -5,6 +5,7 @@ import { useEffect } from "react";
 import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge";
 import { logger } from "../../../lib/logger";
 import type { TerminalSession } from "../../../types";
+import type { RemoteClipboardImageUploadResult } from "../clipboardImagePaste";
 import { handleTerminalClipboardPaste } from "../terminalClipboardPaste";
 
 interface UseTerminalFilePasteOptions {
@@ -20,6 +21,10 @@ interface UseTerminalFilePasteOptions {
   onPasteData?: (data: string) => boolean | void;
   scrollToBottomAfterProgrammaticInput: (data: string) => void;
   containerRef: React.RefObject<HTMLDivElement | null>;
+  /** Remote sessions only: auto-upload a clipboard image on paste. */
+  autoUploadClipboardImage?: boolean;
+  getRemoteCwd?: () => Promise<string | null | undefined>;
+  onClipboardImageUploadResult?: (result: RemoteClipboardImageUploadResult) => void;
 }
 
 export function useTerminalFilePaste({
@@ -33,6 +38,9 @@ export function useTerminalFilePaste({
   onPasteData,
   scrollToBottomAfterProgrammaticInput,
   containerRef,
+  autoUploadClipboardImage = false,
+  getRemoteCwd,
+  onClipboardImageUploadResult,
 }: UseTerminalFilePasteOptions) {
   useEffect(() => {
     const container = containerRef.current;
@@ -43,7 +51,11 @@ export function useTerminalFilePaste({
 
       const bridge = netcattyBridge.get();
 
-      if (!isLocalConnection || !bridge?.readClipboardFiles) return;
+      const wantsImageUpload =
+        autoUploadClipboardImage && !isLocalConnection && !!bridge?.readClipboardImage;
+      const canHandleLocalPaste =
+        isLocalConnection && !!(bridge?.readClipboardFiles || bridge?.hasClipboardImage);
+      if (!wantsImageUpload && !canHandleLocalPaste) return;
 
       // ⚡ Must call preventDefault SYNCHRONOUSLY — the event lifecycle
       // is synchronous; calling it after an await is too late and the
@@ -57,8 +69,12 @@ export function useTerminalFilePaste({
           if (!term) return;
           await handleTerminalClipboardPaste({
             bridge,
+            autoUploadClipboardImage: wantsImageUpload,
+            clipboardImageBridge: bridge ?? undefined,
+            getRemoteCwd,
             isLocalConnection,
             isSensitiveInput,
+            onClipboardImageUploadResult,
             readClipboardText: () => navigator.clipboard.readText(),
             scrollOnPaste: scrollOnPasteRef?.current ?? false,
             onPasteData,
@@ -78,9 +94,12 @@ export function useTerminalFilePaste({
       container.removeEventListener("paste", handlePaste, true);
     };
   }, [
+    autoUploadClipboardImage,
     containerRef,
+    getRemoteCwd,
     isLocalConnection,
     isSensitiveInput,
+    onClipboardImageUploadResult,
     onPasteData,
     scrollOnPasteRef,
     scrollToBottomAfterProgrammaticInput,

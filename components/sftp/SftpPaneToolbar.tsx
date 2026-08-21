@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bookmark, Check, ClipboardCopy, Eye, EyeOff, FilePlus, Folder, FolderPlus, FolderSync, Globe, Home, Languages, List, ListTree, RefreshCw, Search, TerminalSquare, Trash2, X } from "lucide-react";
+import { Bookmark, Check, ClipboardCopy, Eye, EyeOff, FilePlus, Folder, FolderPlus, FolderSync, Globe, Home, Languages, List, ListTree, RefreshCw, Search, Terminal, TerminalSquare, Trash2, X } from "lucide-react";
 import { useToolbarItemLayout } from "../../application/state/useToolbarItemLayout";
 import type { ToolbarItemLayoutDefaults } from "../../domain/toolbarItemLayout";
 import { STORAGE_KEY_SFTP_TOOLBAR_LAYOUT } from "../../infrastructure/config/storageKeys";
@@ -18,11 +18,18 @@ import type { SftpFilenameEncoding } from "../../types";
 import type { SftpPane } from "../../application/state/sftp/types";
 import type { SftpBookmark } from "../../domain/models";
 import { isWindowsPath } from "../../application/state/sftp/utils";
+import {
+  resolveSupersededImeInputEvent,
+  shouldAdoptExternalImeControlledValue,
+  shouldCommitImeControlledChange,
+} from "../../domain/imeControlledInput";
 import { toast } from "../ui/toast";
+import { sftpFilterFocusStore } from "../../application/state/sftp/sftpFilterFocusStore";
 
 export const SFTP_TOOLBAR_ITEM_IDS = [
   "bookmark",
   "goToTerminalCwd",
+  "locatePathInTerminal",
   "followTerminalCwd",
   "copyPath",
   "viewMode",
@@ -41,6 +48,7 @@ export const SFTP_TOOLBAR_LAYOUT_DEFAULTS: ToolbarItemLayoutDefaults = {
   placement: {
     bookmark: "show",
     goToTerminalCwd: "show",
+    locatePathInTerminal: "show",
     followTerminalCwd: "show",
     copyPath: "show",
     viewMode: "show",
@@ -55,20 +63,21 @@ export const SFTP_TOOLBAR_LAYOUT_DEFAULTS: ToolbarItemLayoutDefaults = {
 };
 
 /**
- * When the toolbar is narrow, keep these user-shown actions inline so the path
- * still has room. Other user-shown actions temporarily join the ⋮ list.
+ * When the action row is narrow, keep these user-shown actions inline.
+ * Other user-shown actions temporarily join the ⋮ list.
  * User "hide" / permanent "collapse" are always respected (never re-shown).
  */
 export const SFTP_TOOLBAR_NARROW_INLINE_IDS = new Set<SftpToolbarItemId>([
   "bookmark",
   "goToTerminalCwd",
+  "locatePathInTerminal",
   "followTerminalCwd",
   "copyPath",
   "viewMode",
   "filter",
 ]);
 
-/** Prioritize path space; same threshold as the pre-customize toolbar. */
+/** Spill non-pinned actions into ⋮ when the action row is this narrow. */
 export const SFTP_TOOLBAR_NARROW_WIDTH = 400;
 
 /** Apply user placement, then optional narrow-width temporary spill of show → overflow. */
@@ -193,7 +202,6 @@ interface SftpPaneToolbarProps {
   handlePathKeyDown: (e: React.KeyboardEvent) => void;
   handlePathDoubleClick: () => void;
   handlePathSubmit: (pathOverride?: string) => void;
-  startTransition: React.TransitionStartFunction;
   getNextUntitledName: (existingNames: string[]) => string;
   setNewFileName: (value: string) => void;
   setFileNameError: (value: string | null) => void;
@@ -211,6 +219,7 @@ interface SftpPaneToolbarProps {
   showHiddenFiles: boolean;
   onToggleShowHiddenFiles?: () => void;
   onGoToTerminalCwd?: () => void;
+  onLocatePathInTerminal?: () => void;
   followTerminalCwd?: boolean;
   onToggleFollowTerminalCwd?: () => void;
   viewMode: SftpPaneViewMode;
@@ -243,14 +252,16 @@ export const SftpBookmarkList: React.FC<SftpBookmarkListProps> = ({
           )}
           <Tooltip>
             <TooltipTrigger asChild>
-              <button
-                type="button"
-                className="flex-1 text-left text-xs truncate font-mono"
-                onClick={() => onNavigateToBookmark(bm.path)}
-              >
-                {bm.label}
-                <span className="ml-1.5 text-muted-foreground text-[10px]">{bm.path}</span>
-              </button>
+              <PopoverClose asChild>
+                <button
+                  type="button"
+                  className="flex-1 text-left text-xs truncate font-mono"
+                  onClick={() => onNavigateToBookmark(bm.path)}
+                >
+                  {bm.label}
+                  <span className="ml-1.5 text-muted-foreground text-[10px]">{bm.path}</span>
+                </button>
+              </PopoverClose>
             </TooltipTrigger>
             <TooltipContent>{bm.path}</TooltipContent>
           </Tooltip>
@@ -303,7 +314,6 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
   handlePathKeyDown,
   handlePathDoubleClick,
   handlePathSubmit,
-  startTransition,
   getNextUntitledName,
   setNewFileName,
   setFileNameError,
@@ -320,6 +330,7 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
   showHiddenFiles,
   onToggleShowHiddenFiles,
   onGoToTerminalCwd,
+  onLocatePathInTerminal,
   followTerminalCwd,
   onToggleFollowTerminalCwd,
   viewMode,
@@ -327,6 +338,16 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
   onListDrives,
 }) => {
   const [displayPath, setDisplayPath] = useState(pane.connection?.currentPath ?? "");
+  const [filterDraft, setFilterDraft] = useState(pane.filter);
+  const filterComposingRef = useRef(false);
+  const filterAtComposeStartRef = useRef(pane.filter);
+  // Directory at compositionstart. Navigation that leaves the filter already ""
+  // does not change pane.filter, so path is the signal that must supersede the
+  // draft (compositionend would otherwise commit stale IME text).
+  const filterPathAtComposeStartRef = useRef(pane.connection?.currentPath ?? "");
+  // Set when pane.filter / path changes externally during (or just after)
+  // composition so the post-compositionend onChange cannot re-commit a stale draft.
+  const filterCompositionSupersededRef = useRef(false);
   const prevDisplayConnectionIdRef = useRef(pane.connection?.id);
   const toolbarLayout = useToolbarItemLayout(
     STORAGE_KEY_SFTP_TOOLBAR_LAYOUT,
@@ -346,6 +367,65 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
       }),
     );
   }, [pane.connection?.currentPath, pane.connection?.id, pane.loading]);
+
+  useEffect(() => {
+    setFilterDraft((draftValue) => {
+      const composing = filterComposingRef.current;
+      const currentPath = pane.connection?.currentPath ?? "";
+      const pathChangedDuringCompose = composing
+        && currentPath !== filterPathAtComposeStartRef.current;
+      const shouldAdopt = shouldAdoptExternalImeControlledValue({
+        isComposingSession: composing,
+        draftValue,
+        externalValue: pane.filter,
+        // Allow navigation-cleared filters to supersede an open IME composition so
+        // compositionend / post-composition onChange cannot resurrect the draft.
+        valueAtComposeStart: composing
+          ? filterAtComposeStartRef.current
+          : undefined,
+      }) || pathChangedDuringCompose;
+      if (
+        shouldAdopt
+        && composing
+        && (
+          pane.filter !== filterAtComposeStartRef.current
+          || pathChangedDuringCompose
+        )
+      ) {
+        filterCompositionSupersededRef.current = true;
+      }
+      return shouldAdopt ? pane.filter : draftValue;
+    });
+  }, [pane.filter, pane.connection?.currentPath]);
+
+  // The filter input only mounts while the bar is open, so a composition that is
+  // still active when the bar closes never fires `compositionend`. Clear the guard
+  // (otherwise a stuck `true` blocks every later commit) and resync the draft to the
+  // committed filter so a reopened bar never shows stale, uncommitted text.
+  useEffect(() => {
+    if (!showFilterBar) {
+      filterComposingRef.current = false;
+      filterCompositionSupersededRef.current = false;
+      setFilterDraft(pane.filter);
+    }
+  }, [showFilterBar, pane.filter]);
+
+  useEffect(() => sftpFilterFocusStore.subscribe(pane.id, () => {
+    setShowFilterBar(true);
+    window.setTimeout(() => filterInputRef.current?.focus(), 0);
+  }), [filterInputRef, pane.id, setShowFilterBar]);
+
+  const commitFilterValue = useCallback((value: string) => {
+    // Committing/clearing finalizes any IME session, so drop the guard here. This
+    // covers every commit path (composition end, Escape, inline clear, close) so a
+    // stale composing flag can't block later commits or resurrect a pre-clear value.
+    filterComposingRef.current = false;
+    filterCompositionSupersededRef.current = false;
+    setFilterDraft(value);
+    // Keep parent filter in lockstep with the input. Deferred updates against a
+    // controlled value fight CJK IME composition and can echo/drop candidates.
+    onSetFilter(value);
+  }, [onSetFilter]);
 
   const handleNewFolder = useCallback(() => {
     setNewFolderName("");
@@ -402,15 +482,17 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
       "refresh",
     ];
     if (onGoToTerminalCwd) ids.push("goToTerminalCwd");
+    if (onLocatePathInTerminal) ids.push("locatePathInTerminal");
     if (onToggleFollowTerminalCwd) ids.push("followTerminalCwd");
     if (isRemote) ids.push("encoding");
     return ids;
-  }, [isRemote, onGoToTerminalCwd, onToggleFollowTerminalCwd]);
+  }, [isRemote, onGoToTerminalCwd, onLocatePathInTerminal, onToggleFollowTerminalCwd]);
 
   const itemLabels = useMemo(
     (): Record<SftpToolbarItemId, string> => ({
       bookmark: bookmarkButtonLabel,
       goToTerminalCwd: t("sftp.goToTerminalCwd"),
+      locatePathInTerminal: t("sftp.locatePathInTerminal"),
       followTerminalCwd: t("sftp.followTerminalCwd"),
       copyPath: t("sftp.copyCurrentPath"),
       viewMode: viewModeToggleLabel,
@@ -428,6 +510,7 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
     (): Record<SftpToolbarItemId, React.ReactNode> => ({
       bookmark: <Bookmark size={14} />,
       goToTerminalCwd: <TerminalSquare size={14} />,
+      locatePathInTerminal: <Terminal size={14} />,
       followTerminalCwd: <FolderSync size={14} />,
       copyPath: <ClipboardCopy size={14} />,
       viewMode: viewMode === "list" ? <List size={14} /> : <ListTree size={14} />,
@@ -614,6 +697,24 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
             <TooltipContent>{t("sftp.goToTerminalCwd")}</TooltipContent>
           </Tooltip>
         );
+      case "locatePathInTerminal":
+        if (!onLocatePathInTerminal) return null;
+        return (
+          <Tooltip key={id}>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6"
+                aria-label={t("sftp.locatePathInTerminal")}
+                onClick={onLocatePathInTerminal}
+              >
+                <Terminal size={14} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{t("sftp.locatePathInTerminal")}</TooltipContent>
+          </Tooltip>
+        );
       case "followTerminalCwd":
         if (!onToggleFollowTerminalCwd) return null;
         return (
@@ -763,6 +864,14 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
             {t("sftp.goToTerminalCwd")}
           </button>
         );
+      case "locatePathInTerminal":
+        if (!onLocatePathInTerminal) return null;
+        return (
+          <button key={id} type="button" className={menuItemClass} onClick={onLocatePathInTerminal}>
+            <Terminal size={14} className="shrink-0" />
+            {t("sftp.locatePathInTerminal")}
+          </button>
+        );
       case "followTerminalCwd":
         if (!onToggleFollowTerminalCwd) return null;
         return (
@@ -869,87 +978,97 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
 
   const overflowNodes = overflowIds.map(renderCollapsed).filter(Boolean);
 
+  const pathEditor = isEditingPath ? (
+    <div className="relative w-full min-w-0" data-section="terminal-sftp-path">
+      <Input
+        ref={pathInputRef}
+        value={editingPathValue}
+        onChange={(e) => {
+          setEditingPathValue(e.target.value);
+          setShowPathSuggestions(true);
+          setPathSuggestionIndex(-1);
+        }}
+        onBlur={handlePathBlur}
+        onKeyDown={handlePathKeyDown}
+        onFocus={() => setShowPathSuggestions(true)}
+        className="h-5 w-full text-[10px] bg-background"
+        autoFocus
+      />
+      {showPathSuggestions && pathSuggestions.length > 0 && (
+        <div
+          ref={pathDropdownRef}
+          className="absolute top-full left-0 right-0 mt-1 bg-popover border border-border rounded-md shadow-lg z-50 max-h-48 overflow-auto"
+        >
+          {pathSuggestions.map((suggestion, idx) => (
+            <button
+              key={suggestion.path}
+              type="button"
+              className={cn(
+                "w-full px-3 py-2 text-left text-xs flex items-center gap-2 hover:bg-secondary/60 transition-colors",
+                idx === pathSuggestionIndex && "bg-secondary/80",
+              )}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                handlePathSubmit(suggestion.path);
+              }}
+            >
+              {suggestion.type === "folder" ? (
+                <Folder size={12} className="text-primary shrink-0" />
+              ) : (
+                <Home size={12} className="text-muted-foreground shrink-0" />
+              )}
+              <span className="truncate font-mono">{suggestion.path}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  ) : (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div
+          className="w-full min-w-0 cursor-text hover:bg-secondary/50 rounded px-1 transition-colors"
+          data-section="terminal-sftp-path"
+          onDoubleClick={handlePathDoubleClick}
+        >
+          <SftpBreadcrumb
+            path={displayPath}
+            onNavigate={onNavigateTo}
+            onHome={() =>
+              pane.connection?.homeDir && onNavigateTo(pane.connection.homeDir)
+            }
+            isLocal={!isRemote}
+            onListDrives={onListDrives}
+            acceptForwardSlashUnc={
+              isWindowsPath(displayPath)
+              || isWindowsPath(pane.connection?.homeDir ?? "")
+            }
+          />
+        </div>
+      </TooltipTrigger>
+      <TooltipContent>{t("sftp.path.doubleClickToEdit")}</TooltipContent>
+    </Tooltip>
+  );
+
   return (
     <TooltipProvider delayDuration={500} skipDelayDuration={100} disableHoverableContent>
       {/* Path chrome stays outside customize so path right-click keeps native/browser menus. */}
       <div
         ref={outerRef}
-        className="h-7 px-2 flex items-center gap-1 border-b border-border/40 bg-secondary/20"
+        className="flex flex-col border-b border-border/40 bg-secondary/20"
         data-section="terminal-sftp-toolbar"
       >
-          {/* Editable Breadcrumb with autocomplete */}
-          {isEditingPath ? (
-            <div className="relative flex-1 min-w-0" data-section="terminal-sftp-path">
-              <Input
-                ref={pathInputRef}
-                value={editingPathValue}
-                onChange={(e) => {
-                  setEditingPathValue(e.target.value);
-                  setShowPathSuggestions(true);
-                  setPathSuggestionIndex(-1);
-                }}
-                onBlur={handlePathBlur}
-                onKeyDown={handlePathKeyDown}
-                onFocus={() => setShowPathSuggestions(true)}
-                className="h-5 w-full text-[10px] bg-background"
-                autoFocus
-              />
-              {showPathSuggestions && pathSuggestions.length > 0 && (
-                <div
-                  ref={pathDropdownRef}
-                  className="absolute top-full left-0 right-0 mt-1 bg-popover border border-border rounded-md shadow-lg z-50 max-h-48 overflow-auto"
-                >
-                  {pathSuggestions.map((suggestion, idx) => (
-                    <button
-                      key={suggestion.path}
-                      type="button"
-                      className={cn(
-                        "w-full px-3 py-2 text-left text-xs flex items-center gap-2 hover:bg-secondary/60 transition-colors",
-                        idx === pathSuggestionIndex && "bg-secondary/80",
-                      )}
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        handlePathSubmit(suggestion.path);
-                      }}
-                    >
-                      {suggestion.type === "folder" ? (
-                        <Folder size={12} className="text-primary shrink-0" />
-                      ) : (
-                        <Home size={12} className="text-muted-foreground shrink-0" />
-                      )}
-                      <span className="truncate font-mono">{suggestion.path}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div
-                  className="flex-1 min-w-0 cursor-text hover:bg-secondary/50 rounded px-1 transition-colors"
-                  data-section="terminal-sftp-path"
-                  onDoubleClick={handlePathDoubleClick}
-                >
-                  <SftpBreadcrumb
-                    path={displayPath}
-                    onNavigate={onNavigateTo}
-                    onHome={() =>
-                      pane.connection?.homeDir && onNavigateTo(pane.connection.homeDir)
-                    }
-                    isLocal={!isRemote}
-                    onListDrives={onListDrives}
-                    acceptForwardSlashUnc={
-                      isWindowsPath(displayPath)
-                      || isWindowsPath(pane.connection?.homeDir ?? "")
-                    }
-                  />
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>{t("sftp.path.doubleClickToEdit")}</TooltipContent>
-            </Tooltip>
-          )}
+        <div
+          className="h-7 px-2 flex items-center min-w-0"
+          data-section="terminal-sftp-path-row"
+        >
+          {pathEditor}
+        </div>
 
+        <div
+          className="h-7 px-2 flex items-center gap-1 border-t border-border/40"
+          data-section="terminal-sftp-actions"
+        >
           <ToolbarCustomizeContextMenu
             items={customizeItems}
             placementOf={(id) => toolbarLayout.layout.placement[id] ?? "show"}
@@ -957,19 +1076,22 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
             onMove={moveSftpItem}
             onReset={toolbarLayout.reset}
             t={t}
-            className="ml-auto flex items-center gap-0.5 shrink-0"
+            className="flex items-center gap-0.5 w-full min-w-0"
           >
             {inlineIds.map(renderInline)}
-            <ToolbarOverflowMenu
-              hasItems={overflowNodes.length > 0}
-              label={t("common.more")}
-              orientation="horizontal"
-              buttonClassName="h-6 w-6"
-              contentClassName="min-w-[140px]"
-            >
-              <div className="flex flex-col min-w-[140px]">{overflowNodes}</div>
-            </ToolbarOverflowMenu>
+            <div className="ml-auto shrink-0" data-section="terminal-sftp-overflow">
+              <ToolbarOverflowMenu
+                hasItems={overflowNodes.length > 0}
+                label={t("common.more")}
+                orientation="horizontal"
+                buttonClassName="h-6 w-6"
+                contentClassName="min-w-[140px]"
+              >
+                <div className="flex flex-col min-w-[140px]">{overflowNodes}</div>
+              </ToolbarOverflowMenu>
+            </div>
           </ToolbarCustomizeContextMenu>
+        </div>
       </div>
 
       {showFilterBar && (
@@ -984,23 +1106,91 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
             />
             <Input
               ref={filterInputRef}
-              value={pane.filter}
-              onChange={(e) => startTransition(() => onSetFilter(e.target.value))}
+              value={filterDraft}
+              onChange={(e) => {
+                const superseded = resolveSupersededImeInputEvent({
+                  compositionExternallySuperseded: filterCompositionSupersededRef.current,
+                  isComposingSession: filterComposingRef.current,
+                  nativeEventIsComposing: e.nativeEvent.isComposing,
+                });
+                if (superseded.ignoreEventValue) {
+                  // Keep draft on the external filter (e.g. navigation clear). Do not
+                  // apply the stale composed text from a post-compositionend change.
+                  if (superseded.clearSupersedeLatch) {
+                    filterCompositionSupersededRef.current = false;
+                  }
+                  setFilterDraft(pane.filter);
+                  return;
+                }
+                const next = e.target.value;
+                setFilterDraft(next);
+                if (
+                  shouldCommitImeControlledChange({
+                    isComposingSession: filterComposingRef.current,
+                    nativeEventIsComposing: e.nativeEvent.isComposing,
+                    compositionExternallySuperseded: filterCompositionSupersededRef.current,
+                  })
+                ) {
+                  onSetFilter(next);
+                }
+              }}
+              onCompositionStart={() => {
+                filterComposingRef.current = true;
+                filterCompositionSupersededRef.current = false;
+                filterAtComposeStartRef.current = pane.filter;
+                filterPathAtComposeStartRef.current = pane.connection?.currentPath ?? "";
+              }}
+              onCompositionEnd={(e) => {
+                filterComposingRef.current = false;
+                // We never self-commit while composing, so any change to pane.filter
+                // or directory during the session is external (e.g. follow-CWD
+                // navigation). Honor it and drop the stale composed draft instead of
+                // letting the commit overwrite the navigation-cleared filter. Path
+                // matters when the committed filter was already "" before compose -
+                // navigation sets filter to "" again, so filter-only checks miss it.
+                // Keep the supersede latch armed so a browser post-compositionend
+                // onChange cannot reassert the composed text with composing=false.
+                // Some IME paths never fire that follow-up change; disarm on the
+                // next macrotask so ordinary keystrokes commit. Guard the clear so
+                // an intervening post-composition onChange or a new compositionstart
+                // is not clobbered.
+                const pathChangedDuringCompose =
+                  (pane.connection?.currentPath ?? "") !== filterPathAtComposeStartRef.current;
+                if (
+                  pane.filter !== filterAtComposeStartRef.current
+                  || pathChangedDuringCompose
+                  || filterCompositionSupersededRef.current
+                ) {
+                  filterCompositionSupersededRef.current = true;
+                  setFilterDraft(pane.filter);
+                  window.setTimeout(() => {
+                    if (
+                      filterCompositionSupersededRef.current
+                      && !filterComposingRef.current
+                    ) {
+                      filterCompositionSupersededRef.current = false;
+                    }
+                  }, 0);
+                  return;
+                }
+                commitFilterValue(e.currentTarget.value);
+              }}
               placeholder={t("sftp.filter.placeholder")}
               className="h-6 w-full pl-7 pr-7 text-xs bg-background"
               onKeyDown={(e) => {
                 if (e.key === "Escape") {
-                  if (pane.filter) {
-                    startTransition(() => onSetFilter(""));
+                  if (filterComposingRef.current || e.nativeEvent.isComposing) return;
+                  if (filterDraft || pane.filter) {
+                    commitFilterValue("");
                   } else {
                     setShowFilterBar(false);
                   }
                 }
               }}
             />
-            {pane.filter && (
+            {filterDraft && (
               <button
-                onClick={() => startTransition(() => onSetFilter(""))}
+                onClick={() => commitFilterValue("")}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               >
                 <X size={12} />
@@ -1014,7 +1204,7 @@ export const SftpPaneToolbar: React.FC<SftpPaneToolbarProps> = React.memo(({
                 size="icon"
                 className="h-6 w-6 shrink-0"
                 onClick={() => {
-                  startTransition(() => onSetFilter(""));
+                  commitFilterValue("");
                   setShowFilterBar(false);
                 }}
               >
@@ -1102,7 +1292,7 @@ function SftpBookmarkPopoverBody({
   );
 }
 
-/** Nested bookmark opener inside ⋮ — keeps overflow open until a leaf action. */
+/** Nested bookmark opener inside ⋮ - keeps overflow open until a leaf action. */
 function SftpOverflowNestedBookmark({
   menuItemClass,
   bookmarkButtonLabel,

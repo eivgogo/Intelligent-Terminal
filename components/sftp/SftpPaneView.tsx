@@ -19,22 +19,22 @@ import {
   useSftpWritableHosts,
 } from "./SftpContext";
 import type { SftpPane } from "../../application/state/sftp/types";
-import { joinPath } from "../../application/state/sftp/utils";
+import { joinPath, getParentPath } from "../../application/state/sftp/utils";
 import type { Host } from "../../domain/models";
 import { useSftpPaneDialogs } from "./hooks/useSftpPaneDialogs";
 import { useSftpPaneDragAndSelect } from "./hooks/useSftpPaneDragAndSelect";
 import { useSftpPaneFiles } from "./hooks/useSftpPaneFiles";
 import { useSftpPanePath } from "./hooks/useSftpPanePath";
-import { useSftpPaneSorting, type UseSftpPaneSortingResult } from "./hooks/useSftpPaneSorting";
+import { useSftpPaneSorting, type UseSftpPaneSortingResult } from "../../application/state/sftp/useSftpPaneSorting";
 import { useSftpPaneVirtualList } from "./hooks/useSftpPaneVirtualList";
 import { sftpPaneViewModeStore } from "../../application/state/sftp/sftpPaneViewModeStore";
-import { useSftpDialogActionHandler } from "./hooks/useSftpDialogAction";
+import { useSftpDialogActionHandler } from "../../application/state/sftp/sftpDialogActionStore";
 import { useSftpBookmarks } from "./hooks/useSftpBookmarks";
-import { useLocalSftpBookmarks } from "./hooks/useLocalSftpBookmarks";
+import { useLocalSftpBookmarks } from "../../application/state/sftp/localSftpBookmarks";
 import { useGlobalSftpBookmarks } from "./hooks/useGlobalSftpBookmarks";
-import { useSftpHostViewMode } from "./hooks/useSftpHostViewMode";
+import { useSftpHostViewMode } from "../../application/state/sftp/sftpHostViewModeStore";
 import { sftpListOrderStore } from "./hooks/useSftpListOrderStore";
-import { sftpTreeSelectionStore } from "./hooks/useSftpTreeSelectionStore";
+import { sftpTreeSelectionStore } from "../../application/state/sftp/sftpTreeSelectionStore";
 import { sftpClipboardUploadStore } from "./clipboardUpload";
 
 interface TreeReloadRequest {
@@ -79,6 +79,7 @@ interface SftpPaneViewProps {
   showEmptyHeader?: boolean;
   onToggleShowHiddenFiles?: () => void;
   onGoToTerminalCwd?: () => void;
+  onLocatePathInTerminal?: () => void;
   followTerminalCwd?: boolean;
   onToggleFollowTerminalCwd?: () => void;
   /** When true, treat this pane as always active (used by SftpSidePanel which manages visibility itself) */
@@ -95,6 +96,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
   showEmptyHeader = true,
   onToggleShowHiddenFiles,
   onGoToTerminalCwd,
+  onLocatePathInTerminal,
   followTerminalCwd,
   onToggleFollowTerminalCwd,
   forceActive,
@@ -326,6 +328,14 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
     }
   }, [callbacks, pane.connection?.currentPath, requestTreeReload]);
 
+  const handleExtractArchive = useCallback((entry: Parameters<NonNullable<typeof callbacks.onExtractArchive>>[0], fullPath?: string) => {
+    const archivePath = fullPath ?? joinPath(pane.connection?.currentPath ?? "", entry.name);
+    void Promise.resolve(callbacks.onExtractArchive?.(entry, fullPath)).then(() => {
+      const parentPath = getParentPath(archivePath);
+      if (parentPath) requestNestedTreeReload([parentPath]);
+    });
+  }, [callbacks, pane.connection?.currentPath, requestNestedTreeReload]);
+
   const handleMoveEntriesToPath = useCallback(async (sourcePaths: string[], targetPath: string) => {
     await callbacks.onMoveEntriesToPath(sourcePaths, targetPath);
   }, [callbacks]);
@@ -551,7 +561,6 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
         handlePathKeyDown={handlePathKeyDown}
         handlePathDoubleClick={handlePathDoubleClick}
         handlePathSubmit={handlePathSubmit}
-        startTransition={startTransition}
         getNextUntitledName={getNextUntitledName}
         setNewFileName={setNewFileName}
         setFileNameError={setFileNameError}
@@ -568,6 +577,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
         showHiddenFiles={pane.showHiddenFiles}
         onToggleShowHiddenFiles={onToggleShowHiddenFiles}
         onGoToTerminalCwd={onGoToTerminalCwd}
+        onLocatePathInTerminal={onLocatePathInTerminal}
         followTerminalCwd={followTerminalCwd}
         onToggleFollowTerminalCwd={onToggleFollowTerminalCwd}
         viewMode={viewMode}
@@ -600,6 +610,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
             onOpenFileWith={callbacks.onOpenFileWith}
             onEditFile={callbacks.onEditFile}
             onDownloadFile={callbacks.onDownloadFile}
+            onExtractArchive={callbacks.onExtractArchive ? handleExtractArchive : undefined}
             onEditPermissions={callbacks.onEditPermissions}
             draggedFiles={draggedFiles}
             openNewFolderDialog={openNewFolderDialogAtPath}
@@ -651,6 +662,7 @@ const SftpPaneViewInner: React.FC<SftpPaneViewProps> = ({
           onEditFile={callbacks.onEditFile}
           onDownloadFile={callbacks.onDownloadFile}
           onDownloadFiles={callbacks.onDownloadFiles}
+          onExtractArchive={callbacks.onExtractArchive ? handleExtractArchive : undefined}
           onEditPermissions={callbacks.onEditPermissions}
           onUploadExternalFileList={handleUploadExternalFileList}
           onUploadExternalFolder={handleUploadExternalFolder}
@@ -733,6 +745,7 @@ const sftpPaneViewAreEqual = (
   if (prev.followTerminalCwd !== next.followTerminalCwd) return false;
   if (prev.onToggleFollowTerminalCwd !== next.onToggleFollowTerminalCwd) return false;
   if (prev.onGoToTerminalCwd !== next.onGoToTerminalCwd) return false;
+  if (prev.onLocatePathInTerminal !== next.onLocatePathInTerminal) return false;
   if (prev.onToggleShowHiddenFiles !== next.onToggleShowHiddenFiles) return false;
 
   return true;

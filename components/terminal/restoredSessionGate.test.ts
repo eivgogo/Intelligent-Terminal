@@ -4,9 +4,12 @@ import { readFileSync } from "node:fs";
 
 import {
   getInitialTerminalStatus,
+  resolveTerminalVaultInitialized,
+  shouldResetConnectAutomationOnReconnect,
   shouldSuppressHostStartupCommandOnReconnect,
   shouldStartTerminalBackend,
 } from "./restoredSessionGate.ts";
+import { setVaultInitialized } from "../../application/state/vaultInitStore.ts";
 
 test("restored disconnected sessions initialize as connecting", () => {
   assert.equal(
@@ -19,8 +22,39 @@ test("normal sessions initialize as connecting", () => {
   assert.equal(getInitialTerminalStatus(), "connecting");
 });
 
-test("restored disconnected sessions start terminal backend", () => {
+test("restored disconnected sessions start terminal backend only after vault hydration", () => {
+  setVaultInitialized(false);
+  assert.equal(shouldStartTerminalBackend(), false);
+  setVaultInitialized(true);
   assert.equal(shouldStartTerminalBackend(), true);
+});
+
+test("terminal boot waits for vaultInitialized before creating a backend session", () => {
+  const source = readFileSync(new URL("./useTerminalEffects.ts", import.meta.url), "utf8");
+  assert.match(
+    source,
+    /if \(!attachExistingSession && !vaultInitialized\) \{\s*\n\s*return;/,
+    "boot effect must wait for vault hydration before creating xterm/backend",
+  );
+  assert.match(
+    source,
+    /vaultInitialized,/,
+    "vaultInitialized must be in the boot effect dependency list",
+  );
+});
+
+test("terminal popup can supply its own completed vault hydration state", () => {
+  const terminalSource = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
+  const popupSource = readFileSync(new URL("../TerminalPopupPage.tsx", import.meta.url), "utf8");
+
+  assert.match(
+    terminalSource,
+    /const vaultInitialized = resolveTerminalVaultInitialized\(\s*sharedVaultInitialized,\s*vaultInitializedOverride,\s*\);/,
+  );
+  assert.match(popupSource, /vaultInitializedOverride=\{vaultInitialized\}/);
+  assert.equal(resolveTerminalVaultInitialized(false, true), true);
+  assert.equal(resolveTerminalVaultInitialized(false), false);
+  assert.equal(resolveTerminalVaultInitialized(true, false), false);
 });
 
 test("host startup command policy distinguishes restored and automatic reconnects", () => {
@@ -29,6 +63,88 @@ test("host startup command policy distinguishes restored and automatic reconnect
   assert.equal(shouldSuppressHostStartupCommandOnReconnect("automatic"), true);
 });
 
+test("connect automation reset policy distinguishes manual and automatic reconnects", () => {
+  assert.equal(shouldResetConnectAutomationOnReconnect("manual"), true);
+  assert.equal(shouldResetConnectAutomationOnReconnect("restored"), true);
+  assert.equal(shouldResetConnectAutomationOnReconnect("automatic"), false);
+});
+
+test("manual reconnect resets connect automation before opening a new session", () => {
+  const source = readFileSync(new URL("../Terminal.tsx", import.meta.url), "utf8");
+  const reconnectIndex = source.indexOf("const startReconnect = ");
+  const cancelBatchIndex = source.indexOf(
+    "await cancelConnectAutomationBatch(connectAutomationBatch)",
+    reconnectIndex,
+  );
+  const manualBranchIndex = source.indexOf('if (mode === "manual")', reconnectIndex);
+  const stopFailureRetryIndex = source.indexOf(
+    'if (mode === "auto" && retryTokenStillCurrent())',
+    cancelBatchIndex,
+  );
+  const stopFailureDisconnectedIndex = source.indexOf(
+    'updateStatus("disconnected")',
+    stopFailureRetryIndex,
+  );
+  const resetConsumedIndex = source.indexOf(
+    "connectScriptsConsumedRef.current = false",
+    manualBranchIndex,
+  );
+  const resetCompletedIndex = source.indexOf(
+    "connectScriptsCompletedIdsRef.current = new Set()",
+    manualBranchIndex,
+  );
+  const resetInFlightIndex = source.indexOf(
+    "connectScriptsInFlightRef.current = false",
+    manualBranchIndex,
+  );
+  const connectingIndex = source.indexOf('updateStatus("connecting")', manualBranchIndex);
+  const autoElseIndex = source.indexOf("} else {", manualBranchIndex);
+  const autoSuppressIndex = source.indexOf(
+    'shouldSuppressHostStartupCommandOnReconnect("automatic")',
+    autoElseIndex,
+  );
+
+  assert.notEqual(reconnectIndex, -1);
+  assert.notEqual(cancelBatchIndex, -1);
+  assert.notEqual(manualBranchIndex, -1);
+  assert.notEqual(stopFailureRetryIndex, -1);
+  assert.notEqual(stopFailureDisconnectedIndex, -1);
+  assert.notEqual(resetConsumedIndex, -1);
+  assert.notEqual(resetCompletedIndex, -1);
+  assert.notEqual(resetInFlightIndex, -1);
+  assert.notEqual(connectingIndex, -1);
+  assert.notEqual(autoElseIndex, -1);
+  assert.notEqual(autoSuppressIndex, -1);
+  assert.ok(
+    cancelBatchIndex < manualBranchIndex
+      && cancelBatchIndex < resetConsumedIndex
+      && cancelBatchIndex < resetCompletedIndex
+      && cancelBatchIndex < resetInFlightIndex,
+    "every reconnect must await onConnect cancellation before manual guards are cleared",
+  );
+  assert.ok(
+    stopFailureRetryIndex < stopFailureDisconnectedIndex
+      && stopFailureDisconnectedIndex < manualBranchIndex,
+    "automatic reconnect must return to disconnected when stopping the old batch fails",
+  );
+  assert.ok(
+    resetConsumedIndex < connectingIndex && resetCompletedIndex < connectingIndex,
+    "manual reconnect must clear connect-automation consumption before status becomes connecting",
+  );
+  assert.ok(
+    autoElseIndex < autoSuppressIndex && autoSuppressIndex < connectingIndex,
+    "automatic reconnect must keep the existing connect-automation consumption decision",
+  );
+  assert.ok(
+    !source.slice(autoElseIndex, connectingIndex).includes("connectScriptsConsumedRef.current = false"),
+    "automatic reconnect must not reset connect-automation refs",
+  );
+  assert.match(
+    source.slice(autoElseIndex, connectingIndex),
+    /connectScriptsConsumedRef\.current = true/,
+    "automatic reconnect must stop the old batch without queuing it again",
+  );
+});
 test("restored disconnected sessions still create a terminal runtime before backend startup", () => {
   const source = readFileSync(new URL("./useTerminalEffects.ts", import.meta.url), "utf8");
   const runtimeIndex = source.indexOf("const runtime = createXTermRuntime");
@@ -129,6 +245,7 @@ test("reconnect wakes a hibernated terminal before requiring a terminal instance
   const wakePromiseRefIndex = source.indexOf("const wakePromiseRef = useRef<Promise<boolean> | null>(null)");
   const wakeGuardRefIndex = source.indexOf("const reconnectWakeInFlightRef = useRef(false)");
   const wakeTokenRefIndex = source.indexOf("const reconnectWakeTokenRef = useRef<symbol | null>(null)");
+  const wakeInvalidateModeIndex = source.indexOf('const reconnectWakeInvalidateModeRef = useRef<"dispose" | "keep">("dispose")');
   const wakeTokenCleanupIndex = source.indexOf("reconnectWakeTokenRef.current = null", wakeTokenRefIndex);
   const reconnectIndex = source.indexOf("const startReconnect = ");
   const hibernatedBranchIndex = source.indexOf('!termRef.current && hibernatedRef.current', reconnectIndex);
@@ -140,12 +257,15 @@ test("reconnect wakes a hibernated terminal before requiring a terminal instance
   const wakeJoinIndex = source.indexOf("return wakePromiseRef.current ?? false", source.indexOf("const wakeFromHibernateRuntime"));
   const wakeTokenIndex = source.indexOf("const wakeToken = Symbol()", hibernatedBranchIndex);
   const staleWakeGuardIndex = source.indexOf("reconnectWakeTokenRef.current !== wakeToken", wakeInvocationIndex);
-  const staleWakeDisposeIndex = source.indexOf("disposeRuntimeOnly();", staleWakeGuardIndex);
+  const staleWakeDisposeGuardIndex = source.indexOf('reconnectWakeInvalidateModeRef.current === "dispose"', staleWakeGuardIndex);
+  const staleWakeDisposeIndex = source.indexOf("disposeRuntimeOnly();", staleWakeDisposeGuardIndex);
+  const disconnectKeepModeIndex = source.indexOf('reconnectWakeInvalidateModeRef.current = "keep"', source.indexOf("const handleDisconnect"));
   const missingTermReturnIndex = source.indexOf("if (!termRef.current) return;", reconnectIndex);
 
   assert.notEqual(wakePromiseRefIndex, -1);
   assert.notEqual(wakeGuardRefIndex, -1);
   assert.notEqual(wakeTokenRefIndex, -1);
+  assert.notEqual(wakeInvalidateModeIndex, -1);
   assert.notEqual(wakeTokenCleanupIndex, -1);
   assert.ok(wakeTokenCleanupIndex < reconnectIndex);
   assert.notEqual(reconnectIndex, -1);
@@ -158,7 +278,9 @@ test("reconnect wakes a hibernated terminal before requiring a terminal instance
   assert.notEqual(wakeJoinIndex, -1);
   assert.notEqual(wakeTokenIndex, -1);
   assert.notEqual(staleWakeGuardIndex, -1);
+  assert.notEqual(staleWakeDisposeGuardIndex, -1);
   assert.notEqual(staleWakeDisposeIndex, -1);
+  assert.notEqual(disconnectKeepModeIndex, -1);
   assert.notEqual(missingTermReturnIndex, -1);
   assert.ok(
     hibernatedBranchIndex < missingTermReturnIndex && wakeCallIndex < missingTermReturnIndex,
@@ -173,8 +295,12 @@ test("reconnect wakes a hibernated terminal before requiring a terminal instance
     "closing a terminal must be able to invalidate a pending hibernated reconnect",
   );
   assert.ok(
-    staleWakeGuardIndex < staleWakeDisposeIndex,
+    staleWakeGuardIndex < staleWakeDisposeGuardIndex && staleWakeDisposeGuardIndex < staleWakeDisposeIndex,
     "an invalidated hibernated wake must dispose any runtime created after unmount cleanup",
+  );
+  assert.ok(
+    disconnectKeepModeIndex !== -1,
+    "disconnect must keep a woken runtime so later reconnect still has a terminal instance",
   );
 });
 

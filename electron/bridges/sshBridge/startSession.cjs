@@ -15,8 +15,13 @@ const {
 } = require("../terminalInterruptDiagnostics.cjs");
 const { runWhenProxyConnectionReady } = require("../proxyUtils.cjs");
 const { getAttachHomeWebContentsId } = require("../terminalAttachRestore.cjs");
-const { executeBoundedSshCommand } = require("../boundedSshExec.cjs");
 const { openBoundedSshShellCallback } = require("../boundedSshChannelOpen.cjs");
+const { listInteractiveShellPids: listInteractiveShellPidsShared } = require("../sshInteractiveShells.cjs");
+const {
+  shouldConfirmReusedShellLiveness,
+  resolveReusedShellLivenessMs,
+  waitForReusedShellLiveness,
+} = require("../sshIdleParkPolicy.cjs");
 const {
   annotateMacLocalNetworkErrorMessage,
   resolveFirstTcpEndpoint,
@@ -94,7 +99,11 @@ function userVisibleSshErrorMessage(err, options = {}) {
   const firstHop = resolveFirstTcpEndpoint(options);
   return annotateMacLocalNetworkErrorMessage(err?.message || String(err || ""), {
     hostname: options.hostname || options.host,
-    firstHopHostname: firstHop.hostname,
+    firstHopHostname: firstHop.skipProbe ? "" : firstHop.hostname,
+    firstHopResolvedAddress: firstHop.skipProbe
+      ? ""
+      : (options._macLocalNetworkResolvedFirstHop || options.firstHopResolvedAddress || ""),
+    skipProbe: firstHop.skipProbe === true,
   });
 }
 
@@ -185,73 +194,52 @@ async function prepareAgentForwardingOptions(options, resolveForwardingAgentSock
 
 function createStartSessionApi(ctx) {
   with (ctx) {
-    const listInteractiveShellPids = async (conn) => {
-      if (!conn || typeof conn.exec !== "function") {
-        return Promise.resolve({ available: false, pids: [] });
-      }
+    const listInteractiveShellPids = (conn) => listInteractiveShellPidsShared(conn, {
+      quoteShellArg,
+    });
 
-      const scanCompleteMarker = "__NETCATTY_SHELL_SCAN_COMPLETE__";
-      const script = `SELF=$$
-ps_output=$(ps -e -o pid=,ppid=,tty=,comm= 2>/dev/null) || exit 69
-{
-  printf '%s\n' "$ps_output" | awk -v pp="$PPID" -v self="$SELF" '
-    function isshell(c) { sub(/^.*\\//, "", c); sub(/^-/, "", c); return c ~ /^(ba|z|fi|k|da|a|c|tc)?sh$/ }
-    $1 != self && $2 == pp && $3 !~ /^\\?+$/ && isshell($4) { print $1 }
-  '
-  if [ -r /proc/$SELF/environ ]; then
-    conn=$(tr '\\0' '\\n' < /proc/$SELF/environ 2>/dev/null | sed -n 's/^SSH_CONNECTION=//p' | head -n1)
-    if [ -n "$conn" ]; then
-      for d in /proc/[0-9]*; do
-        pid=$(basename "$d")
-        [ "$pid" = "$SELF" ] && continue
-        [ -r "$d/environ" ] || continue
-        conn2=$(tr '\\0' '\\n' < "$d/environ" 2>/dev/null | sed -n 's/^SSH_CONNECTION=//p' | head -n1)
-        [ "$conn2" = "$conn" ] || continue
-        comm=$(cat "$d/comm" 2>/dev/null)
-        case "$comm" in sh|bash|zsh|fish|ksh|dash|ash|csh|tcsh) ;; *) continue ;; esac
-        ppid=$(awk '{ print $4 }' "$d/stat" 2>/dev/null)
-        pcomm=$(cat "/proc/$ppid/comm" 2>/dev/null)
-        case "$pcomm" in sshd|dropbear|dropbearmulti) ;; *) continue ;; esac
-        tty=$(ps -p "$pid" -o tty= 2>/dev/null | tr -d '[:space:]')
-        [ -n "$tty" ] && [ "$tty" != "?" ] && printf '%s\\n' "$pid"
-      done
-    fi
-  fi
-} | awk '/^[0-9]+$/ && !seen[$1]++ { print $1 }'
-printf '%s\n' '${scanCompleteMarker}'`;
-
-      try {
-        const result = await executeBoundedSshCommand(
-          conn,
-          `exec sh -c ${quoteShellArg(script)}`,
-          {
-            openingTimeoutMs: 1500,
-            runTimeoutMs: 1500,
-            maxOutputBytes: 1024 * 1024,
-          },
-        );
-        const lines = result.stdout.split(/\r?\n/);
-        const completed = lines.includes(scanCompleteMarker);
-        const available = completed && (result.code === null || result.code === 0);
-        return {
-          available,
-          pids: available ? lines.filter((value) => /^\d+$/.test(value)) : [],
-        };
-      } catch {
-        return { available: false, pids: [] };
+    const listInteractiveShellPidsResilient = async (conn, opts = {}) => {
+      const attempts = Math.max(1, Number(opts.attempts) || 1);
+      const backoffMs = Math.max(1, Number(opts.backoffMs) || 150);
+      const initialDelayMs = Math.max(0, Number(opts.initialDelayMs) || 0);
+      let last = { available: false, pids: [] };
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        const delayMs = attempt === 0
+          ? initialDelayMs
+          : backoffMs * attempt;
+        if (delayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+        last = await listInteractiveShellPids(conn);
+        if (last.available || !last.rateLimited) return last;
       }
+      return last;
     };
 
-    const waitForNewInteractiveShellPid = async (conn, previousPids) => {
+    const waitForNewInteractiveShellPid = async (conn, previousPids, opts = {}) => {
       const previous = new Set(previousPids);
+      const initialDelayMs = Math.max(0, Number(opts.initialDelayMs) || 0);
+      const backoffMs = Math.max(1, Number(opts.backoffMs) || 50);
+      if (initialDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, initialDelayMs));
+      }
       for (let attempt = 0; attempt < 5; attempt += 1) {
         const discovery = await listInteractiveShellPids(conn);
-        if (!discovery.available) return null;
+        if (!discovery.available) {
+          // Bastion rate limits can reject the post-open discovery exec just
+          // after a retried shell open. Back off and try again instead of
+          // permanently leaving the copied session without a shellPid.
+          if (discovery.rateLimited && attempt < 4) {
+            await new Promise((resolve) => setTimeout(resolve, backoffMs * (attempt + 1)));
+            continue;
+          }
+          return null;
+        }
         const newPids = discovery.pids.filter((pid) => !previous.has(pid));
         if (newPids.length === 1) return newPids[0];
         if (newPids.length > 1) return null;
         if (attempt < 4) {
-          await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+          await new Promise((resolve) => setTimeout(resolve, backoffMs * (attempt + 1)));
         }
       }
       return null;
@@ -325,7 +313,15 @@ printf '%s\n' '${scanCompleteMarker}'`;
         cols: options.cols || 80,
         rows: options.rows || 24,
       };
-      sessions.set(sessionId, session);
+      const { claimSessionSlot } = require("../sessionBootEpoch.cjs");
+      const claim = claimSessionSlot(sessions, sessionId, session, options.bootEpoch);
+      if (!claim.ok) {
+        const supersededError = new Error("Connection superseded by a newer reconnect");
+        supersededError.code = "NETCATTY_BOOT_SUPERSEDED";
+        try { stream?.close?.(); } catch { /* ignore */ }
+        try { if (!isReused) conn?.end?.(); } catch { /* ignore */ }
+        throw supersededError;
+      }
       openTerminalOutputSession?.(sessionId, event.sender);
 
       // Attach the shared connection descriptor to this session. The caller owns
@@ -427,6 +423,21 @@ printf '%s\n' '${scanCompleteMarker}'`;
         writeToRemote(buf) {
           try { return stream.write(buf); } catch { return true; /* ignore */ }
         },
+        waitForTransportDrain(drainOpts = {}) {
+          // ssh2 buffers up to its 2 MiB channel window before write() returns
+          // false. Watch writableLength progress so healthy slow links can take
+          // longer than one timeout window while a fully stalled peer is bounded.
+          return waitForWritableDrain(stream, {
+            ...drainOpts,
+            progressIntervalMs: 1000,
+            // ssh2 keeps writableLength unchanged until one queued write fully
+            // completes, but shrinks _chunk on each channel-window adjustment.
+            // Include both so partial frame delivery counts as progress.
+            getProgressValue: () => (
+              (Number(stream.writableLength) || 0) + (stream._chunk?.length || 0)
+            ),
+          });
+        },
         interruptRemote() {
           try { stream.signal?.("INT"); } catch { /* ignore */ }
         },
@@ -477,6 +488,10 @@ printf '%s\n' '${scanCompleteMarker}'`;
             bytes: Buffer.isBuffer(data) ? data.length : Buffer.byteLength(String(data)),
           });
           return;
+        }
+        if (session.blockUntargetedCwdProbe && session.pendingCwdRecoveryAfterUserCommand) {
+          session.pendingCwdRecoveryAfterUserCommand = false;
+          session.allowCwdRecovery = true;
         }
         // data is Buffer from ssh2 — feed raw bytes to ZMODEM sentry.
         // In normal mode, sentry's onData callback handles decoding and buffering.
@@ -647,38 +662,23 @@ printf '%s\n' '${scanCompleteMarker}'`;
       log,
       connRef,
       refHolder,
+      reuseOpts = {},
     ) {
       const cols = options.cols || 80;
       const rows = options.rows || 24;
       const sender = event.sender;
       const conn = sourceSession.conn;
-      let discoveryConnectionError = null;
-      const onDiscoveryConnectionError = (err) => {
-        discoveryConnectionError = err;
-      };
-      let shellDiscoveryBeforeOpen = { available: false, pids: [] };
-      if (!options.skipShellPidDiscovery) {
-        conn.once("error", onDiscoveryConnectionError);
-        shellDiscoveryBeforeOpen = await listInteractiveShellPids(conn);
-        conn.removeListener("error", onDiscoveryConnectionError);
-      }
-      const shellPidsBeforeOpen = shellDiscoveryBeforeOpen.pids;
-      if (discoveryConnectionError) {
-        releaseConnectionRef(refHolder);
-        throw discoveryConnectionError;
-      }
-      const assignedPids = new Set(
-        [...sessions.values()]
-          .filter((candidate) => candidate?.connRef === connRef && candidate.shellPid)
-          .map((candidate) => String(candidate.shellPid)),
-      );
-      const unclaimedPids = shellPidsBeforeOpen.filter((pid) => !assignedPids.has(pid));
-      const unassignedSessions = [...sessions.values()].filter(
-        (candidate) => candidate?.connRef === connRef && !candidate.shellPid,
-      );
-      if (unclaimedPids.length === 1 && unassignedSessions.length === 1) {
-        unassignedSessions[0].shellPid = unclaimedPids[0];
-      }
+      // Bastions (jumpHosts or direct targets) rate-limit rapid session channel
+      // opens ("channelOpen too offen"). Opening a discovery exec *before* the
+      // shell burns that budget and Copy Tab falls back to a fresh login
+      // (issue #2704). Open the shell first; discover shellPid afterwards.
+      const configuredBackoffMs = Number(options.sshChannelOpenRateLimitBackoffMs);
+      const discoveryBackoffMs = Number.isFinite(configuredBackoffMs) && configuredBackoffMs > 0
+        ? configuredBackoffMs
+        : 150;
+      const shellPidsBeforeOpen = [...sessions.values()]
+        .filter((candidate) => candidate?.connRef === connRef && candidate.shellPid)
+        .map((candidate) => String(candidate.shellPid));
 
       log("reusing existing connection for new shell channel", {
         sessionId,
@@ -732,7 +732,14 @@ printf '%s\n' '${scanCompleteMarker}'`;
         };
         conn.once("error", onConnError);
 
+        if (connRef.allowShellReuse === false) {
+          conn.removeListener("error", onConnError);
+          failReuse(new Error("Transport is no longer reusable for shells"));
+          return;
+        }
+
         try {
+          const rateLimitBackoffMs = Number(options.sshChannelOpenRateLimitBackoffMs);
           openBoundedSshShellCallback(
             conn,
             {
@@ -756,47 +763,268 @@ printf '%s\n' '${scanCompleteMarker}'`;
                 failReuse(err);
                 return;
               }
+              if (connRef.allowShellReuse === false) {
+                if (stream) { try { stream.close(); } catch { /* ignore */ } }
+                failReuse(new Error("Transport is no longer reusable for shells"));
+                return;
+              }
 
               sendProgress('connected');
 
-              // Hand the up-front lease over to the real session without changing
-              // the lease count (transferConnectionRef). setupShellSession still
-              // records connRef; transfer rebinds _sshTransportLeaseId so a later
-              // releaseConnectionRef(session) returns the right lease.
-              setupShellSession({
-                conn,
-                stream,
-                options: { ...options, _connRef: connRef },
-                sessionId,
-                event,
-                log,
-                detachX11Forwarding: null,
-                chainConnections: [],
-                isReused: true,
-              });
-              const copiedSession = sessions.get(sessionId);
-              if (copiedSession) {
-                if (typeof transferConnectionRef === "function") {
-                  transferConnectionRef(refHolder, copiedSession);
+              const finishReusedShellOpen = (prefetchedChunks = []) => {
+                if (settled) {
+                  if (stream) { try { stream.close(); } catch { /* ignore */ } }
+                  return;
+                }
+
+                // Hand the up-front lease over to the real session without changing
+                // the lease count (transferConnectionRef). setupShellSession still
+                // records connRef; transfer rebinds _sshTransportLeaseId so a later
+                // releaseConnectionRef(session) returns the right lease.
+                try {
+                  setupShellSession({
+                    conn,
+                    stream,
+                    options: { ...options, _connRef: connRef },
+                    sessionId,
+                    event,
+                    log,
+                    detachX11Forwarding: null,
+                    chainConnections: [],
+                    isReused: true,
+                  });
+                } catch (setupErr) {
+                  // openBoundedSshShellCallback delivers this from a Promise .then
+                  // without catching callback throws — reject via failReuse.
+                  failReuse(setupErr);
+                  return;
+                }
+                if (prefetchedChunks.length > 0) {
+                  for (const chunk of prefetchedChunks) {
+                    stream.emit("data", chunk);
+                  }
+                }
+                const reconnectAfterLastShellClose =
+                  consumePendingShellReconnectRisk(connRef);
+                const copiedSession = sessions.get(sessionId);
+                if (copiedSession && reconnectAfterLastShellClose) {
+                  copiedSession.blockUntargetedCwdProbe = true;
+                  copiedSession.parkedReconnectRisk = reconnectAfterLastShellClose;
+                }
+                if (copiedSession) {
+                  if (typeof transferConnectionRef === "function") {
+                    transferConnectionRef(refHolder, copiedSession);
+                  } else {
+                    // Legacy count model: detach holder without decrement.
+                    refHolder.connRef = null;
+                  }
                 } else {
-                  // Legacy count model: detach holder without decrement.
                   refHolder.connRef = null;
                 }
-              } else {
-                refHolder.connRef = null;
-              }
-              const newShellPidPromise = shellDiscoveryBeforeOpen.available
-                ? waitForNewInteractiveShellPid(conn, shellPidsBeforeOpen)
-                : Promise.resolve(null);
-              void newShellPidPromise.then((newShellPid) => {
-                const liveSession = sessions.get(sessionId);
-                if (liveSession && newShellPid) {
-                  liveSession.shellPid = newShellPid;
+
+                void discoverCopiedShellPid(copiedSession).then((newShellPid) => {
+                  // Bind PID only to the session this reuse opened. A higher
+                  // bootEpoch reconnect may already own sessionId in the map.
+                  const liveSession = sessions.get(sessionId);
+                  if (liveSession && liveSession === copiedSession && newShellPid) {
+                    liveSession.shellPid = newShellPid;
+                  }
+                  settled = true;
+                  resolve({ sessionId });
+                });
+              };
+
+              const discoverCopiedShellPid = async (copiedSession) => {
+                if (options.skipShellPidDiscovery) return null;
+                const liveBaseline = () => [...sessions.values()]
+                  .filter((candidate) => (
+                    candidate?.connRef === connRef
+                    && candidate !== copiedSession
+                    && candidate.shellPid
+                  ))
+                  .map((candidate) => String(candidate.shellPid));
+                const listUnassignedSiblings = () => [...sessions.values()].filter(
+                  (candidate) => (
+                    candidate?.connRef === connRef
+                    && candidate !== copiedSession
+                    && !candidate.shellPid
+                  ),
+                );
+                // Prefer PIDs already recorded on sibling tabs of this shared
+                // transport. Fall back to the pre-shell snapshot when the source
+                // closed before discovery runs but had a known shellPid.
+                let baseline = liveBaseline();
+                if (baseline.length === 0) {
+                  baseline = shellPidsBeforeOpen;
                 }
-                settled = true;
-                resolve({ sessionId });
+                // Also reconcile when some siblings are already tracked but the
+                // copy source (or another tab) still lacks shellPid — otherwise
+                // waitForNew sees multiple "new" PIDs and returns null.
+                const needsUntrackedReconcile = listUnassignedSiblings().length > 0;
+                const blockedEndpointSibling = !options.sourceSessionId
+                  && listUnassignedSiblings().some(
+                    (candidate) => candidate.blockUntargetedCwdProbe === true,
+                  );
+                // Idle-park reconnect after the last interactive shell closed:
+                // no sibling tabs share this transport, so post-open discovery
+                // cannot disambiguate anything. Skip the exec — bastions often
+                // tear down the interactive session when a second channel opens,
+                // racing start completion as
+                // "Terminal session closed before its output route opened" (#2923).
+                // Copy Tab (sourceSessionId) still needs discovery even when the
+                // source closes mid-open and leaves an empty baseline.
+                if (
+                  baseline.length === 0
+                  && !options.sourceSessionId
+                  && (!needsUntrackedReconcile || blockedEndpointSibling)
+                ) {
+                  if (copiedSession && blockedEndpointSibling) {
+                    copiedSession.blockUntargetedCwdProbe = true;
+                    copiedSession.parkedReconnectRisk = {
+                      oldShellPids: [],
+                      hasUnknownOldShell: true,
+                    };
+                  }
+                  return null;
+                }
+                if (baseline.length === 0 || needsUntrackedReconcile) {
+                  const discovery = await listInteractiveShellPidsResilient(conn, {
+                    initialDelayMs: discoveryBackoffMs,
+                    attempts: 4,
+                    backoffMs: discoveryBackoffMs,
+                  });
+                  if (!discovery.available && !discovery.rateLimited) {
+                    // Discovery is permanently unavailable (not rate-limited).
+                    return null;
+                  }
+                  if (discovery.available && discovery.pids.length > 0) {
+                    const assignedPids = new Set(liveBaseline());
+                    for (const pid of baseline) assignedPids.add(String(pid));
+                    const unclaimed = discovery.pids.filter((pid) => !assignedPids.has(pid));
+                    const unassignedSiblings = listUnassignedSiblings();
+                    if (unclaimed.length === 1 && unassignedSiblings.length === 1) {
+                      unassignedSiblings[0].shellPid = unclaimed[0];
+                      baseline = liveBaseline();
+                    } else if (unassignedSiblings.length === 0 && unclaimed.length === 1) {
+                      // Sole unclaimed PID is ambiguous once the source tab is
+                      // gone: the closing source process may still be listed
+                      // while the copied shell has not appeared yet. Wait for a
+                      // PID beyond that candidate; if none appears and the
+                      // candidate remains the only unclaimed shell, it is the
+                      // copy (source process already exited).
+                      const candidatePid = String(unclaimed[0]);
+                      const waited = await waitForNewInteractiveShellPid(conn, [candidatePid], {
+                        initialDelayMs: discoveryBackoffMs,
+                        backoffMs: discoveryBackoffMs,
+                      });
+                      if (waited) return waited;
+                      const recheck = await listInteractiveShellPids(conn);
+                      if (!recheck.available) return null;
+                      const assigned = new Set(liveBaseline());
+                      const remaining = recheck.pids
+                        .map(String)
+                        .filter((pid) => !assigned.has(pid));
+                      if (remaining.length === 1) return remaining[0];
+                      return null;
+                    } else if (unassignedSiblings.length === 1 && unclaimed.length === 2) {
+                      // Source never recorded shellPid (e.g. OSC 7 cwd skipped
+                      // the probe), so the first post-open scan already lists
+                      // both shared shells. Reintroducing a pre-open exec would
+                      // burn bastion channel budget (#2704). Disambiguate by
+                      // process age (etimes): login shells on one transport are
+                      // created sequentially, so the copied shell is younger.
+                      // Numeric PID order is not a timestamp and fails when the
+                      // PID allocator wraps between source and copy.
+                      const ages = discovery.ages || {};
+                      const left = String(unclaimed[0]);
+                      const right = String(unclaimed[1]);
+                      const leftAge = ages[left];
+                      const rightAge = ages[right];
+                      if (
+                        Number.isFinite(leftAge)
+                        && Number.isFinite(rightAge)
+                        && leftAge !== rightAge
+                      ) {
+                        const older = leftAge > rightAge ? left : right;
+                        const newer = older === left ? right : left;
+                        unassignedSiblings[0].shellPid = older;
+                        return newer;
+                      }
+                      // Ages tied (same etimes second) or unavailable: refuse
+                      // numeric PID order — after wrap the lower PID can be the
+                      // copy. Leave the pair unassigned and keep only already-
+                      // tracked PIDs in the baseline so waitForNew can still
+                      // claim the copy if one of the two later disappears.
+                      baseline = [...assignedPids];
+                    } else if (assignedPids.size > 0) {
+                      baseline = [...assignedPids];
+                    }
+                  }
+                  // Empty successful scans (shell not visible yet) must not
+                  // abort — waitForNew retries until the new shell appears.
+                }
+                return waitForNewInteractiveShellPid(conn, baseline, {
+                  // Brief pause after the shell channel so bastion rate limits
+                  // have a chance to clear before the discovery exec.
+                  initialDelayMs: discoveryBackoffMs,
+                  backoffMs: discoveryBackoffMs,
+                });
+              };
+
+              // Decide at channel-open time, not when start() was queued.
+              // Copy Tab can lose its source shell while this open is still
+              // pinned; pendingShellReconnectRisk is recorded then (#2923).
+              const confirmReusedShellLiveness = reuseOpts.confirmReusedShellLiveness === true
+                || shouldConfirmReusedShellLiveness({
+                  state: connRef?.state,
+                  pendingShellReconnectRisk: connRef?.pendingShellReconnectRisk,
+                  remoteSshVersion: conn?._remoteVer,
+                });
+              if (!confirmReusedShellLiveness) {
+                finishReusedShellOpen();
+                return;
+              }
+
+              // Idle-park reconnect on an unknown / non-multiplex banner: the
+              // channel can open and then immediately exit 0 (齐治 TERM-SSHD,
+              // issue #2923). Fail reuse before setupShellSession so start()
+              // can discard the parked transport and dial fresh.
+              void waitForReusedShellLiveness(stream, {
+                settleMs: resolveReusedShellLivenessMs(options.sshReusedShellLivenessMs),
+                setTimeout,
+                clearTimeout,
+              }).then((liveness) => {
+                if (settled) {
+                  if (stream) { try { stream.close(); } catch { /* ignore */ } }
+                  return;
+                }
+                if (!liveness.alive) {
+                  log("reused parked shell closed immediately, discarding transport", {
+                    sessionId,
+                    hostname: options.hostname,
+                    reason: liveness.reason,
+                    code: liveness.code,
+                    transportId: connRef?.id,
+                  });
+                  if (connRef) {
+                    connRef.allowIdlePark = false;
+                    connRef.allowShellReuse = false;
+                    if (typeof markEndpointNoIdlePark === "function") {
+                      markEndpointNoIdlePark(connRef.endpoint || connRef.endpointKey);
+                    }
+                  }
+                  try { stream.close(); } catch { /* ignore */ }
+                  failReuse(new Error("Reused parked shell closed immediately"));
+                  return;
+                }
+                finishReusedShellOpen(liveness.buffered);
+              }).catch((livenessErr) => {
+                failReuse(livenessErr);
               });
-            }
+            },
+            Number.isFinite(rateLimitBackoffMs) && rateLimitBackoffMs > 0
+              ? { rateLimitBackoffMs }
+              : {},
           );
         } catch (syncErr) {
           // ssh2 can throw synchronously (e.g. "Not connected") if the borrowed
@@ -810,7 +1038,7 @@ printf '%s\n' '${scanCompleteMarker}'`;
       });
     }
 
-    function reuseShellSession(event, options, sourceSession, sessionId, log) {
+    function reuseShellSession(event, options, sourceSession, sessionId, log, reuseOpts = {}) {
       const connRef = sourceSession.connRef;
       const refHolder = {};
       // Pin while queued as well as while opening: the source tab may close
@@ -828,6 +1056,7 @@ printf '%s\n' '${scanCompleteMarker}'`;
           log,
           connRef,
           refHolder,
+          reuseOpts,
         ));
       const tail = operation.then(() => undefined, () => undefined);
       connRef.shellOpenQueue = tail;
@@ -871,9 +1100,29 @@ printf '%s\n' '${scanCompleteMarker}'`;
       // X11. For X11 hosts we deliberately skip reuse and make a fresh
       // connection so the duplicate keeps working X11 forwarding.
       const reuseEndpoint = buildConnectionReuseEndpoint(options);
+      const allowTransportReuse = options.reuseTransport !== false;
+      // Copy/Split reuse is source-specific. If that source disappears or its
+      // channel cannot open, fall through to a fresh login instead of silently
+      // borrowing another live, idle, or in-flight transport for the endpoint.
+      const allowGeneralTransportReuse = allowTransportReuse && !options.sourceSessionId;
+      const sourceReuseState = options._sourceReuseState;
+      const canAttemptSourceReuse = Boolean(
+        allowTransportReuse
+        && options.sourceSessionId
+        && !options.x11Forwarding
+        && (!sourceReuseState || sourceReuseState.attempted !== true),
+      );
 
-      if (options.sourceSessionId && !options.x11Forwarding) {
-        const sourceSession = findReusableSession(sessions, options.sourceSessionId, reuseEndpoint);
+      if (canAttemptSourceReuse) {
+        if (sourceReuseState) sourceReuseState.attempted = true;
+        const sourceSession = findReusableSession(sessions, options.sourceSessionId, reuseEndpoint)
+          || (sourceReuseState?.session
+            ? findReusableSession(
+              new Map([[options.sourceSessionId, sourceReuseState.session]]),
+              options.sourceSessionId,
+              reuseEndpoint,
+            )
+            : null);
         if (sourceSession) {
           try {
             return await reuseShellSession(event, options, sourceSession, sessionId, log);
@@ -897,7 +1146,7 @@ printf '%s\n' '${scanCompleteMarker}'`;
 
       // Idle-park / endpoint reuse: after the last tab returns its lease the
       // transport may still be warm. Open a new shell channel without re-auth.
-      if (!options.x11Forwarding && typeof findTransportByEndpoint === "function") {
+      if (allowGeneralTransportReuse && !options.x11Forwarding && typeof findTransportByEndpoint === "function") {
         // Shell park reuse requires exact agentForwarding match so disabling
         // ForwardAgent cannot reattach to a warm conn that still exposes the agent.
         const parked = findTransportByEndpoint(reuseEndpoint, { kind: "shell" });
@@ -908,6 +1157,11 @@ printf '%s\n' '${scanCompleteMarker}'`;
               hostname: options.hostname,
               transportId: parked.id,
               transportState: parked.state,
+            });
+            const confirmReusedShellLiveness = shouldConfirmReusedShellLiveness({
+              state: parked.state,
+              pendingShellReconnectRisk: parked.pendingShellReconnectRisk,
+              remoteSshVersion: parked.conn?._remoteVer,
             });
             return await reuseShellSession(
               event,
@@ -921,6 +1175,7 @@ printf '%s\n' '${scanCompleteMarker}'`;
               },
               sessionId,
               log,
+              { confirmReusedShellLiveness },
             );
           } catch (parkErr) {
             log("parked transport reuse failed, falling back to fresh connection", {
@@ -938,7 +1193,12 @@ printf '%s\n' '${scanCompleteMarker}'`;
       // for the same compatible endpoint can wait for this leader and then
       // open its own channel on the authenticated transport.
       let pendingDialCoordination = options._pendingDialState?.coordination || null;
-      if (!pendingDialCoordination && !options.x11Forwarding && typeof beginTransportDial === "function") {
+      if (
+        allowGeneralTransportReuse
+        && !pendingDialCoordination
+        && !options.x11Forwarding
+        && typeof beginTransportDial === "function"
+      ) {
         const coordination = beginTransportDial(reuseEndpoint, { kind: "shell" });
         if (coordination.role === "reuse" || coordination.role === "join") {
           try {
@@ -1043,6 +1303,7 @@ printf '%s\n' '${scanCompleteMarker}'`;
           port: options.port || 22,
           knownHosts: options.knownHosts,
           verifyHostKeys: options.verifyHostKeys,
+          bootEpoch: options.bootEpoch,
         });
 
         // Authentication for final target
@@ -1085,6 +1346,9 @@ printf '%s\n' '${scanCompleteMarker}'`;
             identityFilePaths: options.identityFilePaths,
             hostname: options.hostname,
             initialPassphrase: options.passphrase,
+            passphraseSignal: options._passphraseSignal,
+            sessionId,
+            bootEpoch: options.bootEpoch,
             logPrefix: "[SSH]",
             onPassphrasePromptShown: () => sendProgress(
               totalHops, totalHops, options.hostname, "auth-attempt", "waiting for user input...",
@@ -1108,6 +1372,9 @@ printf '%s\n' '${scanCompleteMarker}'`;
             keyName: options.keyId || options.username,
             hostname: options.hostname,
             initialPassphrase: effectivePassphrase,
+            passphraseSignal: options._passphraseSignal,
+            sessionId,
+            bootEpoch: options.bootEpoch,
             logPrefix: "[SSH]",
             onPassphrasePromptShown: () => sendProgress(
               totalHops, totalHops, options.hostname, "auth-attempt", "waiting for user input...",
@@ -1857,20 +2124,32 @@ printf '%s\n' '${scanCompleteMarker}'`;
                 // Create the shared reference-counted descriptor for this
                 // connection now that the owning channel is open, then wire the
                 // shell up through the shared helper.
-                const ownerSession = setupShellSession({
-                  conn,
-                  stream,
-                  options: {
-                    ...options,
-                    _actualAgentForwarding: Boolean(connectOpts.agentForward),
-                  },
-                  sessionId,
-                  event,
-                  log,
-                  detachX11Forwarding,
-                  chainConnections,
-                  isReused: false,
-                });
+                let ownerSession;
+                try {
+                  ownerSession = setupShellSession({
+                    conn,
+                    stream,
+                    options: {
+                      ...options,
+                      _actualAgentForwarding: Boolean(connectOpts.agentForward),
+                    },
+                    sessionId,
+                    event,
+                    log,
+                    detachX11Forwarding,
+                    chainConnections,
+                    isReused: false,
+                  });
+                } catch (setupErr) {
+                  // Callback runs from openBoundedSshShellCallback's Promise
+                  // .then without a catch — reject the owning start Promise.
+                  if (detachX11Forwarding) {
+                    try { detachX11Forwarding(); } catch { /* ignore */ }
+                  }
+                  settled = true;
+                  reject(setupErr);
+                  return;
+                }
                 establishedOwnerSession = ownerSession;
                 connRef = createConnectionRef(ownerSession, conn, chainConnections);
                 if (pendingDialCoordination) {
@@ -2103,6 +2382,7 @@ printf '%s\n' '${scanCompleteMarker}'`;
             password: options.password,
             logPrefix,
             scope: "terminal",
+            bootEpoch: options.bootEpoch,
             getAuthBanner: () => authBanner,
             shouldSkipAutoFill: () => shouldSkipKiPasswordAutoFill(authPhase),
             onAutoFill: () => sendProgress(

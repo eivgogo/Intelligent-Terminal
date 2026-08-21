@@ -97,13 +97,30 @@ declare global {
       directory: string;
     }): Promise<{ success: boolean; error?: string; filePath?: string }>;
     openSessionLogsDir?(directory: string): Promise<{ success: boolean; error?: string }>;
-    startManualSessionLog?(payload: {
+    clearSessionLogsDir?(directory: string): Promise<{ success: boolean; deletedCount: number; failedCount: number; error?: string }>;
+    chooseManualSessionLogPath?(payload: {
       sessionId: string;
       sessionName?: string;
       preferredDirectory?: string;
       format?: 'txt' | 'raw' | 'html';
+    }): Promise<{
+      success: boolean;
+      canceled?: boolean;
+      error?: string;
+      selectionToken?: string;
+      filePath?: string;
+      format?: 'txt' | 'raw' | 'html';
+    }>;
+    startManualSessionLog?(payload: {
+      sessionId: string;
+      sessionName?: string;
+      preferredDirectory?: string;
+      /** Opaque token from chooseManualSessionLogPath (path is main-process only). */
+      selectionToken?: string;
+      format?: 'txt' | 'raw' | 'html';
       timestampsEnabled?: boolean;
       initialLine?: string;
+      alternateScreenActive?: boolean;
     }): Promise<{ success: boolean; started: boolean; canceled?: boolean; error?: string; filePath?: string }>;
     stopManualSessionLog?(payload: {
       sessionId: string;
@@ -114,10 +131,16 @@ declare global {
 
     // Get file path from File object (for drag-and-drop, uses Electron's webUtils)
     getPathForFile?(file: File): string | undefined;
+    showSystemNotification?(payload: {
+      title: string;
+      body: string;
+      sessionId?: string;
+    }): Promise<{ shown: boolean; reason?: string }>;
     readClipboardText?(): Promise<string>;
     writeClipboardText?(text: string): Promise<boolean>;
     readClipboardFiles?(): Promise<Array<{ path: string; name: string; isDirectory: boolean; size?: number }>>;
     readClipboardImage?(): Promise<{ path: string; name: string; mediaType: string; size?: number } | null>;
+    hasClipboardImage?(): Promise<boolean>;
 
     // Credential encryption (field-level safeStorage for sensitive data at rest)
     credentialsAvailable?(): Promise<boolean>;

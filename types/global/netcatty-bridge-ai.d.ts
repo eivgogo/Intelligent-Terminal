@@ -107,6 +107,21 @@ declare global {
       hostChain?: Array<{ hostId: string; label?: string; hostname?: string }>;
       activePortForwards?: Array<{ ruleId: string; label?: string; type?: string; localPort?: number; status?: string }>;
     }>, chatSessionId?: string): Promise<{ ok: boolean }>;
+    /** Update the app-owned live session snapshot used by existing AI scopes. */
+    aiMcpUpdateLiveSessions?(sessions: Array<{
+      sessionId: string;
+      hostId?: string;
+      hostname: string;
+      label: string;
+      os?: string;
+      username?: string;
+      protocol?: string;
+      shellType?: string;
+      deviceType?: string;
+      connected: boolean;
+      hostChain?: Array<{ hostId: string; label?: string; hostname?: string }>;
+      activePortForwards?: Array<{ ruleId: string; label?: string; type?: string; localPort?: number; status?: string }>;
+    }>): Promise<{ ok: boolean; count?: number; error?: string }>;
     /** Merge sessions into a chat scope without dropping existing entries. */
     aiMcpMergeSessions?(sessions: Array<{
       sessionId: string;
@@ -179,6 +194,7 @@ declare global {
     onCodexAppServerInteractionRequest?(cb: (payload: Record<string, unknown>) => void): () => void;
     onCodexAppServerInteractionCleared?(cb: (payload: { interactionIds: string[]; chatSessionId?: string }) => void): () => void;
     respondCodexAppServerInteraction?(payload: Record<string, unknown>): Promise<{ ok: boolean; error?: string }>;
+    cancelCodexAppServerInteractionTimeout?(interactionId: string): Promise<{ ok: boolean; cancelled?: boolean; error?: string }>;
     aiCattyCancelExec?(chatSessionId: string): Promise<unknown>;
     aiSetChatSessionCancelled?(chatSessionId: string, cancelled?: boolean): Promise<{ ok: boolean; error?: string }>;
     aiMcpSyncPermissionGrants?(grants: Array<Record<string, unknown>>): Promise<{ ok: boolean; count?: number; error?: string }>;

@@ -1,4 +1,4 @@
-import { Suspense, lazy } from 'react';
+import { StrictMode, Suspense, lazy } from 'react';
 import ReactDOM from 'react-dom/client';
 import '@fontsource/mona-sans/400.css';
 import '@fontsource/mona-sans/500.css';
@@ -12,8 +12,7 @@ import '@fontsource/jetbrains-mono/400.css';
 import '@fontsource/jetbrains-mono/500.css';
 import '@fontsource/jetbrains-mono/600.css';
 import App from './App';
-import { ToastProvider } from './components/ui/toast';
-import { TooltipProvider } from './components/ui/tooltip';
+import { AppLockGate } from './components/AppLockGate';
 
 const LazySettingsPage = lazy(() => import('./components/SettingsPage'));
 const LazyTerminalPopupPage = lazy(() => import('./components/TerminalPopupPage'));
@@ -37,10 +36,23 @@ function SettingsWindowFallback() {
           padding: '20px 16px 12px',
         }}
       >
-        <div style={{ fontSize: 18, fontWeight: 600 }}>Settings</div>
-        <div style={{ marginTop: 6, fontSize: 13, color: 'hsl(var(--muted-foreground))' }}>
-          Loading preferences...
-        </div>
+        <div
+          style={{
+            width: 96,
+            height: 22,
+            borderRadius: 6,
+            background: 'hsl(var(--muted) / 0.5)',
+          }}
+        />
+        <div
+          style={{
+            marginTop: 8,
+            width: 150,
+            height: 14,
+            borderRadius: 5,
+            background: 'hsl(var(--muted) / 0.38)',
+          }}
+        />
       </div>
 
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
@@ -125,6 +137,9 @@ const getRoute = () => {
   if (hash === '#/settings' || hash.startsWith('#/settings')) {
     return 'settings';
   }
+  if (hash === '#/tray' || hash.startsWith('#/tray')) {
+    return 'tray';
+  }
   if (hash === '#/terminal-popup' || hash.startsWith('#/terminal-popup')) {
     return 'terminal-popup';
   }
@@ -136,30 +151,72 @@ const getRoute = () => {
 
 const root = ReactDOM.createRoot(rootElement);
 
+const syncTrayWindowClass = (route: string) => {
+  const rootEl = document.documentElement;
+  if (route === 'tray') {
+    rootEl.classList.add('tray-window');
+    document.getElementById('splash')?.remove();
+  } else {
+    rootEl.classList.remove('tray-window');
+  }
+};
+
 const renderApp = () => {
   const route = getRoute();
+  const isPeerSessionWindow = window.location.hash.startsWith('#/session-window');
+  // Peer session windows must not drive the main window's settings IPC sync
+  // and must not re-apply OS-level system settings effects (tray, global
+  // shortcuts, …) — they follow the main window through the chrome stores.
+  const settingsOptions = isPeerSessionWindow
+    ? { enableSettingsSync: false, enableSystemEffects: false }
+    : undefined;
+
+  syncTrayWindowClass(route);
   if (route === 'settings') {
     root.render(
-      <ToastProvider>
-        <TooltipProvider delayDuration={300}>
-          <Suspense fallback={<SettingsWindowFallback />}>
-            <LazySettingsPage />
-          </Suspense>
-        </TooltipProvider>
-      </ToastProvider>
+      <StrictMode>
+        <AppLockGate settingsOptions={settingsOptions}>
+          {({ settings, appLock }) => (
+            <Suspense fallback={<SettingsWindowFallback />}>
+              <LazySettingsPage settings={settings} appLock={appLock} />
+            </Suspense>
+          )}
+        </AppLockGate>
+      </StrictMode>
     );
   } else if (route === 'terminal-popup') {
+    // forceRenderChildren: main sends terminalPopupConfig immediately after
+    // loadURL; the page must mount (and register onTerminalPopupConfig) without
+    // waiting for async app-lock init. notifyRendererReady stays false — this
+    // route is not on the deep-link readiness path.
     root.render(
-      <ToastProvider>
-        <TooltipProvider delayDuration={300}>
-          <Suspense fallback={<TerminalPopupWindowFallback />}>
-            <LazyTerminalPopupPage />
-          </Suspense>
-        </TooltipProvider>
-      </ToastProvider>
+      <StrictMode>
+        <AppLockGate
+          notifyRendererReady={false}
+          forceRenderChildren
+          settingsOptions={settingsOptions}
+        >
+          {({ settings, appLock }) => (
+            <Suspense fallback={<TerminalPopupWindowFallback />}>
+              {/* forceRenderChildren mounts the page so config IPC registers while
+                  locked; defer starting the terminal until unlock (Codex P2). */}
+              <LazyTerminalPopupPage
+                settings={settings}
+                allowTerminalStart={appLock.initialized && !appLock.locked}
+              />
+            </Suspense>
+          )}
+        </AppLockGate>
+      </StrictMode>
     );
   } else {
-    root.render(<App />);
+    root.render(
+      <StrictMode>
+        <AppLockGate settingsOptions={settingsOptions}>
+          {({ settings, appLock }) => <App settings={settings} appLock={appLock} />}
+        </AppLockGate>
+      </StrictMode>
+    );
   }
 };
 

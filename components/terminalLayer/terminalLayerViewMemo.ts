@@ -232,6 +232,7 @@ const SIDE_PANEL_STABLE_CTX_KEYS = [
   'systemMountedTabIds',
   'themeMountedTabIds',
   'handleHistoryPaste',
+  'handleHistoryDelete',
   'handleHistoryRun',
   'handleOpenHistory',
   'HistorySidePanel',
@@ -241,6 +242,8 @@ const SIDE_PANEL_STABLE_CTX_KEYS = [
   'sidePanelOpenTabs',
   'sidePanelLayouts',
   'sftpHostForTab',
+  'sftpPaneClosedTabIdsRef',
+  'sftpRetainedAfterCloseTabIdsRef',
   'effectiveHosts',
   'hosts',
   // SFTP Connected picker reads live terminal sessions from stable ctx.
@@ -259,6 +262,7 @@ const SIDE_PANEL_STABLE_CTX_KEYS = [
   'sftpPendingUploadsForTab',
   'handleSftpCurrentPathChange',
   'handleSftpActiveTransfersChange',
+  'handleSftpActiveExternalEditsChange',
   'sftpDoubleClickBehavior',
   'sftpAutoSync',
   'sftpShowHiddenFiles',
@@ -318,10 +322,7 @@ const SIDE_PANEL_STABLE_CTX_KEYS = [
   'validAIScopeTargetIds',
   'AISidePanelStateRoot',
   'NotesManager',
-  'notes',
-  'noteGroups',
-  'updateNotes',
-  'updateNoteGroups',
+  // notes / noteGroups / updateNotes / updateNoteGroups come from notesStore.
   'onOpenVaultNoteFromChat',
   'onOpenVaultHostFromChat',
   'onOpenVaultSectionFromChat',
@@ -360,8 +361,7 @@ const WORKSPACE_CTX_KEYS = [
   'fontSize',
   'terminalTheme',
   'followAppTerminalTheme',
-  'accentMode',
-  'customAccent',
+  // accentMode / customAccent come from appearanceChromeStore (Terminal leaf).
   'terminalSettings',
   'hotkeyScheme',
   'disableTerminalFontZoom',
@@ -486,6 +486,7 @@ export function terminalLayerFocusSidebarPropsEqual(prev: Ctx, next: Ctx): boole
     && eq(prev, next, 't')
     && eq(prev, next, 'onReorderWorkspaceSessions')
     && eq(prev, next, 'onRequestAddToWorkspace')
+    && eq(prev, next, 'onAppendHostToWorkspace')
     && eq(prev, next, 'handleCloseSession')
     && eq(prev, next, 'onCopySession')
     && eq(prev, next, 'onCopySessionToNewWindow')

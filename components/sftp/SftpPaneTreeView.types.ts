@@ -1,7 +1,7 @@
 import type { SftpFileEntry } from '../../types';
 import type { SftpPane } from '../../application/state/sftp/types';
 import type { SftpTransferSource } from './SftpContext';
-import type { UseSftpPaneSortingResult } from './hooks/useSftpPaneSorting';
+import type { UseSftpPaneSortingResult } from '../../application/state/sftp/useSftpPaneSorting';
 
 export interface SftpPaneTreeViewProps {
   pane: SftpPane;
@@ -23,6 +23,7 @@ export interface SftpPaneTreeViewProps {
   onOpenFileWith?: (entry: SftpFileEntry, fullPath?: string) => void;
   onEditFile?: (entry: SftpFileEntry, fullPath?: string) => void;
   onDownloadFile?: (entry: SftpFileEntry, fullPath?: string) => void;
+  onExtractArchive?: (entry: SftpFileEntry, fullPath?: string) => void | Promise<void>;
   onEditPermissions?: (entry: SftpFileEntry, fullPath?: string) => void;
   draggedFiles: (SftpTransferSource & { side: 'left' | 'right' })[] | null;
   openNewFolderDialog: (targetPath: string) => void;

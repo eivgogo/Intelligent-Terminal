@@ -1,5 +1,5 @@
 /**
- * Sync Payload Builders — Single source of truth for constructing and applying
+ * Sync Payload Builders - Single source of truth for constructing and applying
  * the encrypted cloud-sync payload.
  *
  * Both the main window (App.tsx) and the settings window (SettingsSyncTab.tsx)
@@ -22,16 +22,21 @@ import type {
 import {
   CLOUD_SYNC_PAYLOAD_ENTITY_KEYS,
   SYNC_PAYLOAD_ENTITY_KEYS,
+  SYNC_STORAGE_KEYS,
   hasSyncPayloadEntityData,
   type SyncPayload,
 } from '../domain/sync';
 import { migrateHostsFromLegacyLineTimestamps } from '../domain/host';
+import { toPersistedPortForwardingRules } from '../domain/portForwardingPersistence';
 import {
   nextCustomKeyBindingsSyncVersion,
   parseCustomKeyBindingsStorageRecord,
   serializeCustomKeyBindingsStorageRecord,
 } from '../domain/customKeyBindings';
-import { isEncryptedCredentialPlaceholder } from '../domain/credentials';
+import {
+  isEncryptedCredentialPlaceholder,
+  stripSyncPayloadEncryptedCredentials,
+} from '../domain/credentials';
 import { localStorageAdapter } from '../infrastructure/persistence/localStorageAdapter';
 import { decryptField, encryptField } from '../infrastructure/persistence/secureFieldAdapter';
 import { sanitizeQuickMessages } from '../infrastructure/ai/quickMessages';
@@ -42,6 +47,10 @@ import {
   parseTerminalFontSizeRecord,
   serializeTerminalFontSizeRecord,
 } from './state/terminalFontSizeSync';
+import {
+  parseCustomAccentRecord,
+  serializeCustomAccentRecord,
+} from './state/customAccentSync';
 import {
   STORAGE_KEY_THEME,
   STORAGE_KEY_UI_THEME_LIGHT,
@@ -66,6 +75,7 @@ import {
   STORAGE_KEY_SFTP_AUTO_SYNC,
   STORAGE_KEY_SFTP_SHOW_HIDDEN_FILES,
   STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD,
+  STORAGE_KEY_SFTP_SKIP_UNCHANGED,
   STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR,
   STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD,
   STORAGE_KEY_SFTP_DEFAULT_VIEW_MODE,
@@ -77,6 +87,7 @@ import {
   STORAGE_KEY_SHOW_SFTP_TAB,
   STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR,
   STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS,
+  STORAGE_KEY_SHOW_TAB_NUMBER_BADGES,
   STORAGE_KEY_DISABLE_TERMINAL_FONT_ZOOM,
   STORAGE_KEY_WORKSPACE_FOCUS_STYLE,
   STORAGE_KEY_AI_PROVIDERS,
@@ -91,6 +102,7 @@ import {
   STORAGE_KEY_AI_MAX_ITERATIONS,
   STORAGE_KEY_AI_AGENT_MODEL_MAP,
   STORAGE_KEY_AI_AGENT_PROVIDER_MAP,
+  STORAGE_KEY_AI_AGENT_THINKING_MAP,
   STORAGE_KEY_AI_WEB_SEARCH,
   STORAGE_KEY_AI_QUICK_MESSAGES,
   STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION,
@@ -122,15 +134,33 @@ export interface SyncableVaultData {
 }
 
 /**
- * Returns true when the payload contains any meaningful user data worth
- * protecting or syncing.
+ * Returns true when the payload carries non-empty plugin sidecar entries.
+ *
+ * An explicit empty `{entries:[]}` bundle is intentionally NOT treated as
+ * meaningful by itself — last-known cache alone must not authorize pushing a
+ * wiped hosts/keys vault to cloud (empty-vault upload guard). Sidecar-only
+ * wipes still sync when the vault also has entities/settings, or via Force Push.
+ */
+function hasMeaningfulPluginSidecars(payload: SyncPayload): boolean {
+  return Array.isArray(payload.pluginSidecars?.entries)
+    && payload.pluginSidecars.entries.length > 0;
+}
+
+/**
+ * Returns true when a payload contains entities, settings, or meaningful
+ * plugin sidecars worth syncing / protecting with empty-vault guards.
+ * Local-only trust records are intentionally ignored by the cloud variant.
  */
 export function hasMeaningfulSyncData(payload: SyncPayload): boolean {
   if (hasSyncPayloadEntityData(payload, SYNC_PAYLOAD_ENTITY_KEYS)) return true;
 
-  return Boolean(
-    payload.settings && Object.values(payload.settings).some((value) => value !== undefined),
-  );
+  if (
+    payload.settings && Object.values(payload.settings).some((value) => value !== undefined)
+  ) {
+    return true;
+  }
+
+  return hasMeaningfulPluginSidecars(payload);
 }
 
 /**
@@ -140,9 +170,14 @@ export function hasMeaningfulSyncData(payload: SyncPayload): boolean {
 export function hasMeaningfulCloudSyncData(payload: SyncPayload): boolean {
   if (hasSyncPayloadEntityData(payload, CLOUD_SYNC_PAYLOAD_ENTITY_KEYS)) return true;
 
-  return Boolean(
-    payload.settings && Object.values(payload.settings).some((value) => value !== undefined),
-  );
+  if (
+    payload.settings && Object.values(payload.settings).some((value) => value !== undefined)
+  ) {
+    return true;
+  }
+
+  // Plugin-only profiles (settings/baselines, no vault entities) must still sync.
+  return hasMeaningfulPluginSidecars(payload);
 }
 
 /**
@@ -165,10 +200,10 @@ export function sanitizePortForwardingRulesForSync(
   rules: PortForwardingRule[] | undefined,
 ): PortForwardingRule[] | undefined {
   if (!rules) return rules;
-  return rules.map((rule) => ({
+  // Runtime phases are never part of vault/cloud sync. lastUsedAt is also
+  // stripped so runtime activity cannot churn sync hashes.
+  return toPersistedPortForwardingRules(rules).map((rule) => ({
     ...rule,
-    status: 'inactive' as const,
-    error: undefined,
     lastUsedAt: undefined,
   }));
 }
@@ -214,9 +249,10 @@ const SYNCABLE_TERMINAL_KEYS = [
   'rightClickBehavior', 'showContextMenuOverFullscreenApps', 'middleClickBehavior', 'copyOnSelect', 'normalizeTextOnCopy', 'middleClickPaste', 'wordSeparators',
   'linkModifier', 'keywordHighlightEnabled', 'keywordHighlightRules',
   'keepaliveInterval', 'keepaliveCountMax', 'disableBracketedPaste', 'clearWipesScrollback',
-  'preserveSelectionOnInput', 'forcePromptNewLine', 'osc52Clipboard', 'dynamicTabTitleMode',
+  'autoUploadClipboardImageOnPaste',
+  'preserveSelectionOnInput', 'forcePromptNewLine', 'osc52Clipboard', 'oscNotifications', 'dynamicTabTitleMode',
   'autoCloseOnExit',
-  'showHostInfoBar', 'showServerStats',
+  'showHostInfoBar', 'hostInfoBarTitleMode', 'showServerStats',
   'serverStatsRefreshInterval',
   'systemManagerProcessRefreshInterval', 'systemManagerTmuxRefreshInterval',
   'systemManagerDockerListRefreshInterval', 'systemManagerDockerStatsRefreshInterval',
@@ -254,6 +290,7 @@ export const SYNCABLE_SETTING_STORAGE_KEYS = [
   STORAGE_KEY_SFTP_AUTO_SYNC,
   STORAGE_KEY_SFTP_SHOW_HIDDEN_FILES,
   STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD,
+  STORAGE_KEY_SFTP_SKIP_UNCHANGED,
   STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR,
   STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD,
   STORAGE_KEY_SFTP_DEFAULT_VIEW_MODE,
@@ -263,6 +300,7 @@ export const SYNCABLE_SETTING_STORAGE_KEYS = [
   STORAGE_KEY_SHOW_ONLY_UNGROUPED_HOSTS_IN_ROOT,
   STORAGE_KEY_SHOW_SFTP_TAB,
   STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS,
+  STORAGE_KEY_SHOW_TAB_NUMBER_BADGES,
   STORAGE_KEY_WORKSPACE_FOCUS_STYLE,
   STORAGE_KEY_AI_PROVIDERS,
   STORAGE_KEY_AI_ACTIVE_PROVIDER,
@@ -276,6 +314,7 @@ export const SYNCABLE_SETTING_STORAGE_KEYS = [
   STORAGE_KEY_AI_MAX_ITERATIONS,
   STORAGE_KEY_AI_AGENT_MODEL_MAP,
   STORAGE_KEY_AI_AGENT_PROVIDER_MAP,
+  STORAGE_KEY_AI_AGENT_THINKING_MAP,
   STORAGE_KEY_AI_WEB_SEARCH,
   STORAGE_KEY_AI_QUICK_MESSAGES,
   STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION,
@@ -355,7 +394,7 @@ const mergeAiProvidersPreservingLocalApiKeys = (
 
 /**
  * Same rationale as `mergeAiProvidersPreservingLocalApiKeys`. Only restores the
- * local apiKey when the incoming config still points at the same providerId —
+ * local apiKey when the incoming config still points at the same providerId - 
  * switching providers must not silently leak a key meant for a different one.
  */
 const mergeWebSearchConfigPreservingLocalApiKey = (
@@ -383,8 +422,8 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   if (darkUi) settings.darkUiThemeId = darkUi;
   const accentMode = localStorageAdapter.readString(STORAGE_KEY_ACCENT_MODE);
   if (accentMode === 'theme' || accentMode === 'custom') settings.accentMode = accentMode;
-  const accent = localStorageAdapter.readString(STORAGE_KEY_COLOR);
-  if (accent) settings.customAccent = accent;
+  const accentRaw = localStorageAdapter.readString(STORAGE_KEY_COLOR);
+  if (accentRaw) settings.customAccent = parseCustomAccentRecord(accentRaw).color;
   const uiFont = localStorageAdapter.readString(STORAGE_KEY_UI_FONT_FAMILY);
   if (uiFont) settings.uiFontFamilyId = uiFont;
   const lang = localStorageAdapter.readString(STORAGE_KEY_UI_LANGUAGE);
@@ -458,6 +497,8 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   if (hidden === 'true' || hidden === 'false') settings.sftpShowHiddenFiles = hidden === 'true';
   const compress = localStorageAdapter.readString(STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD);
   if (compress === 'true' || compress === 'false') settings.sftpUseCompressedUpload = compress === 'true';
+  const skipUnchanged = localStorageAdapter.readBoolean(STORAGE_KEY_SFTP_SKIP_UNCHANGED);
+  if (skipUnchanged != null) settings.sftpSkipUnchanged = skipUnchanged;
   const autoOpenSidebar = localStorageAdapter.readString(STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR);
   if (autoOpenSidebar === 'true' || autoOpenSidebar === 'false') settings.sftpAutoOpenSidebar = autoOpenSidebar === 'true';
   const followTerminalCwd = localStorageAdapter.readString(STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD);
@@ -465,7 +506,7 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   const defaultViewMode = localStorageAdapter.readString(STORAGE_KEY_SFTP_DEFAULT_VIEW_MODE);
   if (defaultViewMode === 'list' || defaultViewMode === 'tree') settings.sftpDefaultViewMode = defaultViewMode;
 
-  // SFTP Bookmarks (global only — local bookmarks are device-specific)
+  // SFTP Bookmarks (global only - local bookmarks are device-specific)
   const globalBookmarks = localStorageAdapter.read<SftpBookmark[]>(STORAGE_KEY_SFTP_GLOBAL_BOOKMARKS);
   if (globalBookmarks && Array.isArray(globalBookmarks)) settings.sftpGlobalBookmarks = globalBookmarks;
 
@@ -482,6 +523,8 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   if (showSftpTab != null) settings.showSftpTab = showSftpTab;
   const shellOnlyTabNumberShortcuts = localStorageAdapter.readBoolean(STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS);
   if (shellOnlyTabNumberShortcuts != null) settings.shellOnlyTabNumberShortcuts = shellOnlyTabNumberShortcuts;
+  const showTabNumberBadges = localStorageAdapter.readBoolean(STORAGE_KEY_SHOW_TAB_NUMBER_BADGES);
+  if (showTabNumberBadges != null) settings.showTabNumberBadges = showTabNumberBadges;
   const disableTerminalFontZoom = localStorageAdapter.readBoolean(STORAGE_KEY_DISABLE_TERMINAL_FONT_ZOOM);
   if (disableTerminalFontZoom != null) settings.disableTerminalFontZoom = disableTerminalFontZoom;
   const showHostTreeSidebar = localStorageAdapter.readBoolean(STORAGE_KEY_SHOW_HOST_TREE_SIDEBAR);
@@ -521,6 +564,8 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   if (agentModelMap) ai.agentModelMap = agentModelMap;
   const agentProviderMap = readRecordSetting<Record<string, string>>(STORAGE_KEY_AI_AGENT_PROVIDER_MAP);
   if (agentProviderMap) ai.agentProviderMap = agentProviderMap;
+  const agentThinkingMap = readRecordSetting<Record<string, string>>(STORAGE_KEY_AI_AGENT_THINKING_MAP);
+  if (agentThinkingMap) ai.agentThinkingMap = agentThinkingMap;
   const webSearchConfig = readRecordSetting(STORAGE_KEY_AI_WEB_SEARCH);
   if (webSearchConfig) ai.webSearchConfig = stripDeviceBoundApiKey(webSearchConfig);
   const quickMessages = readArraySetting(STORAGE_KEY_AI_QUICK_MESSAGES);
@@ -590,7 +635,17 @@ async function applySyncableSettings(settings: NonNullable<SyncPayload['settings
   if (settings.lightUiThemeId != null) localStorageAdapter.writeString(STORAGE_KEY_UI_THEME_LIGHT, settings.lightUiThemeId);
   if (settings.darkUiThemeId != null) localStorageAdapter.writeString(STORAGE_KEY_UI_THEME_DARK, settings.darkUiThemeId);
   if (settings.accentMode != null) localStorageAdapter.writeString(STORAGE_KEY_ACCENT_MODE, settings.accentMode);
-  if (settings.customAccent != null) localStorageAdapter.writeString(STORAGE_KEY_COLOR, settings.customAccent);
+  if (settings.customAccent != null) {
+    const existing = parseCustomAccentRecord(localStorageAdapter.readString(STORAGE_KEY_COLOR));
+    localStorageAdapter.writeString(
+      STORAGE_KEY_COLOR,
+      serializeCustomAccentRecord({
+        color: parseCustomAccentRecord(settings.customAccent).color,
+        // Bump so peer windows' version gates accept the synced value.
+        version: Math.max(existing.version, 0) + 1,
+      }),
+    );
+  }
   if (settings.uiFontFamilyId != null) localStorageAdapter.writeString(STORAGE_KEY_UI_FONT_FAMILY, settings.uiFontFamilyId);
   if (settings.uiLanguage != null) localStorageAdapter.writeString(STORAGE_KEY_UI_LANGUAGE, settings.uiLanguage);
   if (settings.customCSS != null) localStorageAdapter.writeString(STORAGE_KEY_CUSTOM_CSS, settings.customCSS);
@@ -624,7 +679,7 @@ async function applySyncableSettings(settings: NonNullable<SyncPayload['settings
     localStorageAdapter.writeString(STORAGE_KEY_TERMINAL_SIDE_PANEL_AUTO_OPEN_TAB, settings.terminalSidePanelAutoOpenTab);
   }
 
-  // Terminal settings — merge with existing to preserve platform-specific keys
+  // Terminal settings - merge with existing to preserve platform-specific keys
   if (settings.terminalSettings) {
     let existing: Record<string, unknown> = {};
     const raw = localStorageAdapter.readString(STORAGE_KEY_TERM_SETTINGS);
@@ -684,6 +739,7 @@ async function applySyncableSettings(settings: NonNullable<SyncPayload['settings
   if (settings.sftpAutoSync != null) localStorageAdapter.writeString(STORAGE_KEY_SFTP_AUTO_SYNC, String(settings.sftpAutoSync));
   if (settings.sftpShowHiddenFiles != null) localStorageAdapter.writeString(STORAGE_KEY_SFTP_SHOW_HIDDEN_FILES, String(settings.sftpShowHiddenFiles));
   if (settings.sftpUseCompressedUpload != null) localStorageAdapter.writeString(STORAGE_KEY_SFTP_USE_COMPRESSED_UPLOAD, String(settings.sftpUseCompressedUpload));
+  if (settings.sftpSkipUnchanged != null) localStorageAdapter.writeBoolean(STORAGE_KEY_SFTP_SKIP_UNCHANGED, settings.sftpSkipUnchanged);
   if (settings.sftpAutoOpenSidebar != null) localStorageAdapter.writeString(STORAGE_KEY_SFTP_AUTO_OPEN_SIDEBAR, String(settings.sftpAutoOpenSidebar));
   if (settings.sftpFollowTerminalCwd != null) localStorageAdapter.writeString(STORAGE_KEY_SFTP_FOLLOW_TERMINAL_CWD, String(settings.sftpFollowTerminalCwd));
   if (settings.sftpDefaultViewMode != null) {
@@ -708,6 +764,9 @@ async function applySyncableSettings(settings: NonNullable<SyncPayload['settings
   }
   if (settings.shellOnlyTabNumberShortcuts != null) {
     localStorageAdapter.writeBoolean(STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS, settings.shellOnlyTabNumberShortcuts);
+  }
+  if (settings.showTabNumberBadges != null) {
+    localStorageAdapter.writeBoolean(STORAGE_KEY_SHOW_TAB_NUMBER_BADGES, settings.showTabNumberBadges);
   }
   if (settings.disableTerminalFontZoom != null) {
     localStorageAdapter.writeBoolean(STORAGE_KEY_DISABLE_TERMINAL_FONT_ZOOM, settings.disableTerminalFontZoom);
@@ -741,6 +800,7 @@ async function applySyncableSettings(settings: NonNullable<SyncPayload['settings
     if (ai.maxIterations != null) localStorageAdapter.writeNumber(STORAGE_KEY_AI_MAX_ITERATIONS, ai.maxIterations);
     if (ai.agentModelMap != null) localStorageAdapter.write(STORAGE_KEY_AI_AGENT_MODEL_MAP, ai.agentModelMap);
     if (ai.agentProviderMap != null) localStorageAdapter.write(STORAGE_KEY_AI_AGENT_PROVIDER_MAP, ai.agentProviderMap);
+    if (ai.agentThinkingMap != null) localStorageAdapter.write(STORAGE_KEY_AI_AGENT_THINKING_MAP, ai.agentThinkingMap);
     if (ai.webSearchConfig !== undefined) {
       if (ai.webSearchConfig === null) {
         localStorageAdapter.remove(STORAGE_KEY_AI_WEB_SEARCH);
@@ -764,7 +824,7 @@ async function applySyncableSettings(settings: NonNullable<SyncPayload['settings
     // After all AI writes, reconcile per-agent bindings against the final
     // provider list. Sync payloads can land with a new `providers` set but
     // no `agentProviderMap`, or with a stale `agentProviderMap` that
-    // points at ids the synced provider set doesn't include — either way
+    // points at ids the synced provider set doesn't include - either way
     // we'd leak overrides bound to ghost providers. Mirrors the same
     // cleanup `removeProvider` does for explicit user deletes.
     pruneOrphanPerAgentBindings();
@@ -792,6 +852,7 @@ function notifyAIStateAfterSync(ai: NonNullable<SyncPayload['settings']>['ai']):
   if (ai.commandTimeout != null) touched.push(STORAGE_KEY_AI_COMMAND_TIMEOUT);
   if (ai.maxIterations != null) touched.push(STORAGE_KEY_AI_MAX_ITERATIONS);
   if (ai.agentModelMap != null) touched.push(STORAGE_KEY_AI_AGENT_MODEL_MAP);
+  if (ai.agentThinkingMap != null) touched.push(STORAGE_KEY_AI_AGENT_THINKING_MAP);
   // agentProviderMap is *always* potentially mutated because the reconcile
   // step may have pruned it even if the payload didn't ship one.
   touched.push(STORAGE_KEY_AI_AGENT_PROVIDER_MAP);
@@ -829,7 +890,7 @@ function pruneOrphanPerAgentBindings(): void {
       nextProviderMap[agentId] = providerId;
     } else {
       providerChanged = true;
-      // Drop the saved model too — that id belonged to the now-missing
+      // Drop the saved model too - that id belonged to the now-missing
       // provider and isn't trustworthy against any other binding.
       if (agentId in nextModelMap) {
         delete nextModelMap[agentId];
@@ -877,11 +938,75 @@ export function buildSyncPayload(
   };
 }
 
+export type PluginSyncSidecarCollector = () =>
+  | Promise<SyncPayload['pluginSidecars'] | null | undefined>
+  | SyncPayload['pluginSidecars']
+  | null
+  | undefined;
+
+export type PluginSyncSidecarApplier = (
+  sidecars: SyncPayload['pluginSidecars'] | null | undefined,
+) => Promise<void> | void;
+
+/**
+ * Attach a host-collected plugin sidecar bundle to a cloud payload.
+ * Secrets must already be excluded by the collector; this only drops empty bundles.
+ */
+export function withPluginSyncSidecars(
+  payload: SyncPayload,
+  sidecars: SyncPayload['pluginSidecars'] | null | undefined,
+): SyncPayload {
+  // null/undefined: collector unavailable — leave payload field unchanged
+  // (callers should reattach last-known before upload).
+  if (sidecars == null) {
+    return payload;
+  }
+  // Explicit empty entries is a real reset and must remain on the wire so
+  // apply paths can distinguish it from a legacy payload missing the field.
+  return {
+    ...payload,
+    pluginSidecars: {
+      version: 1,
+      entries: Array.isArray(sidecars.entries) ? sidecars.entries : [],
+    },
+  };
+}
+
+async function defaultCollectPluginSyncSidecars(): Promise<SyncPayload['pluginSidecars'] | null | undefined> {
+  const { collectPluginSyncSidecarsFromHost } = await import('./pluginSyncSidecarBridge');
+  // Let operational failures (DB/runtime) propagate so cloud upload does not
+  // silently strip previously synced sidecars from the remote snapshot.
+  return collectPluginSyncSidecarsFromHost();
+}
+
+async function defaultApplyPluginSyncSidecars(
+  sidecars: SyncPayload['pluginSidecars'] | null | undefined,
+): Promise<void> {
+  const {
+    applyPluginSyncSidecarsFromHost,
+    isPluginSidecarHostUnavailableError,
+  } = await import('./pluginSyncSidecarBridge');
+  try {
+    await applyPluginSyncSidecarsFromHost(sidecars);
+  } catch (error) {
+    // Only tolerate the host-gated-off / manager-unavailable path so a later
+    // plugin-enabled session can still apply from last-known cache. DB/runtime
+    // failures must fail the surrounding sync so the same remote is retried.
+    if (isPluginSidecarHostUnavailableError(error)) {
+      return;
+    }
+    throw error;
+  }
+}
+
 export async function buildCloudSyncPayload(
   vault: SyncableVaultData,
   portForwardingRules?: PortForwardingRule[],
+  options?: {
+    collectPluginSidecars?: PluginSyncSidecarCollector;
+  },
 ): Promise<SyncPayload> {
-  return {
+  const base: SyncPayload = {
     hosts: vault.hosts,
     keys: vault.keys,
     identities: vault.identities,
@@ -896,6 +1021,9 @@ export async function buildCloudSyncPayload(
     settings: await collectCloudSyncableSettings(),
     syncedAt: Date.now(),
   };
+  const collect = options?.collectPluginSidecars ?? defaultCollectPluginSyncSidecars;
+  const sidecars = await collect();
+  return withPluginSyncSidecars(base, sidecars);
 }
 
 /** Build a local backup/restore payload, including local-only trust records. */
@@ -903,11 +1031,60 @@ export function buildLocalVaultPayload(
   vault: SyncableVaultData,
   portForwardingRules?: PortForwardingRule[],
 ): SyncPayload {
-  return {
+  const base: SyncPayload = {
     ...buildSyncPayload(vault, portForwardingRules),
     settings: collectLocalBackupSettings(),
     knownHosts: vault.knownHosts,
   };
+  // Protective backups must capture plugin sidecars so restore can recover
+  // plugin settings/baselines. Prefer the last successful host collect cache
+  // (sync). Callers that can await should use buildLocalVaultPayloadAsync.
+  try {
+    const raw = localStorageAdapter.read<{ version?: number; entries?: unknown }>(
+      SYNC_STORAGE_KEYS.PLUGIN_SIDECARS_LAST_KNOWN,
+    );
+    if (raw && Array.isArray(raw.entries)) {
+      return withPluginSyncSidecars(base, {
+        version: 1,
+        entries: raw.entries as NonNullable<SyncPayload['pluginSidecars']>['entries'],
+      });
+    }
+  } catch {
+    // ignore cache read failures; backup still carries vault entities
+  }
+  return base;
+}
+
+/**
+ * Async local backup payload that prefers a live host collect when available,
+ * then falls back to last-known cache. Use for protective/version-change backups.
+ */
+export async function buildLocalVaultPayloadAsync(
+  vault: SyncableVaultData,
+  portForwardingRules?: PortForwardingRule[],
+): Promise<SyncPayload> {
+  const base = buildLocalVaultPayload(vault, portForwardingRules);
+  const {
+    collectPluginSyncSidecarsFromHost,
+    isPluginSidecarHostUnavailableError,
+  } = await import('./pluginSyncSidecarBridge');
+  try {
+    const live = await collectPluginSyncSidecarsFromHost();
+    if (live) {
+      // Uploads may still defer wiping last-known until a successful sync
+      // commit, but protective/version-change backups must snapshot the live
+      // authoritative-empty bundle so restore cannot resurrect cleared plugin data.
+      return withPluginSyncSidecars(base, live);
+    }
+  } catch (error) {
+    // Only fall back to last-known when the host is gated off. Operational
+    // failures must abort protective backups so we never apply over data that
+    // was not captured in the safety snapshot.
+    if (!isPluginSidecarHostUnavailableError(error)) {
+      throw error;
+    }
+  }
+  return base;
 }
 
 /**
@@ -919,33 +1096,40 @@ export function buildLocalVaultPayload(
 function applyPayload(
   payload: SyncPayload,
   importers: SyncPayloadImporters,
-  options: { includeLocalOnlyData: boolean },
+  options: {
+    includeLocalOnlyData: boolean;
+    applyPluginSidecars?: PluginSyncSidecarApplier;
+  },
 ): Promise<void> {
-  const legacyLineTimestampsEnabled = payload.settings?.terminalSettings?.showLineTimestamps === true;
+  // Portable payloads must never keep device-bound enc:v1 blobs. Strip them
+  // so a previously poisoned cloud/backup snapshot can still restore host
+  // shells and let the user re-enter secrets (#2702).
+  const sanitizedPayload = stripSyncPayloadEncryptedCredentials(payload);
+  const legacyLineTimestampsEnabled = sanitizedPayload.settings?.terminalSettings?.showLineTimestamps === true;
   // Build the vault import object. Cloud sync intentionally ignores
   // local-only trust records even if legacy cloud snapshots still carry them.
   const vaultImport: Record<string, unknown> = {
-    hosts: migrateHostsFromLegacyLineTimestamps(payload.hosts, legacyLineTimestampsEnabled),
-    keys: payload.keys,
-    identities: payload.identities,
-    proxyProfiles: payload.proxyProfiles,
-    snippets: payload.snippets,
-    customGroups: payload.customGroups,
+    hosts: migrateHostsFromLegacyLineTimestamps(sanitizedPayload.hosts, legacyLineTimestampsEnabled),
+    keys: sanitizedPayload.keys,
+    identities: sanitizedPayload.identities,
+    proxyProfiles: sanitizedPayload.proxyProfiles,
+    snippets: sanitizedPayload.snippets,
+    customGroups: sanitizedPayload.customGroups,
   };
-  if (payload.snippetPackages !== undefined) {
-    vaultImport.snippetPackages = payload.snippetPackages;
+  if (sanitizedPayload.snippetPackages !== undefined) {
+    vaultImport.snippetPackages = sanitizedPayload.snippetPackages;
   }
-  if (payload.notes !== undefined) {
-    vaultImport.notes = payload.notes;
+  if (sanitizedPayload.notes !== undefined) {
+    vaultImport.notes = sanitizedPayload.notes;
   }
-  if (payload.noteGroups !== undefined) {
-    vaultImport.noteGroups = payload.noteGroups;
+  if (sanitizedPayload.noteGroups !== undefined) {
+    vaultImport.noteGroups = sanitizedPayload.noteGroups;
   }
-  if (options.includeLocalOnlyData && payload.knownHosts !== undefined) {
-    vaultImport.knownHosts = payload.knownHosts;
+  if (options.includeLocalOnlyData && sanitizedPayload.knownHosts !== undefined) {
+    vaultImport.knownHosts = sanitizedPayload.knownHosts;
   }
-  if (Array.isArray(payload.groupConfigs)) {
-    vaultImport.groupConfigs = payload.groupConfigs;
+  if (Array.isArray(sanitizedPayload.groupConfigs)) {
+    vaultImport.groupConfigs = sanitizedPayload.groupConfigs;
   }
 
   return Promise.resolve(importers.importVaultData(JSON.stringify(vaultImport))).then(async () => {
@@ -953,16 +1137,23 @@ function applyPayload(
     // them.  Absent field = "payload was created before this feature existed",
     // so local rules are preserved.  Explicitly present [] = "remote has no
     // rules, clear local state".
-    if (payload.portForwardingRules !== undefined && importers.importPortForwardingRules) {
-      importers.importPortForwardingRules(payload.portForwardingRules);
+    if (sanitizedPayload.portForwardingRules !== undefined && importers.importPortForwardingRules) {
+      importers.importPortForwardingRules(sanitizedPayload.portForwardingRules);
     }
 
     // Apply synced settings
-    if (payload.settings) {
-      await applySyncableSettings(payload.settings);
+    if (sanitizedPayload.settings) {
+      await applySyncableSettings(sanitizedPayload.settings);
       // Rehydrate in-memory bookmark snapshot after localStorage was updated
-      if (payload.settings.sftpGlobalBookmarks != null) rehydrateGlobalSftpBookmarks();
+      if (sanitizedPayload.settings.sftpGlobalBookmarks != null) rehydrateGlobalSftpBookmarks();
       importers.onSettingsApplied?.();
+    }
+
+    // Plugin encrypted sidecars: only apply when the field is present so
+    // legacy payloads without pluginSidecars do not wipe installed settings.
+    if (Object.prototype.hasOwnProperty.call(sanitizedPayload, 'pluginSidecars')) {
+      const applySidecars = options.applyPluginSidecars ?? defaultApplyPluginSyncSidecars;
+      await applySidecars(sanitizedPayload.pluginSidecars ?? { version: 1, entries: [] });
     }
   });
 }
@@ -970,8 +1161,14 @@ function applyPayload(
 export function applySyncPayload(
   payload: SyncPayload,
   importers: SyncPayloadImporters,
+  options?: {
+    applyPluginSidecars?: PluginSyncSidecarApplier;
+  },
 ): Promise<void> {
-  return applyPayload(payload, importers, { includeLocalOnlyData: false });
+  return applyPayload(payload, importers, {
+    includeLocalOnlyData: false,
+    applyPluginSidecars: options?.applyPluginSidecars,
+  });
 }
 
 export async function prepareLocalVaultPayloadApply(
@@ -983,11 +1180,14 @@ export async function prepareLocalVaultPayloadApply(
     ) => Promise<() => Promise<void>>;
   } = {},
 ): Promise<() => Promise<void>> {
+  // Sanitize once so vault import and convergent replica commit share the
+  // same portable secrets view (no device-bound enc:v1 leftovers).
+  const sanitizedPayload = stripSyncPayloadEncryptedCredentials(payload);
   const prepareConvergentRestore = dependencies.prepareConvergentRestore
     ?? prepareRestoredPayloadConvergentWrites;
-  const commitConvergentRestore = await prepareConvergentRestore(payload);
+  const commitConvergentRestore = await prepareConvergentRestore(sanitizedPayload);
   return async () => {
-    await applyPayload(payload, importers, { includeLocalOnlyData: true });
+    await applyPayload(sanitizedPayload, importers, { includeLocalOnlyData: true });
     await commitConvergentRestore();
   };
 }

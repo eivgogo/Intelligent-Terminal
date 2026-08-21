@@ -15,6 +15,7 @@ export const terminalPropsAreEqual = (
   && prev.snippetPackages === next.snippetPackages
   && prev.compactToolbar === next.compactToolbar
   && prev.lineTimestampsAvailable === next.lineTimestampsAvailable
+  && prev.onDeleteSnippets === next.onDeleteSnippets
   && prev.chainHosts === next.chainHosts
   && themeFingerprint(prev.appearanceTheme ?? prev.terminalTheme) === themeFingerprint(next.appearanceTheme ?? next.terminalTheme)
   && prev.knownHosts === next.knownHosts
@@ -31,11 +32,11 @@ export const terminalPropsAreEqual = (
   && prev.fontFamilyId === next.fontFamilyId
   && prev.fontSize === next.fontSize
   && prev.followAppTerminalTheme === next.followAppTerminalTheme
-  && prev.accentMode === next.accentMode
-  && prev.customAccent === next.customAccent
+  // accentMode / customAccent intentionally omitted — Terminal reads appearanceChromeStore.
   && prev.terminalSettings === next.terminalSettings
   && prev.sessionId === next.sessionId
   && prev.restoreState === next.restoreState
+  && prev.vaultInitializedOverride === next.vaultInitializedOverride
   && prev.shellType === next.shellType
   && prev.lastCwd === next.lastCwd
   && prev.restoreTerminalCwd === next.restoreTerminalCwd

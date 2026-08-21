@@ -10,11 +10,16 @@ import type { TerminalSessionExitEvent } from '../../application/state/resolveTe
 import { createTerminalSelectionAttachment } from '../../application/state/terminalSelectionAttachment';
 import { getTopTabInsertionTarget, isPointInsideRect, WORKSPACE_SESSION_DRAG_TYPE } from '../../application/state/terminalDragData';
 import { useAIState } from '../../application/state/useAIState';
+import { useAISessionsStore } from '../../application/state/aiSessionsStore';
 import { useStoredBoolean } from '../../application/state/useStoredBoolean';
 import { isSavedVaultHost } from '../../domain/ephemeralHosts';
-import { buildAITerminalSessionInfo, type AITerminalSessionInfo } from './buildAITerminalSessionInfo';
+import {
+  buildAITerminalSessionInfo,
+  type AIPanelContext,
+  type AITerminalSessionInfo,
+} from '../../domain/buildAITerminalSessionInfo';
 export { buildAITerminalSessionInfo };
-export type { AITerminalSessionInfo };
+export type { AIPanelContext, AITerminalSessionInfo };
 import { collectSessionIds, SplitDirection } from '../../domain/workspace';
 import { resolveSessionTabTitle } from '../../domain/sessionTabTitle';
 import { terminalPaneSessionsEqual } from '../../domain/terminalPaneSessionsEqual';
@@ -29,6 +34,7 @@ import { LazyLoadBoundary } from '../ui/lazy-load-boundary';
 import type { DropEntry } from '../../lib/sftpFileUtils';
 import type { GroupConfig, Host, Identity, KnownHost, ProxyProfile, SSHKey, Snippet, TerminalSession, VaultNote, Workspace } from '../../types';
 import type { ExecutorContext } from '../../infrastructure/ai/cattyAgent/executor';
+import type { AISession } from '../../infrastructure/ai/types';
 import Terminal from '../Terminal';
 import { removePaneVisible, setPaneVisible } from '../terminal/paneVisibilityStore';
 import type { TerminalBroadcastInputOptions } from '../terminal/terminalHelpers';
@@ -49,6 +55,12 @@ export type SidePanelTab = SidePanelTool;
 const LazyAIChatSidePanel = lazy(() =>
   import('../AIChatSidePanel').then((module) => ({ default: module.AIChatSidePanel })),
 );
+
+if (typeof requestIdleCallback === 'function') {
+  requestIdleCallback(() => {
+    void import('../AIChatSidePanel');
+  });
+}
 
 const AIChatSidePanelFallback = memo(function AIChatSidePanelFallback() {
   return (
@@ -238,17 +250,17 @@ export const filterTabsMap = <T,>(source: Map<string, T>, validIds: Set<string>)
 
 export { ChunkedEscapeFilter, hasNotifiableTerminalOutput } from './activityEscapeFilter';
 
-export type AIPanelContext = {
-  scopeType: 'terminal' | 'workspace';
-  scopeTargetId?: string;
-  scopeHostIds: string[];
-  scopeLabel: string;
-  terminalSessions: AITerminalSessionInfo[];
-};
+/**
+ * Providers, permissions, agent config and the session mutators — everything
+ * except `sessions` / `activeSessionIdMap` / `draftsByScope` /
+ * `panelViewByScope`, which `useAIState` deliberately keeps out of its return
+ * and publishes to `aiSessionsStore` instead. Because the hot slices are absent,
+ * a landing token cannot change this Context's identity, so provider and
+ * permission consumers stay put while a turn streams.
+ */
+export type AIConfigValue = ReturnType<typeof useAIState>;
 
-type AIStateValue = ReturnType<typeof useAIState>;
-
-const AIStateContext = createContext<AIStateValue | null>(null);
+const AIConfigContext = createContext<AIConfigValue | null>(null);
 
 interface AIChatPanelsHostProps {
   mountedTabIds: string[];
@@ -271,16 +283,19 @@ interface AIChatPanelsHostProps {
   onOpenVaultSnippetFromChat?: (snippetId: string) => void;
 }
 
+const EMPTY_WORKSPACES: Workspace[] = [];
+
 interface AIStateMaintenanceHostProps {
   validAIScopeTargetIds: Set<string>;
+  workspaces?: Workspace[] | null;
 }
 
 const AIStateProviderInner: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const aiState = useAIState();
+  const aiConfig = useAIState();
   return (
-    <AIStateContext.Provider value={aiState}>
+    <AIConfigContext.Provider value={aiConfig}>
       {children}
-    </AIStateContext.Provider>
+    </AIConfigContext.Provider>
   );
 };
 
@@ -289,18 +304,100 @@ AIStateProvider.displayName = 'AIStateProvider';
 
 const AIStateMaintenanceHostInner: React.FC<AIStateMaintenanceHostProps> = ({
   validAIScopeTargetIds,
+  workspaces: workspacesProp,
 }) => {
-  const aiState = useContext(AIStateContext);
+  const aiConfig = useContext(AIConfigContext);
 
-  if (!aiState) {
+  if (!aiConfig) {
     throw new Error('AIStateMaintenanceHost must be rendered inside AIStateProvider');
   }
 
-  const { cleanupOrphanedSessions } = aiState;
+  // Guard missing prop so a wiring gap cannot crash the terminal shell.
+  const workspaces = workspacesProp ?? EMPTY_WORKSPACES;
+
+  const {
+    cleanupOrphanedSessions,
+    seedWorkspaceActiveSessionFromMembers,
+    handoffDissolvedWorkspaceScope,
+    retargetWorkspaceActiveChatForMemberLoss,
+  } = aiConfig;
+  const previousWorkspacesRef = useRef(workspaces);
+  const previousSessionWorkspaceRef = useRef(
+    new Map(workspaces.flatMap((workspace) => (
+      collectSessionIds(workspace.root).map((sessionId) => [sessionId, workspace.id] as const)
+    ))),
+  );
 
   useEffect(() => {
+    const previousWorkspaces = previousWorkspacesRef.current;
+    const previousIds = new Set(previousWorkspaces.map((workspace) => workspace.id));
+    const nextIds = new Set(workspaces.map((workspace) => workspace.id));
+    const previousSessionWorkspace = previousSessionWorkspaceRef.current;
+
+    for (const workspace of workspaces) {
+      if (previousIds.has(workspace.id)) continue;
+      const memberTerminalIds = collectSessionIds(workspace.root);
+      seedWorkspaceActiveSessionFromMembers({
+        workspaceId: workspace.id,
+        memberTerminalIds,
+        preferredTerminalId: workspace.focusedSessionId,
+      });
+    }
+
+    for (const workspace of workspaces) {
+      for (const sessionId of collectSessionIds(workspace.root)) {
+        const previousWorkspaceId = previousSessionWorkspace.get(sessionId);
+        if (previousWorkspaceId === workspace.id) continue;
+        // Member newly joined this workspace — seed only fills an empty map.
+        // Prefer the workspace focused pane so we don't pin the joiner's chat
+        // ahead of the pane the user is already looking at.
+        seedWorkspaceActiveSessionFromMembers({
+          workspaceId: workspace.id,
+          memberTerminalIds: collectSessionIds(workspace.root),
+          preferredTerminalId: workspace.focusedSessionId,
+        });
+        break;
+      }
+    }
+
+    for (const workspace of workspaces) {
+      if (!previousIds.has(workspace.id)) continue;
+      const previousWorkspace = previousWorkspaces.find((entry) => entry.id === workspace.id);
+      if (!previousWorkspace) continue;
+      const previousMemberIds = collectSessionIds(previousWorkspace.root);
+      const currentMemberIds = collectSessionIds(workspace.root);
+      if (previousMemberIds.every((sessionId) => currentMemberIds.includes(sessionId))) continue;
+      retargetWorkspaceActiveChatForMemberLoss({
+        workspaceId: workspace.id,
+        previousMemberTerminalIds: previousMemberIds,
+        currentMemberTerminalIds: currentMemberIds,
+        preferredTerminalId: workspace.focusedSessionId,
+      });
+    }
+
+    for (const workspace of previousWorkspaces) {
+      if (nextIds.has(workspace.id)) continue;
+      const memberTerminalIds = collectSessionIds(workspace.root);
+      handoffDissolvedWorkspaceScope({
+        workspaceId: workspace.id,
+        terminalIds: memberTerminalIds.filter((sessionId) => validAIScopeTargetIds.has(sessionId)),
+        preferredTerminalId: workspace.focusedSessionId,
+      });
+    }
+
+    previousWorkspacesRef.current = workspaces;
+    previousSessionWorkspaceRef.current = new Map(workspaces.flatMap((workspace) => (
+      collectSessionIds(workspace.root).map((sessionId) => [sessionId, workspace.id] as const)
+    )));
     cleanupOrphanedSessions(validAIScopeTargetIds);
-  }, [cleanupOrphanedSessions, validAIScopeTargetIds]);
+  }, [
+    cleanupOrphanedSessions,
+    handoffDissolvedWorkspaceScope,
+    retargetWorkspaceActiveChatForMemberLoss,
+    seedWorkspaceActiveSessionFromMembers,
+    validAIScopeTargetIds,
+    workspaces,
+  ]);
 
   return null;
 };
@@ -310,15 +407,20 @@ AIStateMaintenanceHost.displayName = 'AIStateMaintenanceHost';
 
 interface AISidePanelStateRootProps {
   validAIScopeTargetIds: Set<string>;
+  workspaces?: Workspace[] | null;
   children: React.ReactNode;
 }
 
 const AISidePanelStateRootInner: React.FC<AISidePanelStateRootProps> = ({
   validAIScopeTargetIds,
+  workspaces,
   children,
 }) => (
   <AIStateProvider>
-    <AIStateMaintenanceHost validAIScopeTargetIds={validAIScopeTargetIds} />
+    <AIStateMaintenanceHost
+      validAIScopeTargetIds={validAIScopeTargetIds}
+      workspaces={workspaces}
+    />
     {children}
   </AIStateProvider>
 );
@@ -354,6 +456,18 @@ function aiChatPanelsHostAreEqual(
   return true;
 }
 
+const consumedTerminalSelectionRequestIds = new Set<string>();
+const CONSUMED_TERMINAL_SELECTION_REQUEST_ID_LIMIT = 64;
+
+function markTerminalSelectionRequestConsumed(requestId: string): void {
+  consumedTerminalSelectionRequestIds.add(requestId);
+  if (consumedTerminalSelectionRequestIds.size <= CONSUMED_TERMINAL_SELECTION_REQUEST_ID_LIMIT) {
+    return;
+  }
+  const oldest = consumedTerminalSelectionRequestIds.values().next().value;
+  if (oldest !== undefined) consumedTerminalSelectionRequestIds.delete(oldest);
+}
+
 const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
   mountedTabIds,
   activeTabId,
@@ -370,30 +484,36 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
   onOpenVaultSectionFromChat,
   onOpenVaultSnippetFromChat,
 }) => {
-  const aiState = useContext(AIStateContext);
+  const aiConfig = useContext(AIConfigContext);
 
-  if (!aiState) {
+  if (!aiConfig) {
     throw new Error('AIChatPanelsHost must be rendered inside AIStateProvider');
   }
   const {
+    sessions,
     activeSessionIdMap,
-    defaultAgentId,
+    draftsByScope,
     panelViewByScope,
+  } = useAISessionsStore();
+  const {
+    defaultAgentId,
     showDraftView,
     updateDraft,
-  } = aiState;
+  } = aiConfig;
 
   useEffect(() => {
     if (!pendingTerminalSelection) return;
+    if (consumedTerminalSelectionRequestIds.has(pendingTerminalSelection.requestId)) {
+      return;
+    }
 
     const context = contextsByTabId.get(pendingTerminalSelection.tabId);
     if (!context) return;
 
     const attachment = createTerminalSelectionAttachment(pendingTerminalSelection.text);
-    if (!attachment) {
-      onPendingTerminalSelectionConsumed?.(pendingTerminalSelection.requestId);
-      return;
-    }
+    markTerminalSelectionRequestConsumed(pendingTerminalSelection.requestId);
+    onPendingTerminalSelectionConsumed?.(pendingTerminalSelection.requestId);
+    if (!attachment) return;
 
     const scopeKey = `${context.scopeType}:${context.scopeTargetId ?? ''}`;
     const isSessionView =
@@ -406,7 +526,6 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
       ...draft,
       attachments: [...draft.attachments, attachment],
     }));
-    onPendingTerminalSelectionConsumed?.(pendingTerminalSelection.requestId);
   }, [
     activeSessionIdMap,
     contextsByTabId,
@@ -436,48 +555,52 @@ const AIChatPanelsHostInner: React.FC<AIChatPanelsHostProps> = ({
                 <LazyAIChatSidePanel
                     // Full list keeps fuzzy history ranking; panel areEqual only
                     // compares exact-scope session object refs for stream isolation.
-                    sessions={aiState.sessions}
-                    activeSessionIdMap={aiState.activeSessionIdMap}
-                    draftsByScope={aiState.draftsByScope}
-                    panelViewByScope={aiState.panelViewByScope}
-                    setActiveSessionId={aiState.setActiveSessionId}
-                    ensureDraftForScope={aiState.ensureDraftForScope}
-                    updateDraft={aiState.updateDraft}
-                    showDraftView={aiState.showDraftView}
-                    showSessionView={aiState.showSessionView}
-                    clearDraftForScope={aiState.clearDraftForScope}
-                    addDraftFiles={aiState.addDraftFiles}
-                    removeDraftFile={aiState.removeDraftFile}
-                    createSession={aiState.createSession}
-                    deleteSession={aiState.deleteSession}
-                    updateSessionTitle={aiState.updateSessionTitle}
-                    updateSessionExternalSessionId={aiState.updateSessionExternalSessionId}
-                    addMessageToSession={aiState.addMessageToSession}
-                    updateLastMessage={aiState.updateLastMessage}
-                    updateMessageById={aiState.updateMessageById}
-                    persistContextCompaction={aiState.persistContextCompaction}
-                    providers={aiState.providers}
-                    activeProviderId={aiState.activeProviderId}
-                    activeModelId={aiState.activeModelId}
-                    defaultAgentId={aiState.defaultAgentId}
-                    toolIntegrationMode={aiState.toolIntegrationMode}
-                    externalAgents={aiState.externalAgents}
-                    setExternalAgents={aiState.setExternalAgents}
-                    agentModelMap={aiState.agentModelMap}
-                    setAgentModel={aiState.setAgentModel}
-                    agentProviderMap={aiState.agentProviderMap}
-                    setAgentProvider={aiState.setAgentProvider}
-                    globalPermissionMode={aiState.globalPermissionMode}
-                    setGlobalPermissionMode={aiState.setGlobalPermissionMode}
-                    commandBlocklist={aiState.commandBlocklist}
-                    commandTimeout={aiState.commandTimeout}
-                    maxIterations={aiState.maxIterations}
-                    webSearchConfig={aiState.webSearchConfig}
-                    quickMessages={aiState.quickMessages}
+                    sessions={sessions as AISession[]}
+                    activeSessionIdMap={activeSessionIdMap as Record<string, string | null>}
+                    draftsByScope={draftsByScope}
+                    panelViewByScope={panelViewByScope}
+                    setActiveSessionId={aiConfig.setActiveSessionId}
+                    ensureDraftForScope={aiConfig.ensureDraftForScope}
+                    updateDraft={aiConfig.updateDraft}
+                    showDraftView={aiConfig.showDraftView}
+                    showSessionView={aiConfig.showSessionView}
+                    clearDraftForScope={aiConfig.clearDraftForScope}
+                    addDraftFiles={aiConfig.addDraftFiles}
+                    removeDraftFile={aiConfig.removeDraftFile}
+                    createSession={aiConfig.createSession}
+                    deleteSession={aiConfig.deleteSession}
+                    updateSessionTitle={aiConfig.updateSessionTitle}
+                    updateSessionExternalSessionId={aiConfig.updateSessionExternalSessionId}
+                    addMessageToSession={aiConfig.addMessageToSession}
+                    updateLastMessage={aiConfig.updateLastMessage}
+                    updateMessageById={aiConfig.updateMessageById}
+                    persistContextCompaction={aiConfig.persistContextCompaction}
+                    providers={aiConfig.providers}
+                    activeProviderId={aiConfig.activeProviderId}
+                    activeModelId={aiConfig.activeModelId}
+                    defaultAgentId={aiConfig.defaultAgentId}
+                    toolIntegrationMode={aiConfig.toolIntegrationMode}
+                    externalAgents={aiConfig.externalAgents}
+                    setExternalAgents={aiConfig.setExternalAgents}
+                    agentModelMap={aiConfig.agentModelMap}
+                    setAgentModel={aiConfig.setAgentModel}
+                    agentProviderMap={aiConfig.agentProviderMap}
+                    setAgentProvider={aiConfig.setAgentProvider}
+                    agentThinkingMap={aiConfig.agentThinkingMap}
+                    setAgentThinking={aiConfig.setAgentThinking}
+                    updateProvider={aiConfig.updateProvider}
+                    globalPermissionMode={aiConfig.globalPermissionMode}
+                    setGlobalPermissionMode={aiConfig.setGlobalPermissionMode}
+                    commandBlocklist={aiConfig.commandBlocklist}
+                    commandTimeout={aiConfig.commandTimeout}
+                    maxIterations={aiConfig.maxIterations}
+                    webSearchConfig={aiConfig.webSearchConfig}
+                    quickMessages={aiConfig.quickMessages}
                     scopeType={context.scopeType}
                     scopeTargetId={context.scopeTargetId}
                     scopeHostIds={context.scopeHostIds}
                     scopeLabel={context.scopeLabel}
+                    focusedSessionId={context.focusedSessionId}
                     terminalSessions={context.terminalSessions}
                     resolveExecutorContext={resolveExecutorContext}
                     isVisible={isVisible}
@@ -511,8 +634,6 @@ export interface TerminalLayerProps {
   identities: Identity[];
   snippets: Snippet[];
   snippetPackages: string[];
-  notes: VaultNote[];
-  noteGroups: string[];
   openNoteRequest?: { tabId: string; noteId: string; requestId: number } | null;
   onOpenVaultNoteFromChat?: (noteId: string) => void;
   onOpenVaultHostFromChat?: (hostId: string) => void;
@@ -554,10 +675,12 @@ export interface TerminalLayerProps {
   onUpdateHost: (host: Host) => void;
   onAddKnownHost?: (knownHost: KnownHost) => void;
   onCommandExecuted?: (command: string, hostId: string, hostLabel: string, sessionId: string) => void;
+  onDeleteShellHistoryEntry?: (entryId: string) => void;
   onTerminalDataCapture?: (sessionId: string, data: string) => void;
   onCreateWorkspaceFromSessions: (baseSessionId: string, joiningSessionId: string, hint: Exclude<SplitHint, null>) => void;
   onAddSessionToWorkspace: (workspaceId: string, sessionId: string, hint: Exclude<SplitHint, null>) => void;
   onRequestAddToWorkspace?: (workspaceId: string) => void;
+  onAppendHostToWorkspace?: (workspaceId: string, hostId: string) => void;
   onUpdateSplitSizes: (workspaceId: string, splitId: string, sizes: number[]) => void;
   onSetDraggingSessionId: (id: string | null) => void;
   onToggleWorkspaceViewMode?: (workspaceId: string) => void;
@@ -580,8 +703,6 @@ export interface TerminalLayerProps {
   updateHosts: (hosts: Host[]) => void;
   updateSnippets?: (snippets: Snippet[]) => void;
   updateSnippetPackages?: (packages: string[]) => void;
-  updateNotes: (notes: VaultNote[]) => void;
-  updateNoteGroups: (groups: string[]) => void;
   sftpDefaultViewMode: 'list' | 'tree';
   sftpDoubleClickBehavior: 'open' | 'transfer';
   sftpAutoSync: boolean;
@@ -760,8 +881,7 @@ const terminalPanePropsAreEqual = (
   prev.fontSize === next.fontSize &&
   prev.terminalTheme === next.terminalTheme &&
   prev.followAppTerminalTheme === next.followAppTerminalTheme &&
-  prev.accentMode === next.accentMode &&
-  prev.customAccent === next.customAccent &&
+  // accentMode / customAccent intentionally omitted — Terminal reads appearanceChromeStore.
   prev.terminalSettings === next.terminalSettings &&
   prev.hotkeyScheme === next.hotkeyScheme &&
   prev.disableTerminalFontZoom === next.disableTerminalFontZoom &&
@@ -1213,13 +1333,25 @@ const TerminalPane: React.FC<TerminalPaneProps> = memo(({
       return true;
     };
 
-    if (isVisible) {
+    // Only full-size layouts may feed the hidden-pane pinned size. Split rects
+    // must never be cached: after a split -> focus viewMode switch the cached
+    // fragment size would pin the hidden pane (and its PTY) narrow again,
+    // recreating the \r progress-refresh scrollback spam (#3046).
+    if (isVisible && !rect) {
       capturePaneSize();
       const observer = new ResizeObserver(() => {
         capturePaneSize();
       });
       observer.observe(element);
       return () => observer.disconnect();
+    }
+    if (isVisible) {
+      // A split-visible pane invalidates the cached full-size measurement:
+      // after an intervening viewport resize the stale pixels would pin later
+      // hidden full-size layouts at the wrong width (#3046). The hidden
+      // initialization below re-measures the current area instead.
+      lastVisiblePaneSizeRef.current = null;
+      return;
     }
 
     const initializeHiddenFullSize = !hibernateHiddenTabs
@@ -1533,8 +1665,7 @@ const terminalPanesHostPropsAreEqual = (
   if (prev.fontSize !== next.fontSize) return false;
   if (prev.terminalTheme !== next.terminalTheme) return false;
   if (prev.followAppTerminalTheme !== next.followAppTerminalTheme) return false;
-  if (prev.accentMode !== next.accentMode) return false;
-  if (prev.customAccent !== next.customAccent) return false;
+  // accentMode / customAccent intentionally omitted — Terminal reads appearanceChromeStore.
   if (prev.terminalSettings !== next.terminalSettings) return false;
   if (prev.hotkeyScheme !== next.hotkeyScheme) return false;
   if (prev.disableTerminalFontZoom !== next.disableTerminalFontZoom) return false;

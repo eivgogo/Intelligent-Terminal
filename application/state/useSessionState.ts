@@ -542,6 +542,7 @@ export const useSessionState = ({
       workspaces: workspacesRef.current,
       sessionIds,
       currentActiveTabId: activeTabStore.getActiveTabId(),
+      preferredTabId: activeTabStore.getPreviousActiveTabId(),
       tabOrder: tabOrderRef.current,
     });
 
@@ -549,9 +550,10 @@ export const useSessionState = ({
     setSessions(result.sessions);
     setTabOrder(result.tabOrder);
     if (result.activeTabId) {
-      setActiveTabId(result.activeTabId);
+      // Closing must not rewrite previous-tab history to the closed tab.
+      activeTabStore.setActiveTabId(result.activeTabId, { recordPrevious: false });
     }
-  }, [setActiveTabId]);
+  }, []);
 
   const closeSession = useCallback((sessionId: string, e?: MouseEvent) => {
     e?.stopPropagation();
@@ -619,17 +621,26 @@ export const useSessionState = ({
     });
   }, []);
 
-  const submitWorkspaceRename = useCallback(() => {
+  const submitWorkspaceRename = useCallback((workspaceId?: string, name?: string) => {
+    if (workspaceId !== undefined && name !== undefined) {
+      const trimmed = name.trim();
+      if (!trimmed) return;
+      setWorkspaces(prev => prev.map(w => (
+        w.id === workspaceId ? { ...w, title: trimmed, autoTitle: false } : w
+      )));
+      return;
+    }
+
     setWorkspaceRenameValue(prevValue => {
-      const name = prevValue.trim();
-      if (!name) return prevValue;
-      
+      const trimmed = prevValue.trim();
+      if (!trimmed) return prevValue;
+
       setWorkspaceRenameTarget(prevTarget => {
         if (!prevTarget) return prevTarget;
-        setWorkspaces(prev => prev.map(w => w.id === prevTarget.id ? { ...w, title: name, autoTitle: false } : w));
+        setWorkspaces(prev => prev.map(w => w.id === prevTarget.id ? { ...w, title: trimmed, autoTitle: false } : w));
         return null;
       });
-      
+
       return '';
     });
   }, []);
@@ -786,11 +797,6 @@ export const useSessionState = ({
     host: Host,
     direction: SplitDirection = 'vertical',
   ): string | null => {
-    // Serial hosts use a different session constructor; they currently
-    // only enter workspaces via createSerialSession + drag, so reject
-    // them here to avoid a partially-constructed session.
-    if (host.protocol === 'serial') return null;
-
     // Cheap early-exit using the ref when the workspace is clearly
     // absent. The authoritative check lives inside the setWorkspaces
     // updater below so we also cover the concurrent-close race.

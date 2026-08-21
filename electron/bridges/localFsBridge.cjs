@@ -18,6 +18,21 @@ function normalizeLocalTreeLimit(value, fallback) {
   return Number.isSafeInteger(value) && value >= 0 ? value : fallback;
 }
 
+let cachedLocalUserInfo;
+function localOwnerFromStat(stat) {
+  if (process.platform === "win32") return undefined;
+  if (!stat || typeof stat.uid !== "number") return undefined;
+  try {
+    cachedLocalUserInfo ??= os.userInfo();
+    if (cachedLocalUserInfo.uid === stat.uid && cachedLocalUserInfo.username) {
+      return cachedLocalUserInfo.username;
+    }
+  } catch {
+    // userInfo() can throw when the process has no passwd entry.
+  }
+  return String(stat.uid);
+}
+
 function createLocalTreeTraversalBudget(limits = {}) {
   return {
     directories: 0,
@@ -168,6 +183,9 @@ async function listLocalDir(event, payload) {
         // Windows hidden attribute: resolved from the batched lookup.
         const hidden = isWindows ? hiddenSet.has(entry.name) : false;
 
+        // Follow the target for size/mtime/type; owner is the directory entry itself.
+        const ownerStat = type === "symlink" ? await fs.promises.lstat(fullPath) : stat;
+        const owner = localOwnerFromStat(ownerStat);
         result[i] = {
           name: entry.name,
           type,
@@ -175,6 +193,7 @@ async function listLocalDir(event, payload) {
           size: `${stat.size} bytes`,
           lastModified: stat.mtime.toISOString(),
           hidden,
+          ...(owner ? { owner } : {}),
         };
       } catch (err) {
         // Handle broken symlinks - lstat doesn't follow symlinks
@@ -186,6 +205,7 @@ async function listLocalDir(event, payload) {
             if (lstat.isSymbolicLink()) {
               // Broken symlink
               const hidden = isWindows ? hiddenSet.has(brokenEntry.name) : false;
+              const owner = localOwnerFromStat(lstat);
               result[i] = {
                 name: brokenEntry.name,
                 type: "symlink",
@@ -193,6 +213,7 @@ async function listLocalDir(event, payload) {
                 size: `${lstat.size} bytes`,
                 lastModified: lstat.mtime.toISOString(),
                 hidden,
+                ...(owner ? { owner } : {}),
               };
               return;
             }
@@ -259,8 +280,16 @@ async function writeLocalFile(event, payload) {
  * Delete a local file or directory
  */
 async function deleteLocalFile(event, payload) {
-  const stat = await fs.promises.stat(payload.path);
-  if (stat.isDirectory()) {
+  const stat = await fs.promises.lstat(payload.path);
+  const actualType = stat.isDirectory() ? "directory" : stat.isSymbolicLink() ? "symlink" : "file";
+  if (payload.expectedType && actualType !== payload.expectedType) {
+    const error = new Error(
+      `Local target changed before replace: expected ${payload.expectedType}, found ${actualType}`,
+    );
+    error.code = "ESTALE";
+    throw error;
+  }
+  if (actualType === "directory") {
     await fs.promises.rm(payload.path, { recursive: true, force: true });
   } else {
     await fs.promises.unlink(payload.path);
@@ -295,10 +324,26 @@ async function mkdirLocal(event, payload) {
 }
 
 /**
- * Get local file statistics
+ * Get local file statistics (follows symlinks — size/mtime of the target).
+ * Resume and upload sizing rely on target bytes, not the link node.
  */
 async function statLocal(event, payload) {
   const stat = await fs.promises.stat(payload.path);
+  return {
+    name: path.basename(payload.path),
+    type: stat.isDirectory() ? "directory" : "file",
+    size: stat.size,
+    lastModified: stat.mtime.getTime(),
+  };
+}
+
+/**
+ * Get local path metadata without following symlinks.
+ * Conflict resolution needs this so Replace can unlink a link instead of
+ * writing through it via writeLocalFile.
+ */
+async function lstatLocal(event, payload) {
+  const stat = await fs.promises.lstat(payload.path);
   return {
     name: path.basename(payload.path),
     type: stat.isDirectory() ? "directory" : stat.isSymbolicLink() ? "symlink" : "file",
@@ -307,31 +352,69 @@ async function statLocal(event, payload) {
   };
 }
 
-async function collectLocalTreeEntries(rootPath, limits = {}) {
+function throwIfLocalTreeCancelled(isCancelled) {
+  if (typeof isCancelled === "function" && isCancelled()) {
+    const error = new Error("Local directory traversal cancelled");
+    error.code = "ERR_LOCAL_TREE_CANCELLED";
+    throw error;
+  }
+}
+
+const LOCAL_TREE_ENTRY_BATCH_SIZE = 64;
+
+async function collectLocalTreeEntries(rootPath, limits = {}, onProgress, isCancelled, onEntries) {
   const rootStat = await fs.promises.stat(rootPath);
   if (!rootStat.isDirectory()) {
     throw new Error("Selected path is not a directory");
   }
+  throwIfLocalTreeCancelled(isCancelled);
 
   const traversalBudget = createLocalTreeTraversalBudget(limits);
   claimLocalTreeDirectory(traversalBudget);
   const rootName = path.basename(rootPath);
   const rootRealPath = await fs.promises.realpath(rootPath);
-  const entries = [{
+  const rootEntry = {
     localPath: rootPath,
     relativePath: rootName,
     type: "directory",
     size: rootStat.size,
     lastModified: rootStat.mtime.getTime(),
-  }];
+  };
+  // When streaming batches, avoid retaining the full tree in memory for 100k+
+  // drops. Callers that only need the complete array still get it below.
+  const retainAll = typeof onEntries !== "function";
+  const entries = retainAll ? [rootEntry] : null;
+  let pendingBatch = [rootEntry];
+  const flushBatch = (force = false) => {
+    if (typeof onEntries !== "function") return;
+    if (!force && pendingBatch.length < LOCAL_TREE_ENTRY_BATCH_SIZE) return;
+    if (pendingBatch.length === 0) return;
+    const batch = pendingBatch;
+    pendingBatch = [];
+    onEntries(batch);
+  };
+  flushBatch(true);
+
   const queue = [{
     localPath: rootPath,
     relativePath: rootName,
     ancestorRealPaths: new Set([rootRealPath]),
   }];
   let queueIndex = 0;
+  let fileCount = 0;
+  let directoryCount = 1;
+  let lastReportedTotal = 0;
+  const reportProgress = (force = false) => {
+    if (typeof onProgress !== "function") return;
+    const entryCount = fileCount + directoryCount;
+    if (!force && entryCount - lastReportedTotal < 32) return;
+    lastReportedTotal = entryCount;
+    onProgress({ fileCount, directoryCount, entryCount });
+  };
+  reportProgress(true);
 
   while (queueIndex < queue.length) {
+    throwIfLocalTreeCancelled(isCancelled);
     const current = queue[queueIndex++];
     const children = await fs.promises.readdir(current.localPath, { withFileTypes: true });
     accountLocalTreeEntries(traversalBudget, children.length);
@@ -339,35 +422,44 @@ async function collectLocalTreeEntries(rootPath, limits = {}) {
 
     const metadataConcurrency = 32;
     for (let start = 0; start < children.length; start += metadataConcurrency) {
-      const inspected = await Promise.all(
+      throwIfLocalTreeCancelled(isCancelled);
+      const inspected = (await Promise.all(
         children.slice(start, start + metadataConcurrency).map(async (child) => {
           const childPath = path.join(current.localPath, child.name);
           const childRelativePath = `${current.relativePath}/${child.name}`;
-          // Use lstat to distinguish links, then stat the target. Directory
-          // links retain the established folder-upload behavior, while the
-          // real-path ancestor chain prevents junction/symlink cycles.
-          const linkStat = await fs.promises.lstat(childPath);
-          const stat = linkStat.isSymbolicLink()
-            ? await fs.promises.stat(childPath).catch(() => linkStat)
-            : linkStat;
-          const isDirectory = stat.isDirectory();
-          const realPath = isDirectory
-            ? await fs.promises.realpath(childPath)
-            : null;
-          const isCycle = !!realPath && current.ancestorRealPaths.has(realPath);
-          const ancestorRealPaths = realPath
-            ? new Set([...current.ancestorRealPaths, realPath])
-            : current.ancestorRealPaths;
-          return {
-            childPath,
-            childRelativePath,
-            stat,
-            isDirectory,
-            isCycle,
-            ancestorRealPaths,
-          };
+          try {
+            // Use lstat to distinguish links, then stat the target. Directory
+            // links retain the established folder-upload behavior, while the
+            // real-path ancestor chain prevents junction/symlink cycles.
+            const linkStat = await fs.promises.lstat(childPath);
+            const stat = linkStat.isSymbolicLink()
+              ? await fs.promises.stat(childPath).catch(() => linkStat)
+              : linkStat;
+            const isDirectory = stat.isDirectory();
+            const realPath = isDirectory
+              ? await fs.promises.realpath(childPath)
+              : null;
+            const isCycle = !!realPath && current.ancestorRealPaths.has(realPath);
+            const ancestorRealPaths = realPath
+              ? new Set([...current.ancestorRealPaths, realPath])
+              : current.ancestorRealPaths;
+            return {
+              childPath,
+              childRelativePath,
+              stat,
+              isDirectory,
+              isCycle,
+              ancestorRealPaths,
+            };
+          } catch (error) {
+            // A folder can change while it is being scanned. Match the
+            // tolerant browser traversal and skip entries that disappear or
+            // become inaccessible instead of aborting the whole drop.
+            console.warn(`Could not inspect ${childPath}:`, error.message);
+            return null;
+          }
         }),
-      );
+      )).filter(Boolean);
 
       // Promise.all preserves the sorted child order, so restart manifests stay
       // deterministic while metadata I/O is parallelized.
@@ -379,30 +471,106 @@ async function collectLocalTreeEntries(rootPath, limits = {}) {
         // Cyclic links cannot be represented by a finite copied tree. Skip the
         // loop itself instead of misreporting it as a file that later fails.
         if (child.isCycle) continue;
-        entries.push({
+        const row = {
           localPath: child.childPath,
           relativePath: child.childRelativePath,
           type: child.isDirectory ? "directory" : "file",
           size: child.stat.size,
           lastModified: child.stat.mtime.getTime(),
-        });
-
+        };
+        if (retainAll) entries.push(row);
+        pendingBatch.push(row);
         if (child.isDirectory) {
+          directoryCount += 1;
           queue.push({
             localPath: child.childPath,
             relativePath: child.childRelativePath,
             ancestorRealPaths: child.ancestorRealPaths,
           });
+        } else {
+          fileCount += 1;
         }
       }
+      flushBatch();
+      reportProgress();
     }
   }
 
-  return entries;
+  throwIfLocalTreeCancelled(isCancelled);
+  flushBatch(true);
+  reportProgress(true);
+  return retainAll ? entries : [];
 }
 
 async function listLocalTree(event, payload) {
-  return collectLocalTreeEntries(payload.path);
+  const progressChannel = typeof payload?.progressChannel === "string" && payload.progressChannel
+    ? payload.progressChannel
+    : null;
+  const cancelChannel = typeof payload?.cancelChannel === "string" && payload.cancelChannel
+    ? payload.cancelChannel
+    : null;
+  let cancelled = false;
+  const onCancel = () => {
+    cancelled = true;
+  };
+  // Lazy-require so unit tests can import collectLocalTreeEntries without a
+  // full Electron binary (top-level require("electron") breaks node --test).
+  let electronIpcMain = null;
+  if (cancelChannel) {
+    try {
+      electronIpcMain = require("electron").ipcMain;
+      electronIpcMain.on(cancelChannel, onCancel);
+    } catch {
+      electronIpcMain = null;
+    }
+  }
+  const onProgress = progressChannel
+    ? (stats) => {
+      try {
+        event.sender.send(progressChannel, stats);
+      } catch {
+        // Renderer may have gone away mid-scan.
+      }
+    }
+    : undefined;
+  const entriesChannel = typeof payload?.entriesChannel === "string" && payload.entriesChannel
+    ? payload.entriesChannel
+    : null;
+  const onEntries = entriesChannel
+    ? (batch) => {
+      try {
+        // Always send plain arrays for entry batches. The stream end marker is
+        // a separate object so the preload can keep its listener until every
+        // nested batch has been delivered (invoke reply races with send).
+        event.sender.send(entriesChannel, batch);
+      } catch {
+        // Renderer may have gone away mid-scan.
+      }
+    }
+    : undefined;
+  try {
+    return await collectLocalTreeEntries(
+      payload.path,
+      payload.limits || {},
+      onProgress,
+      () => cancelled,
+      onEntries,
+    );
+  } finally {
+    // Must be sent after the last entry batch and before the invoke resolves
+    // is not enough alone — preload must wait for this marker before removing
+    // its listener, otherwise deep nested files (discovered late) are dropped.
+    if (entriesChannel) {
+      try {
+        event.sender.send(entriesChannel, { type: "tree-end" });
+      } catch {
+        // Renderer may have gone away mid-scan.
+      }
+    }
+    if (cancelChannel && electronIpcMain) {
+      electronIpcMain.removeListener(cancelChannel, onCancel);
+    }
+  }
 }
 
 /**
@@ -470,6 +638,11 @@ async function listDrives() {
   return letters.filter((_, idx) => results[idx].status === "fulfilled").map((letter) => letter + ":");
 }
 
+async function extractLocalArchive(_event, payload) {
+  const { extractLocalArchiveFile } = require("./sftpBridge/archiveExtract.cjs");
+  return extractLocalArchiveFile(payload?.path);
+}
+
 /**
  * Register IPC handlers for local filesystem operations
  */
@@ -479,8 +652,10 @@ function registerHandlers(ipcMain) {
   ipcMain.handle("netcatty:local:write", writeLocalFile);
   ipcMain.handle("netcatty:local:delete", deleteLocalFile);
   ipcMain.handle("netcatty:local:rename", renameLocalFile);
+  ipcMain.handle("netcatty:local:extract", extractLocalArchive);
   ipcMain.handle("netcatty:local:mkdir", mkdirLocal);
   ipcMain.handle("netcatty:local:stat", statLocal);
+  ipcMain.handle("netcatty:local:lstat", lstatLocal);
   ipcMain.handle("netcatty:local:tree", listLocalTree);
   ipcMain.handle("netcatty:local:homedir", getHomeDir);
   ipcMain.handle("netcatty:local:drives", listDrives);
@@ -496,8 +671,10 @@ module.exports = {
   writeLocalFile,
   deleteLocalFile,
   renameLocalFile,
+  extractLocalArchive,
   mkdirLocal,
   statLocal,
+  lstatLocal,
   collectLocalTreeEntries,
   createLocalTreeTraversalBudget,
   MAX_LOCAL_TREE_DIRECTORIES,

@@ -29,7 +29,6 @@ import { Host, Identity, KnownHost, ProxyProfile, SSHKey, TransferTask } from ".
 import { resolveGroupDefaults, applyGroupDefaults } from "../domain/groupConfig";
 import { materializeHostProxyProfile } from "../domain/proxyProfiles";
 import { useSftpFileAssociations } from "../application/state/useSftpFileAssociations";
-import { useWarmSftpTransferPool } from "../application/state/sftp/useSftpTransferLifecycle";
 import { registerEditorSftpWriterScoped } from "../application/state/editorSftpBridge";
 import { toast } from "./ui/toast";
 
@@ -44,7 +43,7 @@ import { SftpContextProvider, activeTabStore } from "./sftp";
 import { useSftpViewPaneCallbacks } from "./sftp/hooks/useSftpViewPaneCallbacks";
 import { useSftpViewTabs } from "./sftp/hooks/useSftpViewTabs";
 import { useSftpKeyboardShortcuts } from "./sftp/hooks/useSftpKeyboardShortcuts";
-import { sftpFocusStore, SftpFocusedSide, useSftpFocusedSide } from "./sftp/hooks/useSftpFocusedPane";
+import { sftpFocusStore, SftpFocusedSide, useSftpFocusedSide } from "../application/state/sftp/sftpFocusStore";
 import { keepOnlyActivePaneSelections, keepOnlyPaneSelections } from "./sftp/hooks/selectionScope";
 
 
@@ -127,8 +126,9 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
     ...fileWatchHandlers,
     transferOwnerId: "main-sftp-view",
     // Main SFTP page stays interactive while mounted so top-tab switches
-    // (e.g. Terminal ↔ SFTP) must not soft-close every tab's session;
-    // the terminal side panel still parks when its panel is hidden.
+    // (e.g. Terminal ↔ SFTP) must not soft-close every tab's session.
+    // The terminal side panel parks only after the panel is closed (not when
+    // switching History/System while the chrome stays open).
     // Bulk transfers use dedicated pool sessions regardless.
     interactive: true,
     useCompressedUpload: sftpUseCompressedUpload,
@@ -185,11 +185,6 @@ const SftpViewInner: React.FC<SftpViewProps> = ({
   // without needing to re-create when sftp changes
   const sftpRef = useRef(sftp);
   sftpRef.current = sftp;
-
-  useWarmSftpTransferPool({
-    hostIds: connectedHosts.map((entry) => entry.host.id),
-    warmTransferPoolForHost: sftp.warmTransferPoolForHost,
-  });
 
   // Register this useSftpState's writeTextFileByConnection with the bridge so
   // the editor tab's save path can reach the active SFTP session. The bridge

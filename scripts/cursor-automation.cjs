@@ -119,6 +119,67 @@ const PROTECTED_PATH_BASENAMES = Object.freeze([
 
 const IMPLEMENT_CATEGORIES = new Set(['bug_ready', 'feature_quick_win']);
 
+const AUTOMATION_MODE_FULL = 'full';
+const AUTOMATION_MODE_TRIAGE_ONLY = 'triage_only';
+
+/** Routes that write code or drive the Cursor ↔ Codex review loop. */
+const TRIAGE_ONLY_SKIP_KINDS = new Set([
+  'codex_loop',
+  'own_rerequest_codex',
+  'external_rerequest_codex',
+  'codex_poll',
+  'issue_followup',
+]);
+
+function resolveAutomationMode(explicit) {
+  const raw = explicit == null ? process.env.CURSOR_AUTOMATION_MODE : explicit;
+  const mode = String(raw || AUTOMATION_MODE_FULL).trim().toLowerCase();
+  return mode === AUTOMATION_MODE_TRIAGE_ONLY
+    ? AUTOMATION_MODE_TRIAGE_ONLY
+    : AUTOMATION_MODE_FULL;
+}
+
+function isTriageOnlyMode(explicit) {
+  return resolveAutomationMode(explicit) === AUTOMATION_MODE_TRIAGE_ONLY;
+}
+
+/**
+ * Temporary choke point: Cursor classifies issues, but does not implement
+ * or run the Codex loop. Restore by setting CURSOR_AUTOMATION_MODE=full.
+ */
+function gateAutomationRoute(kind, { mode, reason } = {}) {
+  const resolvedKind = String(kind || 'skip');
+  const resolvedReason = reason || resolvedKind;
+  if (!isTriageOnlyMode(mode) || !TRIAGE_ONLY_SKIP_KINDS.has(resolvedKind)) {
+    return { kind: resolvedKind, reason: resolvedReason };
+  }
+  return {
+    kind: 'skip',
+    reason:
+      resolvedReason && resolvedReason !== resolvedKind
+        ? `triage-only: skipped ${resolvedKind} (${resolvedReason})`
+        : `triage-only: skipped ${resolvedKind}`,
+  };
+}
+
+function applyTriageOnlyClassificationPolicy(classification, labels = []) {
+  if (!isTriageOnlyMode()) {
+    return { classification, labels };
+  }
+  const nextLabels = Array.isArray(labels) ? [...labels] : [];
+  const remapped = nextLabels.filter((name) => name !== 'ready-for-agent');
+  if (
+    nextLabels.includes('ready-for-agent') &&
+    !remapped.includes('ready-for-human')
+  ) {
+    remapped.push('ready-for-human');
+  }
+  return {
+    classification: { ...classification, should_implement: false },
+    labels: remapped,
+  };
+}
+
 function sanitizeUntrustedText(value, maxLength = 12_000) {
   const text = String(value || '')
     .replace(/<!--[^]*?-->/g, '')
@@ -169,6 +230,8 @@ function parseExternalResearchEnvelope(value) {
 const USER_AUTHORED_URL_TOKEN_PATTERN = /https?:\/\/[^\s<>()"'`,;]+/gi;
 const GITHUB_USER_ATTACHMENT_ASSET_PATH_PATTERN =
   /^\/user-attachments\/assets\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const GITHUB_USER_ATTACHMENT_REDIRECT_HOST_PATTERN =
+  /^github-production-user-asset-[a-z0-9-]+\.s3\.amazonaws\.com$/i;
 
 function normalizeGithubUserAttachmentAssetUrl(value) {
   const candidate = String(value || '').replace(/[.!:\]}]+$/g, '');
@@ -196,6 +259,38 @@ function extractGithubUserAttachmentAssetUrls(input = {}) {
   return [...new Set(tokens.map(normalizeGithubUserAttachmentAssetUrl).filter(Boolean))];
 }
 
+/** Classify GitHub's signed attachment redirect without fetching untrusted media. */
+function classifyGithubUserAttachmentRedirect(value) {
+  const locations = String(value || '')
+    .split(/\r?\n/)
+    .filter((line) => /^location\s*:/i.test(line))
+    .map((line) => line.replace(/^location\s*:\s*/i, '').trim())
+    .filter(Boolean);
+  if (!locations.length) return '';
+  try {
+    const parsed = new URL(locations.at(-1));
+    if (
+      parsed.protocol !== 'https:'
+      || parsed.username
+      || parsed.password
+      || !GITHUB_USER_ATTACHMENT_REDIRECT_HOST_PATTERN.test(parsed.hostname)
+    ) {
+      return '';
+    }
+    const mediaType = String(parsed.searchParams.get('response-content-type') || '')
+      .split(';', 1)[0]
+      .trim()
+      .toLowerCase();
+    if (mediaType.startsWith('image/')) return 'image';
+    if (mediaType.startsWith('video/') || mediaType.startsWith('audio/')) {
+      return 'unsupported_media';
+    }
+    return '';
+  } catch {
+    return '';
+  }
+}
+
 function rewriteExternalResearchInputAttachments(input, attachments = []) {
   const replacements = new Map();
   for (const attachment of attachments) {
@@ -205,8 +300,16 @@ function rewriteExternalResearchInputAttachments(input, attachments = []) {
     if (exactSource !== sourceUrl) {
       throw new Error('Research attachment source must be a GitHub user attachment asset URL.');
     }
-    if (!/^attachments\/[A-Za-z0-9._/-]+$/.test(relativePath) || relativePath.includes('..')) {
-      throw new Error('Research attachment path must stay under attachments/.');
+    if (attachment?.kind === 'unsupported_media') {
+      replacements.set(sourceUrl, '[video or audio attachment omitted from automated research]');
+      continue;
+    }
+    if (
+      attachment?.kind != null && attachment.kind !== 'image'
+      || !/^attachments\/[A-Za-z0-9._/-]+$/.test(relativePath)
+      || relativePath.includes('..')
+    ) {
+      throw new Error('Research image attachment path must stay under attachments/.');
     }
     replacements.set(sourceUrl, `[proxied image: ${relativePath}]`);
   }
@@ -263,6 +366,14 @@ function normalizeResearchSourceUrl(value) {
     if (parsed.protocol !== 'https:') return '';
     parsed.hash = '';
     if (parsed.pathname.length > 1) parsed.pathname = parsed.pathname.replace(/\/$/, '');
+    if (parsed.hostname === 'github.com') {
+      const segments = parsed.pathname.split('/');
+      if (segments.length >= 3) {
+        segments[1] = segments[1].toLowerCase();
+        segments[2] = segments[2].toLowerCase();
+        parsed.pathname = segments.join('/');
+      }
+    }
     return parsed.toString();
   } catch {
     return '';
@@ -277,6 +388,24 @@ function extractResearchSourceUrls(text) {
     if (normalized) urls.push(normalized);
   }
   return urls;
+}
+
+function dropUnverifiedResearchSources(text, unverifiedUrls) {
+  const blocked = unverifiedUrls instanceof Set
+    ? unverifiedUrls
+    : new Set(unverifiedUrls || []);
+  if (!blocked.size) return String(text || '');
+  return String(text || '')
+    .split('\n')
+    .filter((line) => {
+      const match = line.match(/^-\s+(https:\/\/[^\s<>()]+)\s+(?:—|–|-)\s+\S.*$/);
+      if (!match) return true;
+      const normalized = normalizeResearchSourceUrl(match[1]);
+      return !normalized || !blocked.has(normalized);
+    })
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 function extractHttpsUrls(value) {
@@ -394,9 +523,14 @@ function parseExternalResearchStream(value, input) {
     const sourceUrls = extractResearchSourceUrls(normalized);
     const unverified = sourceUrls.filter((url) => !webEvidenceUrls.has(url));
     if (unverified.length) {
-      throw new Error(
-        `Research source URL was not present in completed web tool results: ${unverified.join(', ')}`,
-      );
+      // Keep classify moving when the model mixes proven tool evidence with one
+      // hallucinated citation. Only fail closed when nothing cited is proven.
+      if (unverified.length === sourceUrls.length) {
+        throw new Error(
+          `Research source URL was not present in completed web tool results: ${unverified.join(', ')}`,
+        );
+      }
+      return dropUnverifiedResearchSources(normalized, new Set(unverified));
     }
   }
   return normalized;
@@ -1122,17 +1256,40 @@ function extractIssueCommentWatermark(body) {
   return String(body || '').match(ISSUE_WATERMARK_RE)?.[1] || '';
 }
 
-function extractSourceIssueNumber(pull) {
+function extractKeywordIssueNumbers(body, { includeRelated = false } = {}) {
+  const keywords = includeRelated
+    ? 'close[sd]?|fix(?:e[sd])?|resolve[sd]?|related\\s+to|refs?|references?'
+    : 'close[sd]?|fix(?:e[sd])?|resolve[sd]?';
+  const issueReference = '#\\d+(?![A-Za-z0-9_])';
+  const clause = new RegExp(
+    `(?:^|\\W)(?:${keywords})\\s+(`
+      + `${issueReference}(?:\\s*(?:,\\s*(?:and\\s+)?|and\\s+|&\\s*)${issueReference})*`
+      + ')',
+    'gi',
+  );
+  const issueNumbers = [];
+  for (const match of String(body || '').matchAll(clause)) {
+    for (const reference of match[1].matchAll(/#(\d+)/g)) {
+      const issueNumber = Number(reference[1]);
+      if (Number.isFinite(issueNumber) && issueNumber > 0) issueNumbers.push(issueNumber);
+    }
+  }
+  return [...new Set(issueNumbers)];
+}
+
+function extractSourceIssueNumbers(pull) {
   const body = String(pull?.body || '');
   const marker = body.match(SOURCE_ISSUE_RE);
-  if (marker) return Number(marker[1]);
-  const closing = body.match(
-    /(?:^|\W)(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)\b/i,
-  );
-  if (closing) return Number(closing[1]);
+  if (marker) return [Number(marker[1])];
+  const closing = extractKeywordIssueNumbers(body);
+  if (closing.length) return [...new Set(closing)];
   const headRef = String(pull?.head?.ref || pull?.headRefName || '');
   const branch = headRef.match(/^cursor\/issue-(\d+)-/i);
-  return branch ? Number(branch[1]) : null;
+  return branch ? [Number(branch[1])] : [];
+}
+
+function extractSourceIssueNumber(pull) {
+  return extractSourceIssueNumbers(pull)[0] || null;
 }
 
 function extractProcessedIssueFollowupIds(
@@ -1416,30 +1573,122 @@ function nextSourceIssueLabelsAfterPull(existing = [], merged = false) {
   return [...new Set(labels)];
 }
 
+function shouldCleanupSourceIssueAfterPull(pull, options = {}) {
+  if (!pull || String(pull.state || '').toLowerCase() !== 'closed') return false;
+  const issueNumbers = extractSourceIssueNumbers(pull);
+  if (!issueNumbers.length) return false;
+
+  const repository = String(options.repository || '').toLowerCase();
+  const baseRepo = String(
+    pull.base?.repo?.full_name || pull.base?.repo?.nameWithOwner || repository,
+  ).toLowerCase();
+  if (repository && baseRepo && baseRepo !== repository) return false;
+
+  const merged = Boolean(pull.merged || pull.merged_at || pull.mergedAt);
+  if (merged) {
+    const body = String(pull.body || '');
+    if (SOURCE_ISSUE_RE.test(body)) {
+      const issueNumber = issueNumbers[0];
+      const closing = new RegExp(
+        `(?:^|\\W)(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\\s+#${issueNumber}\\b`,
+        'i',
+      );
+      if (closing.test(body)) return true;
+    } else {
+      return true;
+    }
+  }
+
+  return shouldGatePullOnSourceIssueFollowups(pull, options);
+}
+
 function buildImplementationFailureMessage(issue = {}, {
   kind = 'processing_failed',
   workflowUrl = '',
   artifactName = '',
+  protectedPaths = [],
 } = {}) {
   const chinese = /[\u3400-\u9fff]/u.test(`${issue.title || ''}\n${issue.body || ''}`);
   const link = workflowUrl ? (chinese ? `查看本次运行：${workflowUrl}` : `View this run: ${workflowUrl}`) : '';
   const artifact = artifactName
     ? (chinese ? `候选补丁和验证报告已保存为 ${artifactName}。` : `The candidate patch and verification report were preserved as ${artifactName}.`)
     : '';
+  const protectedDetails = formatProtectedPathDetails(protectedPaths, { chinese });
   const messages = chinese
     ? {
-        verification_failed: '自动修改已经完成，但本次改动新增了验证失败，因此没有创建 PR。',
+        verification_failed: '自动修改已经产出候选补丁，但验证闸门未通过，因此没有创建 PR。',
         protected_path: '自动修改涉及受保护的发布或自动化文件，安全规则已停止发布。',
         no_changes: 'Cursor 没有产出可安全提交的聚焦修改，已转给维护者继续判断。',
         processing_failed: '自动修改流程自身没有正常完成，已转给维护者继续处理。',
       }
     : {
-        verification_failed: 'The automatic change completed, but it introduced a verification failure, so no PR was created.',
+        verification_failed: 'The automatic change produced a candidate patch, but it did not pass the verification gate, so no PR was created.',
         protected_path: 'The automatic change touched protected release or automation files, so the safety gate stopped publication.',
         no_changes: 'Cursor did not produce a safe focused change. A maintainer needs to continue the investigation.',
         processing_failed: 'The automation process itself did not finish normally. A maintainer needs to continue.',
       };
-  return [messages[kind] || messages.processing_failed, artifact, link].filter(Boolean).join('\n\n');
+  return [messages[kind] || messages.processing_failed, protectedDetails, artifact, link]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function buildCodexFixFailureMessage({
+  kind = 'processing_failed',
+  workflowUrl = '',
+  artifactName = '',
+  protectedPaths = [],
+} = {}) {
+  const messages = {
+    verification_failed: 'The automatic Codex fix was preserved, but it did not pass verification. The PR remains draft for maintainer review.',
+    protected_path: 'The automatic Codex fix touched protected release or automation files, so the safety gate stopped publication.',
+    no_changes: 'The automatic Codex fix completed, but it did not change any files for the latest review findings. The findings may already be addressed, stale, or require maintainer judgment, so the PR remains draft for human review.',
+    processing_failed: 'The automatic Codex fix process itself did not finish normally. The PR remains draft for maintainer review.',
+  };
+  const protectedDetails = formatProtectedPathDetails(protectedPaths);
+  const artifact = artifactName
+    ? `The candidate patch and verification report were preserved as ${artifactName}.`
+    : '';
+  const link = workflowUrl ? `View this run: ${workflowUrl}` : '';
+  return [messages[kind] || messages.processing_failed, protectedDetails, artifact, link]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function buildClassificationFailureMessage(issue = {}, {
+  kind = 'processing_failed',
+  workflowUrl = '',
+  isFollowup = false,
+} = {}) {
+  const chinese = /[\u3400-\u9fff]/u.test(`${issue.title || ''}\n${issue.body || ''}`);
+  const messages = chinese
+    ? {
+        research_failed: isFollowup
+          ? '自动复核在读取这次补充的附件或外部资料时失败，Issue 已保留并转给维护者继续处理。'
+          : '自动分类在读取附件或外部资料时失败，Issue 已保留并转给维护者继续处理。',
+        classification_failed: isFollowup
+          ? '自动复核没有得到可安全使用的判断结果，Issue 已保留并转给维护者继续处理。'
+          : '自动分类没有得到可安全使用的判断结果，Issue 已保留并转给维护者继续处理。',
+        apply_failed: '自动分类已经得到结果，但更新 Issue 状态时没有安全完成，已转给维护者继续处理。',
+        processing_failed: isFollowup
+          ? '这次补充的自动复核流程没有正常完成，Issue 已保留并转给维护者继续处理。'
+          : '自动分类流程没有正常完成，Issue 已保留并转给维护者继续处理。',
+      }
+    : {
+        research_failed: isFollowup
+          ? 'The automatic review could not read the new attachments or external context. The issue was preserved for maintainer review.'
+          : 'Automatic classification could not read the attachments or external context. The issue was preserved for maintainer review.',
+        classification_failed: isFollowup
+          ? 'The automatic review did not produce a safe usable decision. The issue was preserved for maintainer review.'
+          : 'Automatic classification did not produce a safe usable decision. The issue was preserved for maintainer review.',
+        apply_failed: 'Automatic classification produced a result, but the issue state could not be updated safely. A maintainer needs to continue.',
+        processing_failed: isFollowup
+          ? 'The automatic review of the new information did not finish normally. The issue was preserved for maintainer review.'
+          : 'The automatic classification process did not finish normally. The issue was preserved for maintainer review.',
+      };
+  const link = workflowUrl
+    ? (chinese ? `查看本次运行：${workflowUrl}` : `View this run: ${workflowUrl}`)
+    : '';
+  return [messages[kind] || messages.processing_failed, link].filter(Boolean).join('\n\n');
 }
 
 function buildIssueFollowupReply({
@@ -1640,18 +1889,80 @@ function buildExternalCodexRerequestComment(headSha) {
   ].join('\n');
 }
 
+/**
+ * True when a comment body is a Codex review *request* (not a clean summary).
+ * Matches "@codex review" as a mention token, not "Codex Review: …" summaries.
+ */
+function isCodexReviewRequestBody(body) {
+  const text = String(body || '');
+  if (!/(^|[^A-Za-z0-9_@])@codex\s+review\b/i.test(text)) return false;
+  // Connector clean/noise posts never use the @codex request form.
+  return true;
+}
+
+/**
+ * Authors whose @codex review posts count for same-head dedupe.
+ * Includes maintainers/GITHUB_TOKEN and Cursor's PR bot (often posts a plain
+ * @codex review before our own_rerequest job lands).
+ */
+function isCodexRequestDedupeAuthor(login, { ownActors } = {}) {
+  if (isTrustedAutomationControlAuthor(login, { ownActors })) return true;
+  const name = String(login || '')
+    .trim()
+    .toLowerCase()
+    .replace(/^@/, '');
+  return name === 'cursor[bot]' || name === 'cursor';
+}
+
+/**
+ * Skip posting another @codex review when this head was already requested.
+ *
+ * Historical bug: only `cursor-external-codex:SHA` counted. Automation
+ * comments that pin `cursor-codex-head:SHA` (and maintainer requests built the
+ * same way) did not, so a second synchronize-path request could fire for the
+ * same SHA while an earlier job was still in flight — clean issue comment from
+ * one job, findings review from the other.
+ *
+ * Skip when a trusted/dedupe author already requested this head via:
+ * - `cursor-external-codex:SHA`, or
+ * - `cursor-codex-head:SHA` pin matching headSha.
+ *
+ * Plain unpinned "@codex review" is intentionally ignored: without a head pin
+ * we cannot tell which SHA it targeted, and timestamp heuristics (age, commit
+ * date, PR.updated_at) all have false-positive races. Prefer always planting
+ * a head pin (buildCodexReviewRequestComment) so re-request is safe.
+ *
+ * `notBefore` is accepted but unused (kept so older workflow callers do not
+ * throw if they still pass it).
+ */
 function shouldSkipExternalCodexRerequest({
   existingComments = [],
   headSha,
   ownActors,
+  notBefore: _notBefore = null,
+  notBeforeSlackMs: _notBeforeSlackMs = 5_000,
 } = {}) {
-  const marker = `<!-- cursor-external-codex:${sanitizeUntrustedText(headSha, 64)} -->`;
-  return existingComments.some(
-    (c) =>
-      isTrustedAutomationControlAuthor(c?.user?.login || c?.login, {
-        ownActors,
-      }) && String(c.body || '').includes(marker),
-  );
+  const want = String(headSha || '')
+    .trim()
+    .toLowerCase();
+  if (!want) return false;
+  const externalMarker = `<!-- cursor-external-codex:${sanitizeUntrustedText(want, 64)} -->`;
+
+  return existingComments.some((c) => {
+    const login = c?.user?.login || c?.login;
+    if (!isCodexRequestDedupeAuthor(login, { ownActors })) return false;
+    const body = String(c?.body || '');
+    if (!isCodexReviewRequestBody(body)) return false;
+
+    // Explicit external marker for this SHA (legacy + current automation).
+    if (body.includes(externalMarker)) return true;
+
+    // Automation / human request that pins this head.
+    const pinned = extractRequestedHeadSha(body);
+    if (pinned && commitShasMatch(want, pinned)) return true;
+
+    return false;
+  });
 }
 
 function buildSlackPayload({
@@ -2088,6 +2399,121 @@ const ISSUE_FOLLOWUP_LABELS = new Set([
   'triage:unclear',
 ]);
 
+/** Outcome labels that mean automatic triage already finished once. */
+const ISSUE_ADMITTED_LABELS = new Set([
+  'triage:admitted',
+  'needs-info',
+  'ready-for-agent',
+  'ready-for-human',
+  'triage:bug-ready',
+  'triage:bug-needs-info',
+  'triage:feature-quick-win',
+  'triage:feature-defer',
+  'triage:already-available',
+  'triage:other',
+  'triage:unclear',
+  'unclear',
+]);
+
+/** Auto-closed triage outcomes that a human reopen should hand to maintainers. */
+const ISSUE_AUTO_CLOSE_HANDOFF_LABELS = new Set([
+  'triage:already-available',
+  'triage:unclear',
+  'unclear',
+]);
+
+const REOPEN_HANDOFF_MARKER = '<!-- cursor-reopen-handoff -->';
+
+function normalizeIssueLabelNames(labels = []) {
+  return (labels || [])
+    .map((label) => (typeof label === 'string' ? label : label?.name))
+    .filter(Boolean);
+}
+
+function isIssueAlreadyAdmitted(labels = []) {
+  return normalizeIssueLabelNames(labels).some((name) =>
+    ISSUE_ADMITTED_LABELS.has(name),
+  );
+}
+
+function labelsForReadyForHumanHandoff(existingLabels = []) {
+  const existing = normalizeIssueLabelNames(existingLabels);
+  // Keep triage:already-available / unclear as dispute signals so later author
+  // follow-ups stay on issue_followup instead of re-entering classify.
+  const drop = new Set(['ready-for-agent']);
+  const preserved = existing.includes('triage:admitted')
+    ? ['triage:admitted']
+    : [];
+  return [
+    ...new Set([
+      ...existing.filter((name) => !drop.has(name) && name !== 'ready-for-human'),
+      'triage',
+      'ready-for-human',
+      ...preserved,
+    ]),
+  ];
+}
+
+/**
+ * Route issues opened/reopened without always re-running agent classify.
+ * Reopen of an already-triaged issue must not replay the close/reopen loop.
+ */
+function decideIssuesEventRoute({
+  action,
+  labels = [],
+  actorLogin,
+  botLogins = ['netcatty-bot', 'github-actions[bot]'],
+} = {}) {
+  const normalizedAction = String(action || '').toLowerCase();
+  if (normalizedAction === 'opened') {
+    return { kind: 'issue_classify', reason: 'issues:opened' };
+  }
+  if (normalizedAction !== 'reopened') {
+    return {
+      kind: 'skip',
+      reason: `issues:${normalizedAction || 'unknown'}`,
+    };
+  }
+
+  const names = normalizeIssueLabelNames(labels);
+  const bots = normalizeLoginList(botLogins, [
+    'netcatty-bot',
+    'github-actions[bot]',
+  ]);
+  const actor = String(actorLogin || '').trim().toLowerCase();
+  if (actor && bots.has(actor)) {
+    return {
+      kind: 'skip',
+      reason: 'bot reopen of managed issue',
+    };
+  }
+  if (!isIssueAlreadyAdmitted(names)) {
+    return { kind: 'issue_classify', reason: 'issues:reopened' };
+  }
+  if (names.some((name) => ISSUE_AUTO_CLOSE_HANDOFF_LABELS.has(name))) {
+    return {
+      kind: 'ready_for_human_handoff',
+      reason: 'human reopen of auto-closed triage',
+    };
+  }
+  // Merged-fix / bug-ready / feature reopens must re-enter classify so a
+  // failed fix can spawn another implementation. Bot reopen is already skipped
+  // above, which covers follow-up reopen side effects.
+  return {
+    kind: 'issue_classify',
+    reason: 'issues:reopened admitted non-auto-close',
+  };
+}
+
+function buildReopenHandoffReply(issue = {}) {
+  const chinese = /[\u3400-\u9fff]/u.test(
+    `${issue.title || ''}\n${issue.body || ''}`,
+  );
+  return chinese
+    ? '这条 Issue 已重新打开，并交给维护者继续处理。自动分流不会再次把它标成“已有能力/可关闭”。'
+    : 'This issue was reopened and handed to a maintainer. Automatic triage will not close it again as already available.';
+}
+
 function normalizeLoginList(value, fallback = []) {
   const values = Array.isArray(value) ? value : String(value || '').split(',');
   const normalized = values
@@ -2143,23 +2569,57 @@ function decideIssueCommentRoute({
   }
 
   const isManaged = names.some((name) => ISSUE_FOLLOWUP_LABELS.has(name));
-  if (isAuthor && isManaged) {
-    return {
-      kind: 'issue_followup',
-      reason: 'author follow-up on managed issue',
-    };
-  }
   const trustedAssociation = ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(
     String(commenterAssociation || '').toUpperCase(),
   );
+  // Prefer maintainer @bot over plain author follow-up so maintainers who also
+  // filed the issue can still force re-triage (incl. auto-closed disputes).
   if (isManaged && trustedAssociation && mentionsIssueBot(body, botLogins)) {
     return {
       kind: 'issue_followup',
       reason: 'maintainer mentioned issue bot',
     };
   }
+  if (isAuthor && isManaged) {
+    return {
+      kind: 'issue_followup',
+      reason: 'author follow-up on managed issue',
+    };
+  }
 
   return { kind: 'skip', reason: 'issue comment no follow-up signal' };
+}
+
+function refineIssueCommentRoute(decision, {
+  hasOpenBotPull = false,
+  hasOpenRelatedPull = false,
+  body = '',
+  labels = [],
+} = {}) {
+  if (decision?.kind !== 'issue_followup' || hasOpenBotPull) return decision;
+  const names = normalizeIssueLabelNames(labels);
+  // Disputed auto-close outcomes (already_available / unclear) must stay on
+  // follow-up after author reopen handoff so classify cannot auto-close again.
+  // Maintainer @bot mentions are explicit re-triage requests and must still
+  // re-enter classify even when those dispute labels remain.
+  // Do not gate on ready-for-human alone — that label also covers
+  // feature_defer / other / implement failures that should reclassify.
+  if (
+    names.some((name) => ISSUE_AUTO_CLOSE_HANDOFF_LABELS.has(name))
+    && decision.reason !== 'maintainer mentioned issue bot'
+  ) {
+    return decision;
+  }
+  const simpleKind = classifySimpleIssueFollowup([{ body }]);
+  if (simpleKind) return decision;
+  return {
+    kind: 'issue_classify',
+    reason: hasOpenRelatedPull
+      ? 'actionable author follow-up with trusted related PR'
+      : decision.reason === 'maintainer mentioned issue bot'
+        ? 'actionable maintainer bot mention without open automation PR'
+        : 'actionable author follow-up without open automation PR',
+  };
 }
 
 /**
@@ -2303,41 +2763,38 @@ function listProtectedPathHits(filePaths) {
   return hits;
 }
 
-function isTestSourcePath(filePath) {
-  const normalized = String(filePath || '').replace(/\\/g, '/');
-  return (
-    /(?:^|\/)[^/]+\.(?:test|spec)\.[cm]?[jt]sx?$/.test(normalized) ||
-    /(?:^|\/)__tests__\//.test(normalized)
-  );
+function normalizeProtectedPathDetails(filePaths = []) {
+  const unique = [...new Set((filePaths || []).map((value) =>
+    String(value || '').replace(/\\/g, '/').trim(),
+  ))];
+  return listProtectedPathHits(unique)
+    .filter((value) => value.length <= 300 && !/[\r\n\0]/.test(value))
+    .slice(0, 12);
 }
 
-function listModifiedExistingTestPaths({
-  gitStatusPorcelain = '',
-  nameStatusText = '',
-} = {}) {
-  const hits = [];
-  for (const line of String(gitStatusPorcelain || '').split('\n')) {
-    if (!line.trim()) continue;
-    const status = line.slice(0, 2);
-    if (status === '??' || status.includes('A')) continue;
-    const rest = line.slice(3).trim();
-    const paths = rest.includes(' -> ')
-      ? rest.split(' -> ').map((value) => unquoteGitPath(value.trim()))
-      : [unquoteGitPath(rest)];
-    hits.push(...paths.filter(isTestSourcePath));
+function formatProtectedPathDetails(filePaths = [], { chinese = false } = {}) {
+  const paths = normalizeProtectedPathDetails(filePaths);
+  if (!paths.length) return '';
+  const heading = chinese ? '触发安全规则的位置：' : 'Protected paths:';
+  return [heading, ...paths.map((value) => `- ${value}`)].join('\n');
+}
+
+function writeProtectedPathReport(filePath, filePaths = []) {
+  const reportPath = String(filePath || '');
+  if (!reportPath) throw new Error('Protected path report requires a file path.');
+  fs.mkdirSync(path.dirname(reportPath), { recursive: true });
+  fs.rmSync(reportPath, { force: true });
+  const paths = normalizeProtectedPathDetails(filePaths);
+  if (paths.length) writeJson(reportPath, paths);
+  return paths;
+}
+
+function readProtectedPathReport(filePath) {
+  try {
+    return normalizeProtectedPathDetails(JSON.parse(fs.readFileSync(filePath, 'utf8')));
+  } catch {
+    return [];
   }
-  for (const line of String(nameStatusText || '').split('\n')) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    const parts = trimmed.split(/\t/);
-    const status = parts[0] || '';
-    if (/^A\d*$/.test(status)) continue;
-    const paths = /^R\d*/.test(status) && parts.length >= 3
-      ? [parts[1], parts[2]]
-      : parts.slice(1, 2);
-    hits.push(...paths.map(unquoteGitPath).filter(isTestSourcePath));
-  }
-  return [...new Set(hits)];
 }
 
 function hasProtectedChanges(gitStatusPorcelain) {
@@ -2358,10 +2815,7 @@ function hasProtectedChangesInSources({
     ...fromCommits,
     ...fromNameStatus,
   ]);
-  return [...new Set([
-    ...protectedHits,
-    ...listModifiedExistingTestPaths({ gitStatusPorcelain, nameStatusText }),
-  ])];
+  return [...new Set(protectedHits)];
 }
 
 function getCodexRoundFromComments(comments = [], options = {}) {
@@ -2632,20 +3086,16 @@ async function prepareIssueContext({
         (comment) => String(comment?.id || '') === previousWatermark,
       )
     : -1;
-  const needsInfoReply = Boolean(
-    triggerId &&
-      (labelNames.includes('needs-info') ||
-        labelNames.includes('triage:bug-needs-info')),
-  );
+  const commentTriggeredReclassification = Boolean(triggerId);
   const processed = extractProcessedIssueFollowupIds(commentList, botLogins);
-  if ((needsInfoReply || automaticBacklogDrain) && !manual) {
+  if ((commentTriggeredReclassification || automaticBacklogDrain) && !manual) {
     if (
       triggerId &&
       (processed.has(triggerId) ||
         commentIdAtOrBefore(triggerId, previousWatermark))
     ) {
       setOutput(core, 'should_run', false);
-      setOutput(core, 'reason', 'This needs-info reply was already processed.');
+      setOutput(core, 'reason', 'This issue reply was already processed.');
       return { shouldRun: false, issue, comments: commentList };
     }
     const startOfDay = new Date(nowMs);
@@ -2661,7 +3111,7 @@ async function prepareIssueContext({
       setOutput(core, 'should_run', false);
       setOutput(core, 'rate_limited', true);
       setOutput(core, 'pending_ids', triggerId);
-      setOutput(core, 'reason', 'Daily needs-info follow-up limit reached.');
+      setOutput(core, 'reason', 'Daily issue follow-up limit reached.');
       return {
         shouldRun: false,
         rateLimited: true,
@@ -2783,7 +3233,13 @@ async function applyClassification({
     typeof label === 'string' ? label : label.name,
   );
   const nextLabels = labelsForCategory(classification.category, existingLabels);
-  const closeReason = CLOSE_REASONS[classification.category] || null;
+  const triageOnly = applyTriageOnlyClassificationPolicy(
+    classification,
+    nextLabels,
+  );
+  const appliedClassification = triageOnly.classification;
+  const appliedLabels = triageOnly.labels;
+  const closeReason = CLOSE_REASONS[appliedClassification.category] || null;
   const shouldClose = Boolean(closeReason);
 
   // Publish the reply only after the state transition succeeds. If the update
@@ -2793,7 +3249,7 @@ async function applyClassification({
     owner,
     repo,
     issue_number: issue.number,
-    labels: nextLabels,
+    labels: appliedLabels,
     ...(shouldClose
       ? { state: 'closed', state_reason: closeReason }
       : { state: issue.state }),
@@ -2804,7 +3260,7 @@ async function applyClassification({
       owner,
       repo,
       issue_number: issue.number,
-      body: buildTriageComment(classification, {
+      body: buildTriageComment(appliedClassification, {
         issueCommentWatermark,
         processedCommentIds,
       }),
@@ -2824,12 +3280,12 @@ async function applyClassification({
     throw error;
   }
 
-  setOutput(core, 'category', classification.category);
-  setOutput(core, 'summary', classification.summary || classification.category);
-  setOutput(core, 'should_implement', classification.should_implement);
-  setOutput(core, 'confidence', classification.confidence);
+  setOutput(core, 'category', appliedClassification.category);
+  setOutput(core, 'summary', appliedClassification.summary || appliedClassification.category);
+  setOutput(core, 'should_implement', appliedClassification.should_implement);
+  setOutput(core, 'confidence', appliedClassification.confidence);
   setOutput(core, 'should_close', shouldClose);
-  return classification;
+  return appliedClassification;
 }
 
 async function markNeedsHuman({
@@ -2839,6 +3295,8 @@ async function markNeedsHuman({
   message,
   dedupeMarker = '',
   trustedCommentAuthors = 'binaricat,netcatty-bot,github-actions[bot]',
+  labels,
+  ensureOpen = false,
 }) {
   const owner = context.repo.owner;
   const repo = context.repo.repo;
@@ -2848,19 +3306,19 @@ async function markNeedsHuman({
     issue_number: Number(issueNumber),
   });
   const existing = issue.labels.map((l) => (typeof l === 'string' ? l : l.name));
-  const next = [
-    ...new Set([
-      ...existing.filter((l) => l !== 'ready-for-agent'),
-      'triage',
-      'ready-for-human',
-    ]),
-  ];
-  await github.rest.issues.update({
+  const next = Array.isArray(labels)
+    ? [...new Set(labels.filter(Boolean))]
+    : labelsForReadyForHumanHandoff(existing);
+  const update = {
     owner,
     repo,
     issue_number: issue.number,
     labels: next,
-  });
+  };
+  if (ensureOpen && String(issue.state || '').toLowerCase() === 'closed') {
+    update.state = 'open';
+  }
+  await github.rest.issues.update(update);
   const marker = String(dedupeMarker || '').trim();
   if (marker) {
     const trusted = normalizeLoginList(trustedCommentAuthors, [
@@ -2894,6 +3352,53 @@ async function markNeedsHuman({
   return { issue, labels: next, commented: true };
 }
 
+async function applyReadyForHumanHandoff({
+  github,
+  context,
+  issueNumber,
+  message,
+  dedupeMarker = REOPEN_HANDOFF_MARKER,
+  trustedCommentAuthors = 'binaricat,netcatty-bot,github-actions[bot]',
+} = {}) {
+  const { data: issue } = await github.rest.issues.get({
+    ...context.repo,
+    issue_number: Number(issueNumber),
+  });
+  const names = normalizeIssueLabelNames(issue.labels);
+  // Reopen already left the issue open. If a maintainer re-closed it while this
+  // handoff was queued, do not force it open again.
+  if (String(issue.state || '').toLowerCase() === 'closed') {
+    return {
+      issue,
+      labels: names,
+      commented: false,
+      skipped: true,
+      reason: 'issue already closed',
+    };
+  }
+  // Revalidate at apply time: a queued handoff must not undo a maintainer who
+  // already cleared the auto-close outcome and moved the issue elsewhere.
+  if (!names.some((name) => ISSUE_AUTO_CLOSE_HANDOFF_LABELS.has(name))) {
+    return {
+      issue,
+      labels: names,
+      commented: false,
+      skipped: true,
+      reason: 'auto-close handoff labels no longer present',
+    };
+  }
+  return markNeedsHuman({
+    github,
+    context,
+    issueNumber,
+    message: message || buildReopenHandoffReply(issue),
+    dedupeMarker,
+    trustedCommentAuthors,
+    labels: labelsForReadyForHumanHandoff(issue.labels),
+    ensureOpen: false,
+  });
+}
+
 function isBotPrForIssue(pull, issueNumber) {
   if (!pull) return false;
   const n = String(issueNumber);
@@ -2923,6 +3428,129 @@ function isBotPrForIssue(pull, issueNumber) {
     (trustedBotAuthor && (marker || botLabel || headRef.startsWith(prefix))) ||
     (marker && botLabel)
   );
+}
+
+function pullReferencesIssue(pull, issueNumber, { includeRelated = false } = {}) {
+  if (!pull) return false;
+  const n = String(issueNumber);
+  const body = String(pull.body || '');
+  const marker = body.match(SOURCE_ISSUE_RE);
+  if (marker && marker[1] === n) return true;
+  return extractKeywordIssueNumbers(body, { includeRelated }).includes(Number(n));
+}
+
+function isTrustedOpenPullForIssue(pull, issueNumber, {
+  repository = '',
+  includeRelated = false,
+} = {}) {
+  if (!pull || (pull.state && String(pull.state).toLowerCase() !== 'open')) return false;
+  const normalizedRepository = String(repository || '').toLowerCase();
+  const headRepository = String(
+    pull.head?.repo?.full_name || pull.headRepository?.nameWithOwner || '',
+  ).toLowerCase();
+  const trustedAssociations = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+  const trustedAuthor = trustedAssociations.has(
+    String(pull.author_association || pull.authorAssociation || '').toUpperCase(),
+  );
+  const body = String(pull.body || '');
+  const sourceMarker = body.match(SOURCE_ISSUE_RE);
+  const labels = (pull.labels || []).map((label) => (
+    typeof label === 'string' ? label : label?.name
+  ));
+  const author = String(pull.user?.login || pull.author?.login || '').toLowerCase();
+  const headRef = String(pull.head?.ref || pull.headRefName || '');
+  const trustedBotAuthor = ['netcatty-bot', 'github-actions[bot]', 'github-actions']
+    .includes(author);
+  const automationManaged =
+    Boolean(sourceMarker)
+    || (
+      trustedBotAuthor
+      && (
+        isBotPrMarker(body)
+        || labels.includes('automation:bot-pr')
+        || /^cursor\/issue-\d+-/.test(headRef)
+      )
+    );
+  const referencesIssue = automationManaged
+    ? Boolean(sourceMarker && sourceMarker[1] === String(issueNumber))
+    : pullReferencesIssue(pull, issueNumber, { includeRelated });
+  return (
+    (Boolean(normalizedRepository) && headRepository === normalizedRepository || trustedAuthor)
+    && referencesIssue
+  );
+}
+
+async function findOpenPullForIssue({
+  github,
+  context,
+  issueNumber,
+  includeRelated = false,
+}) {
+  const pulls = await github.paginate(github.rest.pulls.list, {
+    ...context.repo,
+    state: 'open',
+    per_page: 100,
+    sort: 'updated',
+    direction: 'desc',
+  });
+  const repository = `${context.repo.owner}/${context.repo.repo}`.toLowerCase();
+  return (pulls || []).find((pull) => isTrustedOpenPullForIssue(pull, issueNumber, {
+    repository,
+    includeRelated,
+  })) || null;
+}
+
+function shouldRetryIssueHandoff(comments = [], {
+  trustedActors = '',
+  recoveryVersion = '',
+  notBefore = '',
+  notAfter = '',
+} = {}) {
+  const actors = new Set(
+    String(trustedActors || '')
+      .split(',')
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  const notBeforeMs = Date.parse(String(notBefore || ''));
+  const notAfterMs = Date.parse(String(notAfter || ''));
+  const trustedComments = (comments || []).filter((comment) => (
+    actors.has(String(comment.user?.login || '').toLowerCase())
+  ));
+  if (
+    recoveryVersion
+    && trustedComments.some((comment) => (
+      String(comment.body || '').includes(`cursor-handoff-recovery:version=${recoveryVersion}`)
+    ))
+  ) return false;
+  const boundedComments = trustedComments
+    .filter((comment) => {
+      if (!Number.isFinite(notBeforeMs) && !Number.isFinite(notAfterMs)) return true;
+      const createdAt = Date.parse(comment.created_at || comment.createdAt || '');
+      if (!Number.isFinite(createdAt)) return false;
+      if (Number.isFinite(notBeforeMs) && createdAt < notBeforeMs) return false;
+      if (Number.isFinite(notAfterMs) && createdAt > notAfterMs) return false;
+      return true;
+    })
+    .sort((left, right) => (
+      Date.parse(left.created_at || left.createdAt || '')
+      - Date.parse(right.created_at || right.createdAt || '')
+    ));
+  let latestTerminal = '';
+  for (const comment of boundedComments) {
+    const body = String(comment.body || '');
+    const retryableFailure =
+      /cursor-implement-failure:[^>]*kind=protected_path/i.test(body)
+      || /cursor-classification-failure:kind=research_failed/i.test(body)
+      || body.includes('收到这条补充了，但自动复核没有安全完成')
+      || body.includes('The automatic follow-up did not finish safely');
+    if (retryableFailure) {
+      latestTerminal = 'retryable_failure';
+    } else if (/cursor-followup:comment-id=[^;>]+;result=(?:no_change|updated)/i.test(body)) {
+      latestTerminal = 'success';
+    }
+  }
+  return latestTerminal === 'retryable_failure';
 }
 
 async function findOpenBotPrForIssue({ github, context, issueNumber }) {
@@ -3332,6 +3960,13 @@ module.exports = {
   PROTECTED_PATH_PREFIXES,
   PROTECTED_PATH_BASENAMES,
   IMPLEMENT_CATEGORIES,
+  AUTOMATION_MODE_FULL,
+  AUTOMATION_MODE_TRIAGE_ONLY,
+  TRIAGE_ONLY_SKIP_KINDS,
+  resolveAutomationMode,
+  isTriageOnlyMode,
+  gateAutomationRoute,
+  applyTriageOnlyClassificationPolicy,
   ISSUE_TEMPLATE_MARKERS,
   CODEX_LOOP_LABEL,
   CODEX_CLEAN_LABEL,
@@ -3340,6 +3975,7 @@ module.exports = {
   CODEX_TERMINALS,
   sanitizeUntrustedText,
   extractGithubUserAttachmentAssetUrls,
+  classifyGithubUserAttachmentRedirect,
   rewriteExternalResearchInputAttachments,
   normalizeExternalResearchText,
   parseExternalResearchStream,
@@ -3370,6 +4006,7 @@ module.exports = {
   buildTriageComment,
   buildPullRequestBody,
   extractIssueCommentWatermark,
+  extractSourceIssueNumbers,
   extractSourceIssueNumber,
   extractProcessedIssueFollowupIds,
   countIssueFollowupRepliesSince,
@@ -3383,7 +4020,10 @@ module.exports = {
   classifySimpleIssueFollowup,
   buildSimpleIssueFollowupReply,
   nextSourceIssueLabelsAfterPull,
+  shouldCleanupSourceIssueAfterPull,
   buildImplementationFailureMessage,
+  buildCodexFixFailureMessage,
+  buildClassificationFailureMessage,
   buildIssueFollowupReply,
   buildIssueFollowupFallbackReply,
   buildPullRequestComment,
@@ -3410,10 +4050,23 @@ module.exports = {
   CODEX_REQUEST_RETRY_MS,
   decideCodexLoopAction,
   shouldReTriageIssueComment,
+  ISSUE_ADMITTED_LABELS,
+  ISSUE_AUTO_CLOSE_HANDOFF_LABELS,
+  REOPEN_HANDOFF_MARKER,
+  normalizeIssueLabelNames,
+  isIssueAlreadyAdmitted,
+  labelsForReadyForHumanHandoff,
+  decideIssuesEventRoute,
+  buildReopenHandoffReply,
   mentionsIssueBot,
   decideIssueCommentRoute,
+  refineIssueCommentRoute,
+  applyReadyForHumanHandoff,
   formatCodexFindingsMarkdown,
   listProtectedPathHits,
+  formatProtectedPathDetails,
+  writeProtectedPathReport,
+  readProtectedPathReport,
   unquoteGitPath,
   pathsFromGitStatusPorcelain,
   pathsFromGitDiffNameStatus,
@@ -3427,7 +4080,11 @@ module.exports = {
   applyClassification,
   markNeedsHuman,
   isBotPrForIssue,
+  pullReferencesIssue,
+  isTrustedOpenPullForIssue,
   findOpenBotPrForIssue,
+  findOpenPullForIssue,
+  shouldRetryIssueHandoff,
   shouldGatePullOnSourceIssueFollowups,
   getPendingIssueFollowupsForPull,
   ensurePullRequestDraft,

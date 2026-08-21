@@ -24,6 +24,16 @@ import {
 import React from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { SftpFileEntry } from '../../types';
+import {
+  formatDate as formatDateFromState,
+  isNavigableDirectory,
+} from '../../application/state/sftp/utils';
+
+export { isNavigableDirectory };
+
+/** Accept undefined timestamps from file-list rows. */
+export const formatDate = (timestamp: number | undefined): string =>
+  formatDateFromState(timestamp ?? 0);
 
 // Pre-built icon maps for O(1) lookup in getFileIcon
 type IconDef = [LucideIcon, string?];
@@ -200,17 +210,6 @@ export const formatTransferBytes = (bytes: number): string => {
 };
 
 /**
- * Format date as YYYY-MM-DD hh:mm in local timezone
- */
-export const formatDate = (timestamp: number | undefined): string => {
-    if (!timestamp) return '--';
-    const date = new Date(timestamp);
-    if (isNaN(date.getTime())) return '--';
-    const pad = (n: number) => n.toString().padStart(2, '0');
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-};
-
-/**
  * Format speed with appropriate unit
  */
 export const formatSpeed = (bytesPerSecond: number): string => {
@@ -245,40 +244,15 @@ export const getFileIcon = (entry: SftpFileEntry): React.ReactElement => {
     return React.createElement(FileCode, { size: 14 });
 };
 
-// Sort configuration types
-export type SortField = 'name' | 'size' | 'modified' | 'type';
-export type SortOrder = 'asc' | 'desc';
-
-// Column widths type
-export interface ColumnWidths {
-    name: number;
-    modified: number;
-    size: number;
-    type: number;
-}
-
-export type SftpColumnVisibility = Record<keyof ColumnWidths, boolean>;
-
-export const DEFAULT_SFTP_COLUMN_VISIBILITY: SftpColumnVisibility = {
-    name: true,
-    modified: true,
-    size: true,
-    type: true,
-};
-
-export const normalizeSftpColumnVisibility = (value: unknown): SftpColumnVisibility => {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) {
-        return DEFAULT_SFTP_COLUMN_VISIBILITY;
-    }
-
-    const stored = value as Partial<Record<keyof ColumnWidths, unknown>>;
-    return {
-        name: true,
-        modified: stored.modified !== false,
-        size: stored.size !== false,
-        type: stored.type !== false,
-    };
-};
+// Sort / column layout — owned by application/state; re-exported for UI callers.
+export {
+  DEFAULT_SFTP_COLUMN_VISIBILITY,
+  normalizeSftpColumnVisibility,
+  type ColumnWidths,
+  type SftpColumnVisibility,
+  type SortField,
+  type SortOrder,
+} from '../../application/state/sftp/columnLayout';
 
 export const isSftpColumnMenuKey = (key: string, shiftKey: boolean): boolean =>
     key === 'ContextMenu' || (key === 'F10' && shiftKey);
@@ -291,6 +265,7 @@ export const buildSftpColumnTemplate = (
     if (visibleColumns.modified) columns.push(`minmax(0, ${columnWidths.modified}fr)`);
     if (visibleColumns.size) columns.push(`minmax(52px, ${columnWidths.size}fr)`);
     if (visibleColumns.type) columns.push(`minmax(64px, ${columnWidths.type}fr)`);
+    if (visibleColumns.owner) columns.push(`minmax(56px, ${columnWidths.owner}fr)`);
     return columns.join(' ');
 };
 
@@ -332,19 +307,14 @@ export const sortSftpEntries = (
                 cmp = extA.localeCompare(extB);
                 break;
             }
+            case 'owner':
+                cmp = (a.owner || '').localeCompare(b.owner || '');
+                break;
         }
         return sortOrder === 'asc' ? cmp : -cmp;
     });
 
     return sorted;
-};
-
-/**
- * Check if an entry is navigable like a directory
- * This includes regular directories and symlinks that point to directories
- */
-export const isNavigableDirectory = (entry: SftpFileEntry): boolean => {
-    return entry.type === 'directory' || (entry.type === 'symlink' && entry.linkTarget === 'directory');
 };
 
 /**
@@ -380,4 +350,64 @@ export const filterHiddenFiles = <T extends { name: string; hidden?: boolean }>(
 ): T[] => {
     if (showHiddenFiles) return files;
     return files.filter((f) => !isHiddenFile(f));
+};
+
+/**
+ * Filter files by search term (case-insensitive substring match on name).
+ * Always preserves ".." parent directory entry. Empty/whitespace terms are no-ops.
+ */
+export const filterSftpEntriesByName = <T extends { name: string }>(
+    files: T[],
+    filter: string,
+): T[] => {
+    const term = filter.trim().toLowerCase();
+    if (!term) return files;
+    return files.filter(
+        (f) => f.name === ".." || f.name.toLowerCase().includes(term),
+    );
+};
+
+export type SftpTreeNameFilterOptions<T extends { name: string }> = {
+    parentPath: string;
+    joinPath: (parentPath: string, name: string) => string;
+    isDirectory: (entry: T) => boolean;
+    /** Loaded children for a directory path; undefined means not loaded yet. */
+    getChildren: (entryPath: string) => T[] | undefined;
+};
+
+/**
+ * Tree-aware name filter: keeps list-view match rules, and also keeps directory
+ * ancestors when an expanded loaded descendant matches. Collapsed, loading,
+ * error, and unloaded directories only appear when their own name matches
+ * (callers should treat those paths as unavailable in getChildren; no
+ * server-side recursive search).
+ */
+export const filterSftpTreeEntriesByName = <T extends { name: string }>(
+    files: T[],
+    filter: string,
+    options: SftpTreeNameFilterOptions<T>,
+): T[] => {
+    const term = filter.trim().toLowerCase();
+    if (!term) return files;
+
+    const subtreeHasMatch = (entries: T[], parentPath: string): boolean => {
+        for (const entry of entries) {
+            if (entry.name === "..") continue;
+            if (entry.name.toLowerCase().includes(term)) return true;
+            if (!options.isDirectory(entry)) continue;
+            const entryPath = options.joinPath(parentPath, entry.name);
+            const children = options.getChildren(entryPath);
+            if (children && subtreeHasMatch(children, entryPath)) return true;
+        }
+        return false;
+    };
+
+    return files.filter((entry) => {
+        if (entry.name === "..") return true;
+        if (entry.name.toLowerCase().includes(term)) return true;
+        if (!options.isDirectory(entry)) return false;
+        const entryPath = options.joinPath(options.parentPath, entry.name);
+        const children = options.getChildren(entryPath);
+        return Boolean(children && subtreeHasMatch(children, entryPath));
+    });
 };

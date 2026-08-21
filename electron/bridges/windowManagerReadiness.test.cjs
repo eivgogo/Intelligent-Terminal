@@ -19,7 +19,10 @@ const {
   shouldCloseWindowFromInput,
   unregisterMainWindow,
 } = require("./windowManager.cjs");
-const { createMainWindowApi } = require("./windowManager/mainWindow.cjs");
+const {
+  createMainWindowApi,
+  setTerminalKeyboardFocusForWindow,
+} = require("./windowManager/mainWindow.cjs");
 
 function createWindowStub({ destroyed = false, webContents } = {}) {
   return {
@@ -1101,6 +1104,145 @@ test("main window treats Ctrl+0 as reset-zoom via explicit shortcut handling", a
   assert.deepEqual(ignoreMenuShortcutValues, []);
 });
 
+test("main window leaves terminal font shortcuts for the renderer while terminal input is focused", async () => {
+  let beforeInputHandler = null;
+  const ignoreMenuShortcutValues = [];
+  const zoomFactorCalls = [];
+  let createdWindow = null;
+
+  class BrowserWindowStub {
+    constructor() {
+      createdWindow = this;
+      this.webContents = {
+        id: 1,
+        on(channel, handler) {
+          if (channel === "before-input-event") beforeInputHandler = handler;
+        },
+        once() {},
+        isDestroyed() {
+          return false;
+        },
+        isCrashed() {
+          return false;
+        },
+        setIgnoreMenuShortcuts(value) {
+          ignoreMenuShortcutValues.push(value);
+        },
+        setWindowOpenHandler() {},
+        openDevTools() {},
+        getZoomFactor() {
+          return 1;
+        },
+        setZoomFactor(value) {
+          zoomFactorCalls.push(value);
+        },
+      };
+    }
+
+    on() {}
+    once() {}
+    isDestroyed() { return false; }
+    isMaximized() { return false; }
+    isFullScreen() { return false; }
+    getBounds() { return { x: 0, y: 0, width: 1400, height: 900 }; }
+    setBackgroundColor() {}
+    setOpacity() {}
+    async loadURL() {}
+    close() {}
+  }
+
+  const api = createMainWindowApi({
+    mainWindow: null,
+    electronApp: null,
+    currentTheme: "light",
+    isQuitting: false,
+    pendingWindowStateWrite: null,
+    queuedWindowState: null,
+    windowStateCloseRequested: false,
+    DEFAULT_WINDOW_WIDTH: 1400,
+    DEFAULT_WINDOW_HEIGHT: 900,
+    MIN_WINDOW_WIDTH: 1100,
+    MIN_WINDOW_HEIGHT: 640,
+    V8_CACHE_OPTIONS: "bypassHeatCheck",
+    THEME_COLORS: { light: { background: "#fff" } },
+    unhealthyWebContentsIds: new Set(),
+    rendererReadySeenByWebContentsId: new Set(),
+    __dirname,
+    URL,
+    require,
+    console,
+    setTimeout,
+    clearTimeout,
+    getGlobalShortcutBridge() {
+      return { handleWindowClose: () => false };
+    },
+    debugLog() {},
+    resolveFrontendBackgroundColor() { return null; },
+    loadWindowState() { return null; },
+    getDevRendererBaseUrl(url) { return url; },
+    getWindowBoundsState() { return null; },
+    queueWindowStateSave() {},
+    saveWindowStateSync() {},
+    setupDeferredShow() {},
+    createExternalOnlyWindowOpenHandler() { return {}; },
+    createAppWindowOpenHandler() { return {}; },
+    attachOAuthLoadingOverlay() {},
+    registerWindowHandlers() {},
+    requestWindowCommandClose() {
+      return true;
+    },
+    shouldCloseWindowFromInput,
+    applyWindowOpacityToWindow() {},
+    closeSettingsWindow() {},
+    hideSettingsWindow() {},
+  });
+
+  await api.createWindow(
+    {
+      BrowserWindow: BrowserWindowStub,
+      nativeTheme: {},
+      app: {},
+      screen: {},
+      shell: {},
+      ipcMain: {},
+    },
+    {
+      preload: "/tmp/preload.cjs",
+      devServerUrl: "http://localhost:5173",
+      isDev: true,
+      appIcon: null,
+      isMac: false,
+      electronDir: __dirname,
+    },
+  );
+
+  setTerminalKeyboardFocusForWindow(createdWindow, true);
+  ignoreMenuShortcutValues.length = 0;
+
+  for (const key of ["=", "-", "0"]) {
+    let prevented = false;
+    beforeInputHandler({ preventDefault: () => { prevented = true; } }, {
+      type: "keyDown",
+      control: true,
+      shift: false,
+      key,
+    });
+
+    assert.equal(prevented, false);
+  }
+
+  assert.deepEqual(zoomFactorCalls, []);
+  assert.deepEqual(ignoreMenuShortcutValues, [true, true, true]);
+
+  beforeInputHandler({ preventDefault() {} }, {
+    type: "keyDown",
+    control: true,
+    shift: false,
+    key: "A",
+  });
+  assert.equal(ignoreMenuShortcutValues.at(-1), false);
+});
+
 test("main window clears renderer readiness when the main frame starts navigating", async () => {
   const webContentsHandlers = {};
   const rendererReadyIds = new Set([7]);
@@ -1976,6 +2118,7 @@ test("window IPC handlers target the sender owner window", async () => {
   };
   const calls = [];
   const titles = [];
+  const guardedTitles = [];
   const win = {
     isDestroyed() {
       return false;
@@ -1996,7 +2139,45 @@ test("window IPC handlers target the sender owner window", async () => {
       },
     },
   };
+  const minimizeCalls = [];
+  const minimizeCloseCalls = [];
+  const minimizeHideCalls = [];
+  const minimizeSentMessages = [];
+  const minimizeWin = {
+    isDestroyed() {
+      return false;
+    },
+    minimize() {
+      minimizeCalls.push("minimize");
+    },
+    close() {
+      minimizeCloseCalls.push("close");
+    },
+    hide() {
+      minimizeHideCalls.push("hide");
+    },
+    webContents: {
+      id: 404,
+      isDestroyed() {
+        return false;
+      },
+      send(channel, payload) {
+        minimizeSentMessages.push([channel, payload]);
+      },
+    },
+  };
 
+  buildAppMenu({
+    buildFromTemplate(template) {
+      return { template };
+    },
+  }, { name: "Netcatty" }, false, "en", {
+    setAppLockWindowTitle(target, title) {
+      guardedTitles.push([target, title]);
+      target.setTitle(title);
+      return true;
+    },
+  });
   registerWindowHandlers(ipcMain, { themeSource: "light" });
 
   const result = await handlers.get("netcatty:window:focus")({
@@ -2021,6 +2202,7 @@ test("window IPC handlers target the sender owner window", async () => {
 
   assert.equal(titleResult, true);
   assert.deepEqual(titles, ["Prod SSH"]);
+  assert.deepEqual(guardedTitles, [[win, "Prod SSH"]]);
 
   const opacityCalls = [];
   registerMainWindow({
@@ -2041,6 +2223,20 @@ test("window IPC handlers target the sender owner window", async () => {
   const opacityResult = await handlers.get("netcatty:setWindowOpacity")(null, 0.7);
   assert.equal(opacityResult, true);
   assert.deepEqual(opacityCalls, [0.7]);
+
+  await handlers.get("netcatty:window:minimize")({
+    sender: {
+      id: 505,
+      getOwnerBrowserWindow() {
+        return minimizeWin;
+      },
+    },
+  });
+
+  assert.deepEqual(minimizeCalls, ["minimize"]);
+  assert.deepEqual(minimizeCloseCalls, []);
+  assert.deepEqual(minimizeHideCalls, []);
+  assert.deepEqual(minimizeSentMessages, []);
 });
 
 test("resolveSettingsWindowBounds centers settings on the requesting window display", () => {

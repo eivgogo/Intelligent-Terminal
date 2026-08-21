@@ -133,6 +133,73 @@ test('scheduled Codex polls share one concurrency group', () => {
   );
 });
 
+test('workflow defaults to Cursor triage-only and gates coding routes', () => {
+  const workflow = fs.readFileSync(
+    path.join(__dirname, '..', '.github', 'workflows', 'cursor-automation.yml'),
+    'utf8',
+  );
+
+  assert.match(
+    workflow,
+    /CURSOR_AUTOMATION_MODE: \$\{\{ vars\.CURSOR_AUTOMATION_MODE \|\| 'triage_only' \}\}/,
+  );
+  assert.match(workflow, /auto\.gateAutomationRoute\(kind,/);
+  assert.match(workflow, /# Temporarily disabled: Cursor is triage-only/);
+  assert.match(workflow, /# schedule:/);
+  assert.match(workflow, /#   - cron: '\*\/5 \* \* \* \*'/);
+});
+
+test('gateAutomationRoute skips implement and Codex loop kinds in triage-only', () => {
+  for (const kind of [
+    'codex_loop',
+    'own_rerequest_codex',
+    'external_rerequest_codex',
+    'codex_poll',
+    'issue_followup',
+  ]) {
+    const gated = auto.gateAutomationRoute(kind, {
+      mode: 'triage_only',
+      reason: `manual ${kind}`,
+    });
+    assert.equal(gated.kind, 'skip', kind);
+    assert.match(gated.reason, new RegExp(`triage-only: skipped ${kind}`));
+  }
+
+  const classify = auto.gateAutomationRoute('issue_classify', {
+    mode: 'triage_only',
+    reason: 'issues:opened',
+  });
+  assert.equal(classify.kind, 'issue_classify');
+  assert.equal(classify.reason, 'issues:opened');
+
+  const full = auto.gateAutomationRoute('codex_loop', { mode: 'full' });
+  assert.equal(full.kind, 'codex_loop');
+});
+
+test('applyTriageOnlyClassificationPolicy blocks implement and remaps agent labels', () => {
+  const previous = process.env.CURSOR_AUTOMATION_MODE;
+  process.env.CURSOR_AUTOMATION_MODE = 'triage_only';
+  try {
+    const { classification, labels } = auto.applyTriageOnlyClassificationPolicy(
+      { category: 'bug_ready', should_implement: true, reply: 'Will fix.' },
+      ['bug', 'triage', 'triage:bug-ready', 'ready-for-agent'],
+    );
+    assert.equal(classification.should_implement, false);
+    assert.ok(labels.includes('ready-for-human'));
+    assert.ok(!labels.includes('ready-for-agent'));
+  } finally {
+    if (previous == null) delete process.env.CURSOR_AUTOMATION_MODE;
+    else process.env.CURSOR_AUTOMATION_MODE = previous;
+  }
+
+  const unchanged = auto.applyTriageOnlyClassificationPolicy(
+    { category: 'bug_ready', should_implement: true },
+    ['ready-for-agent'],
+  );
+  assert.equal(unchanged.classification.should_implement, true);
+  assert.ok(unchanged.labels.includes('ready-for-agent'));
+});
+
 test('no-PR follow-ups use a writable Cursor agent mode', () => {
   const workflow = fs.readFileSync(
     path.join(__dirname, '..', '.github', 'workflows', 'cursor-automation.yml'),
@@ -591,6 +658,157 @@ test('decideIssueCommentRoute sends author additions on managed issues to follow
   );
 });
 
+test('actionable author follow-ups without an open bot PR are reclassified', () => {
+  const decision = { kind: 'issue_followup', reason: 'author follow-up on managed issue' };
+  assert.deepEqual(
+    auto.refineIssueCommentRoute(decision, {
+      hasOpenBotPull: false,
+      body: '默认开启 X11 就可以，内置服务暂时不需要。',
+    }),
+    {
+      kind: 'issue_classify',
+      reason: 'actionable author follow-up without open automation PR',
+    },
+  );
+  assert.equal(
+    auto.refineIssueCommentRoute(decision, {
+      hasOpenBotPull: true,
+      body: 'Please also cover this case.',
+    }),
+    decision,
+  );
+  assert.deepEqual(
+    auto.refineIssueCommentRoute(decision, {
+      hasOpenRelatedPull: true,
+      body: 'Please also cover this case.',
+    }),
+    {
+      kind: 'issue_classify',
+      reason: 'actionable author follow-up with trusted related PR',
+    },
+  );
+  assert.equal(
+    auto.refineIssueCommentRoute(decision, {
+      hasOpenBotPull: false,
+      body: '收到，谢谢',
+    }),
+    decision,
+  );
+  assert.equal(
+    auto.refineIssueCommentRoute(decision, {
+      hasOpenBotPull: false,
+      labels: ['triage:already-available', 'triage:admitted'],
+      body: '我从 main build 了，还是一样，本地网络权限没有弹窗。',
+    }),
+    decision,
+  );
+  assert.equal(
+    auto.refineIssueCommentRoute(decision, {
+      hasOpenBotPull: false,
+      labels: ['triage:unclear', 'unclear', 'ready-for-human'],
+      body: '补充：复现步骤是打开 Vault 再连局域网主机。',
+    }),
+    decision,
+  );
+  // ready-for-human alone must NOT block reclassify (feature_defer / other /
+  // implement-failure handoffs still need actionable follow-ups to classify).
+  assert.deepEqual(
+    auto.refineIssueCommentRoute(decision, {
+      hasOpenBotPull: false,
+      labels: ['triage', 'triage:feature-defer', 'ready-for-human'],
+      body: '默认开启 X11 就可以，内置服务暂时不需要。',
+    }),
+    {
+      kind: 'issue_classify',
+      reason: 'actionable author follow-up without open automation PR',
+    },
+  );
+  // After reopen handoff, triage:already-available is preserved with
+  // ready-for-human so disputes cannot re-close via classify.
+  assert.equal(
+    auto.refineIssueCommentRoute(decision, {
+      hasOpenBotPull: false,
+      labels: [
+        'triage',
+        'triage:admitted',
+        'triage:already-available',
+        'ready-for-human',
+      ],
+      body: '我从 main build 了，还是一样，本地网络权限没有弹窗。',
+    }),
+    decision,
+  );
+});
+
+test('decideIssuesEventRoute skips bot reopen and hands auto-closed reopen to humans', () => {
+  assert.deepEqual(
+    auto.decideIssuesEventRoute({ action: 'opened', labels: [] }),
+    { kind: 'issue_classify', reason: 'issues:opened' },
+  );
+  assert.deepEqual(
+    auto.decideIssuesEventRoute({
+      action: 'reopened',
+      labels: ['bug', 'triage'],
+      actorLogin: 'alice',
+    }),
+    { kind: 'issue_classify', reason: 'issues:reopened' },
+  );
+  assert.deepEqual(
+    auto.decideIssuesEventRoute({
+      action: 'reopened',
+      labels: ['triage:admitted', 'triage:already-available'],
+      actorLogin: 'netcatty-bot',
+    }),
+    { kind: 'skip', reason: 'bot reopen of managed issue' },
+  );
+  assert.deepEqual(
+    auto.decideIssuesEventRoute({
+      action: 'reopened',
+      labels: ['triage:admitted', 'triage:already-available'],
+      actorLogin: 'binaricat',
+    }),
+    {
+      kind: 'ready_for_human_handoff',
+      reason: 'human reopen of auto-closed triage',
+    },
+  );
+  assert.deepEqual(
+    auto.decideIssuesEventRoute({
+      action: 'reopened',
+      labels: ['triage:admitted', 'ready-for-human', 'triage'],
+      actorLogin: 'binaricat',
+    }),
+    {
+      kind: 'issue_classify',
+      reason: 'issues:reopened admitted non-auto-close',
+    },
+  );
+  assert.deepEqual(
+    auto.decideIssuesEventRoute({
+      action: 'reopened',
+      labels: ['triage:admitted', 'triage:bug-ready', 'bug'],
+      actorLogin: 'alice',
+    }),
+    {
+      kind: 'issue_classify',
+      reason: 'issues:reopened admitted non-auto-close',
+    },
+  );
+  const handoff = auto.labelsForReadyForHumanHandoff([
+    'bug',
+    'triage',
+    'triage:admitted',
+    'triage:already-available',
+    'ready-for-agent',
+  ]);
+  assert.ok(handoff.includes('ready-for-human'));
+  assert.ok(handoff.includes('triage:admitted'));
+  assert.ok(handoff.includes('triage:already-available'));
+  assert.ok(!handoff.includes('ready-for-agent'));
+  assert.equal(auto.isIssueAlreadyAdmitted(['triage:admitted']), true);
+  assert.equal(auto.isIssueAlreadyAdmitted(['bug', 'triage']), false);
+});
+
 test('decideIssueCommentRoute accepts maintainer @bot and ignores untrusted bystanders', () => {
   assert.equal(
     auto.decideIssueCommentRoute({
@@ -613,6 +831,81 @@ test('decideIssueCommentRoute accepts maintainer @bot and ignores untrusted byst
     'skip',
   );
   assert.equal(auto.mentionsIssueBot('补充：@netcatty-bot请再确认'), true);
+});
+
+test('maintainer @bot on auto-closed labels can reclassify without open bot PR', () => {
+  const maintainerDecision = auto.decideIssueCommentRoute({
+    labels: ['triage:already-available', 'triage:admitted', 'ready-for-human'],
+    commenterLogin: 'maintainer',
+    issueAuthorLogin: 'alice',
+    commenterAssociation: 'MEMBER',
+    body: '@netcatty-bot 请重新分流，这个能力其实还没有。',
+  });
+  assert.deepEqual(maintainerDecision, {
+    kind: 'issue_followup',
+    reason: 'maintainer mentioned issue bot',
+  });
+  assert.deepEqual(
+    auto.refineIssueCommentRoute(maintainerDecision, {
+      hasOpenBotPull: false,
+      labels: ['triage:already-available', 'triage:admitted', 'ready-for-human'],
+      body: '@netcatty-bot 请重新分流，这个能力其实还没有。',
+    }),
+    {
+      kind: 'issue_classify',
+      reason: 'actionable maintainer bot mention without open automation PR',
+    },
+  );
+  // Maintainer who is also the issue author still gets the maintainer reason.
+  const maintainerAuthor = auto.decideIssueCommentRoute({
+    labels: ['triage:already-available', 'ready-for-human'],
+    commenterLogin: 'maintainer',
+    issueAuthorLogin: 'maintainer',
+    commenterAssociation: 'OWNER',
+    body: '@netcatty-bot 请重新分流，这个能力其实还没有。',
+  });
+  assert.deepEqual(maintainerAuthor, {
+    kind: 'issue_followup',
+    reason: 'maintainer mentioned issue bot',
+  });
+  assert.deepEqual(
+    auto.refineIssueCommentRoute(maintainerAuthor, {
+      hasOpenBotPull: false,
+      labels: ['triage:already-available', 'ready-for-human'],
+      body: '@netcatty-bot 请重新分流，这个能力其实还没有。',
+    }),
+    {
+      kind: 'issue_classify',
+      reason: 'actionable maintainer bot mention without open automation PR',
+    },
+  );
+  // Author follow-ups on the same labels still stay on follow-up (no re-close loop).
+  const authorDecision = {
+    kind: 'issue_followup',
+    reason: 'author follow-up on managed issue',
+  };
+  assert.equal(
+    auto.refineIssueCommentRoute(authorDecision, {
+      hasOpenBotPull: false,
+      labels: ['triage:already-available', 'ready-for-human'],
+      body: '@netcatty-bot 请重新分流，这个能力其实还没有。',
+    }),
+    authorDecision,
+  );
+  // Non-maintainer author + @bot still routes as author follow-up (not reclassify).
+  assert.deepEqual(
+    auto.decideIssueCommentRoute({
+      labels: ['triage:already-available', 'ready-for-human'],
+      commenterLogin: 'alice',
+      issueAuthorLogin: 'alice',
+      commenterAssociation: 'NONE',
+      body: '@netcatty-bot 请重新分流，这个能力其实还没有。',
+    }),
+    {
+      kind: 'issue_followup',
+      reason: 'author follow-up on managed issue',
+    },
+  );
 });
 
 test('decideIssueCommentRoute ignores automation actors and unmanaged chatter', () => {
@@ -791,6 +1084,51 @@ test('source issue labels clear stale agent state after PR completion', () => {
   );
 });
 
+test('source cleanup includes merged maintainer fixes but not unmerged handoffs', () => {
+  const maintainerPull = {
+    state: 'closed',
+    merged: true,
+    body: 'Focused maintainer fix.\n\nFixes #42',
+    user: { login: 'binaricat' },
+    head: { repo: { full_name: 'binaricat/Netcatty' } },
+    base: { repo: { full_name: 'binaricat/Netcatty' } },
+  };
+  const options = {
+    ownActors: 'binaricat,netcatty-bot,github-actions[bot]',
+    repository: 'binaricat/Netcatty',
+  };
+  assert.equal(auto.shouldCleanupSourceIssueAfterPull(maintainerPull, options), true);
+  assert.deepEqual(
+    auto.extractSourceIssueNumbers({
+      ...maintainerPull,
+      body: 'Fixes #42, #43, and #44\nCloses #42',
+    }),
+    [42, 43, 44],
+  );
+  assert.equal(
+    auto.shouldCleanupSourceIssueAfterPull({
+      ...maintainerPull,
+      merged: false,
+      merged_at: null,
+    }, options),
+    false,
+  );
+  assert.equal(
+    auto.shouldCleanupSourceIssueAfterPull({
+      ...maintainerPull,
+      body: 'Related to #42',
+    }, options),
+    false,
+  );
+  assert.equal(
+    auto.shouldCleanupSourceIssueAfterPull({
+      ...maintainerPull,
+      base: { repo: { full_name: 'another/repo' } },
+    }, options),
+    false,
+  );
+});
+
 test('implementation failure messages report the real category and preserved artifact', () => {
   const message = auto.buildImplementationFailureMessage(
     { title: '[Bug] 上传失败' },
@@ -800,13 +1138,73 @@ test('implementation failure messages report the real category and preserved art
       artifactName: 'implement-patch-1',
     },
   );
-  assert.match(message, /新增了验证失败/);
+  assert.match(message, /验证闸门未通过|未能通过验证/);
+  assert.doesNotMatch(message, /新增了验证失败/);
   assert.match(message, /implement-patch-1/);
   assert.match(message, /github\.example/);
+
+  const protectedMessage = auto.buildImplementationFailureMessage(
+    { title: '[Bug] 自动修改失败' },
+    {
+      kind: 'protected_path',
+      protectedPaths: [
+        '.github/workflows/release.yml',
+        'components/ordinary.test.ts',
+      ],
+    },
+  );
+  assert.match(protectedMessage, /\.github\/workflows\/release\.yml/);
+  assert.doesNotMatch(protectedMessage, /ordinary\.test\.ts/);
+
+  const codexMessage = auto.buildCodexFixFailureMessage({
+    kind: 'verification_failed',
+    workflowUrl: 'https://github.example/run/2',
+    artifactName: 'codex-fix-patch-2',
+  });
+  assert.match(codexMessage, /verification gate|did not pass verification/i);
+  assert.doesNotMatch(codexMessage, /introduced verification failures/);
+  assert.match(codexMessage, /codex-fix-patch-2/);
+  assert.match(codexMessage, /github\.example/);
+
+  const noChangesMessage = auto.buildCodexFixFailureMessage({
+    kind: 'no_changes',
+    workflowUrl: 'https://github.example/run/3',
+  });
+  assert.match(noChangesMessage, /did not change any files/);
+  assert.match(noChangesMessage, /already be addressed, stale/);
+  assert.match(noChangesMessage, /github\.example\/run\/3/);
+
+  const classificationMessage = auto.buildClassificationFailureMessage(
+    { title: '[Bug] 附件无法读取' },
+    {
+      kind: 'research_failed',
+      workflowUrl: 'https://github.example/run/4',
+    },
+  );
+  assert.match(classificationMessage, /读取附件或外部资料时失败/);
+  assert.match(classificationMessage, /github\.example\/run\/4/);
+});
+
+test('protected path reports replace stale data and ignore ordinary source files', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cursor-protected-report-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const report = path.join(dir, 'protected-paths.json');
+
+  assert.deepEqual(auto.writeProtectedPathReport(report, [
+    'package-lock.json',
+    'components/App.tsx',
+    'package-lock.json',
+  ]), ['package-lock.json']);
+  assert.deepEqual(auto.readProtectedPathReport(report), ['package-lock.json']);
+
+  assert.deepEqual(auto.writeProtectedPathReport(report, []), []);
+  assert.equal(fs.existsSync(report), false);
+  assert.deepEqual(auto.readProtectedPathReport(report), []);
 });
 
 test('markNeedsHuman ignores forged dedupe markers from untrusted commenters', async () => {
   let created = 0;
+  let lastUpdate = null;
   let comments = [{
     user: { login: 'mallory' },
     body: '<!-- cursor-implement-failure:base=abc;kind=no_changes -->',
@@ -814,8 +1212,21 @@ test('markNeedsHuman ignores forged dedupe markers from untrusted commenters', a
   const github = {
     rest: {
       issues: {
-        get: async () => ({ data: { number: 42, labels: [] } }),
-        update: async () => ({ data: {} }),
+        get: async () => ({
+          data: {
+            number: 42,
+            state: 'open',
+            labels: [
+              { name: 'triage:already-available' },
+              { name: 'triage:admitted' },
+              { name: 'ready-for-agent' },
+            ],
+          },
+        }),
+        update: async (args) => {
+          lastUpdate = args;
+          return { data: {} };
+        },
         listComments: Symbol('listComments'),
         createComment: async () => { created += 1; return { data: {} }; },
       },
@@ -832,6 +1243,10 @@ test('markNeedsHuman ignores forged dedupe markers from untrusted commenters', a
   const first = await auto.markNeedsHuman(args);
   assert.equal(first.commented, true);
   assert.equal(created, 1);
+  assert.ok(lastUpdate.labels.includes('ready-for-human'));
+  assert.ok(lastUpdate.labels.includes('triage:admitted'));
+  assert.ok(lastUpdate.labels.includes('triage:already-available'));
+  assert.ok(!lastUpdate.labels.includes('ready-for-agent'));
 
   comments = [{
     user: { login: 'netcatty-bot' },
@@ -842,19 +1257,174 @@ test('markNeedsHuman ignores forged dedupe markers from untrusted commenters', a
   assert.equal(created, 1);
 });
 
-test('workflow cleans source labels on automation PR close and dedupes clean notices', () => {
+test('applyReadyForHumanHandoff hands open auto-closed issues to humans', async () => {
+  let update = null;
+  let commentBody = '';
+  const github = {
+    rest: {
+      issues: {
+        get: async () => ({
+          data: {
+            number: 2673,
+            state: 'open',
+            title: '[Bug] 不能连接本地网络',
+            body: '本地网络权限',
+            labels: [
+              { name: 'triage' },
+              { name: 'triage:admitted' },
+              { name: 'triage:already-available' },
+            ],
+          },
+        }),
+        update: async (args) => {
+          update = args;
+          return { data: {} };
+        },
+        listComments: Symbol('listComments'),
+        createComment: async (args) => {
+          commentBody = args.body;
+          return { data: {} };
+        },
+      },
+    },
+    paginate: async () => [],
+  };
+  const result = await auto.applyReadyForHumanHandoff({
+    github,
+    context: { repo: { owner: 'binaricat', repo: 'Netcatty' } },
+    issueNumber: 2673,
+  });
+  assert.equal(result.commented, true);
+  assert.equal(update.state, undefined);
+  assert.ok(update.labels.includes('ready-for-human'));
+  assert.ok(update.labels.includes('triage:already-available'));
+  assert.match(commentBody, /cursor-reopen-handoff/);
+  assert.match(commentBody, /重新打开/);
+});
+
+test('applyReadyForHumanHandoff skips when auto-close labels were cleared', async () => {
+  let updated = false;
+  const github = {
+    rest: {
+      issues: {
+        get: async () => ({
+          data: {
+            number: 2673,
+            state: 'open',
+            title: '[Bug] 不能连接本地网络',
+            body: '本地网络权限',
+            labels: [
+              { name: 'triage' },
+              { name: 'triage:admitted' },
+              { name: 'ready-for-agent' },
+            ],
+          },
+        }),
+        update: async () => {
+          updated = true;
+          return { data: {} };
+        },
+        listComments: Symbol('listComments'),
+        createComment: async () => ({ data: {} }),
+      },
+    },
+    paginate: async () => [],
+  };
+  const result = await auto.applyReadyForHumanHandoff({
+    github,
+    context: { repo: { owner: 'binaricat', repo: 'Netcatty' } },
+    issueNumber: 2673,
+  });
+  assert.equal(result.skipped, true);
+  assert.equal(result.commented, false);
+  assert.equal(updated, false);
+});
+
+test('applyReadyForHumanHandoff skips when maintainer already re-closed', async () => {
+  let updated = false;
+  const github = {
+    rest: {
+      issues: {
+        get: async () => ({
+          data: {
+            number: 2673,
+            state: 'closed',
+            title: '[Bug] 不能连接本地网络',
+            body: '本地网络权限',
+            labels: [
+              { name: 'triage' },
+              { name: 'triage:admitted' },
+              { name: 'triage:already-available' },
+            ],
+          },
+        }),
+        update: async () => {
+          updated = true;
+          return { data: {} };
+        },
+        listComments: Symbol('listComments'),
+        createComment: async () => ({ data: {} }),
+      },
+    },
+    paginate: async () => [],
+  };
+  const result = await auto.applyReadyForHumanHandoff({
+    github,
+    context: { repo: { owner: 'binaricat', repo: 'Netcatty' } },
+    issueNumber: 2673,
+  });
+  assert.equal(result.skipped, true);
+  assert.equal(result.reason, 'issue already closed');
+  assert.equal(result.commented, false);
+  assert.equal(updated, false);
+});
+
+test('workflow cleans source labels after eligible PR close and dedupes clean notices', () => {
   const workflow = fs.readFileSync(
     path.join(__dirname, '..', '.github', 'workflows', 'cursor-automation.yml'),
     'utf8',
   );
   assert.match(workflow, /types: \[opened, synchronize, reopened, ready_for_review, closed\]/);
   assert.match(workflow, /kind == 'source_issue_cleanup'/);
-  assert.match(workflow, /shouldGatePullOnSourceIssueFollowups\(pull/);
+  assert.match(workflow, /shouldCleanupSourceIssueAfterPull\(pull/);
+  assert.match(workflow, /const issueNumbers = auto\.extractSourceIssueNumbers\(pull\)/);
+  assert.match(workflow, /for \(const issueNumber of issueNumbers\)/);
   assert.match(workflow, /github\.rest\.issues\.removeLabel/);
   assert.match(workflow, /github\.rest\.issues\.addLabels/);
-  assert.match(workflow, /not a trusted automation pull request; skipping source cleanup/);
+  assert.match(workflow, /not eligible for source cleanup; skipping/);
   assert.match(workflow, /is no longer closed; skipping source cleanup/);
   assert.match(workflow, /source issue changed while queued; skipping cleanup/);
+  assert.match(workflow, /does not currently close issue/);
+  assert.match(workflow, /findOpenPullForIssue/);
+  assert.match(workflow, /refineIssueCommentRoute/);
+  assert.match(
+    workflow,
+    /refineIssueCommentRoute\(decision, \{\n\s+hasOpenBotPull: Boolean\(pull\),\n\s+hasOpenRelatedPull: Boolean\(relatedPull\),\n\s+body: comment\.body,\n\s+labels,/,
+  );
+  assert.match(workflow, /decideIssuesEventRoute/);
+  assert.match(workflow, /kind == 'ready_for_human_handoff'/);
+  assert.match(workflow, /applyReadyForHumanHandoff/);
+  assert.match(workflow, /REOPEN_HANDOFF_MARKER/);
+  assert.match(workflow, /issueNumber: issue\.number,\n\s+includeRelated: true/);
+  assert.match(workflow, /reconcile_closed_handoffs:/);
+  assert.match(workflow, /shouldRetryIssueHandoff/);
+  assert.match(workflow, /isTrustedOpenPullForIssue/);
+  assert.match(workflow, /cursor-handoff-recovery:version=\$\{recoveryVersion\}/);
+  assert.match(workflow, /workflow_id: 'cursor-automation\.yml'/);
+  assert.match(workflow, /Reconcile handoffs/);
+  assert.ok((workflow.match(/auto\.extractPaginatedItems\(response\)/g) || []).length >= 2);
+  assert.match(workflow, /notBefore: '2026-07-31T12:54:37Z'/);
+  assert.match(workflow, /notAfter: '2026-08-04T08:27:14Z'/);
+  assert.match(workflow, /auditedIssueNumbers = new Set\(\[2679, 2697, 2704, 2705, 2708, 2709\]\)/);
+  assert.match(workflow, /is:issue is:closed label:"ready-for-human" label:triage/);
+  assert.match(workflow, /is:pr is:merged label:"ready-for-human" label:"automation:bot-pr"/);
+  const route = workflow.match(/\n  route:\n[\s\S]*?(?=\n  cleanup_source_issue:)/)?.[0] || '';
+  assert.doesNotMatch(
+    route,
+    /sameRepo\s*&&\s*\n\s*context\.payload\.action === 'closed'/,
+  );
+  assert.match(route, /decideIssuesEventRoute/);
+  assert.match(route, /ready_for_human_handoff:/);
   assert.match(workflow, /Follow-up changed before the simple reply; dispatched a fresh review/);
   assert.match(workflow, /is merged; skipped stale follow-up handoff state changes/);
   assert.match(workflow, /trusted_comment_bodies/);
@@ -984,6 +1554,10 @@ test('buildPullRequestBody records the issue comment snapshot', () => {
   assert.match(body, /<!-- cursor-issue-watermark:comment-id=987 -->/);
   assert.equal(auto.extractIssueCommentWatermark(body), '987');
   assert.equal(auto.extractSourceIssueNumber({ body }), 42);
+  assert.deepEqual(
+    auto.extractSourceIssueNumbers({ body: `${body}\nFixes #99` }),
+    [42],
+  );
 });
 
 test('parseIssueFollowupStatus is fail-closed and builds durable reply markers', () => {
@@ -1118,6 +1692,218 @@ test('shouldGatePullOnSourceIssueFollowups is limited to automation bot PRs', ()
     }),
     false,
   );
+});
+
+test('pullReferencesIssue matches exact closing references without prefix collisions', () => {
+  assert.equal(auto.pullReferencesIssue({ body: 'Fixes #42' }, 42), true);
+  assert.equal(auto.pullReferencesIssue({ body: 'Fixes #420' }, 42), false);
+  assert.equal(auto.pullReferencesIssue({ body: 'Related to #42' }, 42), false);
+  assert.equal(
+    auto.pullReferencesIssue({ body: 'Related to #42' }, 42, { includeRelated: true }),
+    true,
+  );
+  const relatedList = { body: 'Related to #41, #42, and #43.' };
+  assert.equal(auto.pullReferencesIssue(relatedList, 41, { includeRelated: true }), true);
+  assert.equal(auto.pullReferencesIssue(relatedList, 42, { includeRelated: true }), true);
+  assert.equal(auto.pullReferencesIssue(relatedList, 43, { includeRelated: true }), true);
+  assert.equal(auto.pullReferencesIssue(relatedList, 44, { includeRelated: true }), false);
+  assert.equal(
+    auto.pullReferencesIssue({ body: 'Related to #42abc' }, 42, { includeRelated: true }),
+    false,
+  );
+  assert.equal(auto.pullReferencesIssue({ body: 'Fixes #42_foo' }, 42), false);
+  assert.equal(auto.pullReferencesIssue({ body: 'Fixes #42-detail' }, 42), true);
+  assert.equal(auto.pullReferencesIssue({ body: 'Fixes #42, #43oops' }, 42), true);
+  assert.equal(auto.pullReferencesIssue({ body: 'Fixes #42, #43oops' }, 43), false);
+  assert.equal(
+    auto.pullReferencesIssue({ head: { ref: 'cursor/issue-42-123' } }, 42),
+    false,
+  );
+});
+
+test('findOpenPullForIssue keeps maintainer work from spawning a duplicate bot PR', async () => {
+  const pulls = [
+    {
+      number: 7,
+      body: 'Fixes #42',
+      author_association: 'NONE',
+      head: { repo: { full_name: 'attacker/fork' } },
+    },
+    {
+      number: 8,
+      body: 'Maintainer implementation\n\nFixes #42',
+      author_association: 'MEMBER',
+      head: { repo: { full_name: 'maintainer/fork' } },
+    },
+  ];
+  const found = await auto.findOpenPullForIssue({
+    github: {
+      paginate: async () => pulls,
+      rest: { pulls: { list: async () => ({ data: pulls }) } },
+    },
+    context: { repo: { owner: 'binaricat', repo: 'Netcatty' } },
+    issueNumber: 42,
+  });
+  assert.equal(found.number, 8);
+});
+
+test('legacy retry only accepts trusted fixed failure categories once', () => {
+  const options = {
+    trustedActors: 'netcatty-bot,github-actions[bot]',
+    recoveryVersion: 'handoff-v1',
+  };
+  assert.equal(auto.shouldRetryIssueHandoff([{
+    user: { login: 'netcatty-bot' },
+    body: '<!-- cursor-implement-failure:base=abc;kind=protected_path -->',
+  }], options), true);
+  assert.equal(auto.shouldRetryIssueHandoff([{
+    user: { login: 'netcatty-bot' },
+    body: '收到这条补充了，但自动复核没有安全完成，已经转给维护者继续处理。',
+  }], options), true);
+  assert.equal(auto.shouldRetryIssueHandoff([{
+    user: { login: 'attacker' },
+    body: '<!-- cursor-implement-failure:base=abc;kind=protected_path -->',
+  }], options), false);
+  assert.equal(auto.shouldRetryIssueHandoff([{
+    user: { login: 'netcatty-bot' },
+    body: '<!-- cursor-implement-failure:base=abc;kind=verification_failed -->',
+  }], options), false);
+  assert.equal(auto.shouldRetryIssueHandoff([
+    {
+      user: { login: 'netcatty-bot' },
+      body: '<!-- cursor-implement-failure:base=abc;kind=protected_path -->',
+    },
+    {
+      user: { login: 'netcatty-bot' },
+      body: '<!-- cursor-handoff-recovery:version=handoff-v1 -->',
+    },
+  ], options), false);
+
+  const boundedOptions = {
+    ...options,
+    recoveryVersion: 'handoff-v2',
+    notBefore: '2026-07-31T12:54:37Z',
+    notAfter: '2026-08-04T08:27:14Z',
+  };
+  assert.equal(auto.shouldRetryIssueHandoff([{
+    user: { login: 'netcatty-bot' },
+    body: '收到这条补充了，但自动复核没有安全完成，已经转给维护者继续处理。',
+    created_at: '2026-07-30T12:00:00Z',
+  }], boundedOptions), false);
+  assert.equal(auto.shouldRetryIssueHandoff([{
+    user: { login: 'netcatty-bot' },
+    body: '收到这条补充了，但自动复核没有安全完成，已经转给维护者继续处理。',
+    created_at: '2026-08-01T12:00:00Z',
+  }], boundedOptions), true);
+  assert.equal(auto.shouldRetryIssueHandoff([
+    {
+      user: { login: 'netcatty-bot' },
+      body: '<!-- cursor-implement-failure:base=abc;kind=protected_path -->',
+      created_at: '2026-08-01T12:00:00Z',
+    },
+    {
+      user: { login: 'netcatty-bot' },
+      body: '<!-- cursor-followup:comment-id=123;result=no_change -->',
+      created_at: '2026-08-02T12:00:00Z',
+    },
+  ], boundedOptions), false);
+  assert.equal(auto.shouldRetryIssueHandoff([
+    {
+      user: { login: 'netcatty-bot' },
+      body: '<!-- cursor-followup:comment-id=123;result=updated -->',
+      created_at: '2026-08-01T12:00:00Z',
+    },
+    {
+      user: { login: 'netcatty-bot' },
+      body: '<!-- cursor-classification-failure:kind=research_failed;run=2 -->',
+      created_at: '2026-08-02T12:00:00Z',
+    },
+  ], boundedOptions), true);
+  assert.equal(auto.shouldRetryIssueHandoff([{
+    user: { login: 'netcatty-bot' },
+    body: '<!-- cursor-implement-failure:base=future;kind=protected_path -->',
+    created_at: '2026-08-05T12:00:00Z',
+  }], boundedOptions), false);
+  assert.equal(auto.shouldRetryIssueHandoff([
+    {
+      user: { login: 'netcatty-bot' },
+      body: '<!-- cursor-implement-failure:base=abc;kind=protected_path -->',
+      created_at: '2026-08-01T12:00:00Z',
+    },
+    {
+      user: { login: 'netcatty-bot' },
+      body: '<!-- cursor-handoff-recovery:version=handoff-v2 -->',
+      created_at: '2026-08-05T12:00:00Z',
+    },
+  ], boundedOptions), false);
+});
+
+test('findOpenPullForIssue accepts same-repo work but ignores untrusted fork claims', async () => {
+  const pulls = [
+    {
+      number: 7,
+      body: 'Fixes #42',
+      author_association: 'NONE',
+      head: { repo: { full_name: 'attacker/fork' } },
+    },
+    {
+      number: 8,
+      body: 'Fixes #42',
+      author_association: 'NONE',
+      head: { repo: { full_name: 'binaricat/Netcatty' } },
+    },
+  ];
+  const found = await auto.findOpenPullForIssue({
+    github: {
+      paginate: async () => pulls,
+      rest: { pulls: { list: async () => ({ data: pulls }) } },
+    },
+    context: { repo: { owner: 'binaricat', repo: 'Netcatty' } },
+    issueNumber: 42,
+  });
+  assert.equal(found.number, 8);
+});
+
+test('automation pull references only control the marked source issue', () => {
+  const pull = {
+    number: 8,
+    state: 'open',
+    body: [
+      '<!-- cursor-bot-pr -->',
+      '<!-- cursor-source-issue:41 -->',
+      'Related to #42',
+      'Fixes #43',
+    ].join('\n'),
+    labels: [{ name: 'automation:bot-pr' }],
+    user: { login: 'netcatty-bot' },
+    head: {
+      ref: 'cursor/issue-41-123',
+      repo: { full_name: 'binaricat/Netcatty' },
+    },
+  };
+  const options = { repository: 'binaricat/Netcatty', includeRelated: true };
+  assert.equal(auto.isTrustedOpenPullForIssue(pull, 41, options), true);
+  assert.equal(auto.isTrustedOpenPullForIssue(pull, 42, options), false);
+  assert.equal(auto.isTrustedOpenPullForIssue(pull, 43, options), false);
+});
+
+test('automation label does not hide a trusted maintainer pull reference', () => {
+  const pull = {
+    number: 2703,
+    state: 'open',
+    body: 'Maintainer implementation\n\nRelated to #2699',
+    labels: [{ name: 'automation:bot-pr' }],
+    user: { login: 'binaricat' },
+    author_association: 'OWNER',
+    head: {
+      ref: 'worktree/quiet-cloud-b74d',
+      repo: { full_name: 'binaricat/Netcatty' },
+    },
+  };
+  assert.equal(auto.isTrustedOpenPullForIssue(pull, 2699, {
+    repository: 'binaricat/Netcatty',
+    includeRelated: true,
+  }), true);
 });
 
 test('getPendingIssueFollowupsForPull does not block maintainer Fixes-only PRs', async () => {
@@ -1734,7 +2520,7 @@ test('hasProtectedChangesInSources checks commit names', () => {
   ]);
 });
 
-test('generated changes may add tests but cannot alter existing test sources', () => {
+test('generated changes may add or update regression tests', () => {
   const committed = auto.hasProtectedChangesInSources({
     nameStatusText: [
       'M\tcomponents/existing.test.ts',
@@ -1742,7 +2528,7 @@ test('generated changes may add tests but cannot alter existing test sources', (
       'M\tcomponents/App.tsx',
     ].join('\n'),
   });
-  assert.deepEqual(committed, ['components/existing.test.ts']);
+  assert.deepEqual(committed, []);
 
   const workingTree = auto.hasProtectedChangesInSources({
     gitStatusPorcelain: [
@@ -1750,7 +2536,7 @@ test('generated changes may add tests but cannot alter existing test sources', (
       '?? components/new-regression-2.test.ts',
     ].join('\n'),
   });
-  assert.deepEqual(workingTree, ['components/other.test.ts']);
+  assert.deepEqual(workingTree, []);
 });
 
 test('hasProtectedChangesInSources blocks electron-builder configs', () => {
@@ -1914,6 +2700,9 @@ test('every code-writing Cursor path compares exact-base failures and preserves 
   assert.match(codex, /fix-test-comparison\.json/);
   assert.match(codex, /steps\.fixpatch\.outputs\.artifact_ready == 'true'/);
   assert.match(codex, /fix-candidate-tests\.log/);
+  assert.match(codex, /fix-base-tests\.log/);
+  assert.match(implement, /base-tests\.log/);
+  assert.match(followup, /followup-base-tests\.log/);
   assert.ok(
     codex.indexOf('name: Install test shell dependencies') <
       codex.indexOf('name: Capture Codex-fix exact-base test baseline'),
@@ -1924,7 +2713,24 @@ test('every code-writing Cursor path compares exact-base failures and preserves 
     assert.ok(restoreDependencies >= 0);
     assert.ok(lintCandidate > restoreDependencies);
     assert.match(section, /restoring locked dependencies failed/);
+    assert.equal((section.match(/writeProtectedPathReport/g) || []).length, 2);
+    assert.match(section, /readProtectedPathReport/);
   }
+  assert.match(implement, /Skip if trusted related PR already open/);
+  assert.match(implement, /findOpenPullForIssue/);
+  assert.match(implement, /includeRelated: true/);
+  assert.match(implement, /id: upload_patch/);
+  assert.match(implement, /steps\.upload_patch\.outcome/);
+  assert.match(codex, /buildCodexFixFailureMessage/);
+  assert.match(codex, /id: upload_fixpatch/);
+  assert.match(codex, /steps\.upload_fixpatch\.outcome/);
+  assert.match(codex, /cursor-codex-fix-failure:kind=/);
+  assert.match(codex, /cursor-codex-fix-failure:kind=no_changes/);
+  assert.doesNotMatch(
+    codex,
+    /agent, protected paths, or verification failed/,
+  );
+  assert.doesNotMatch(codex, /did not produce additional code changes/);
 });
 
 test('classification failure handoff receives its issue number', () => {
@@ -1937,6 +2743,50 @@ test('classification failure handoff receives its issue number', () => {
   )?.[0] || '';
   assert.match(handoff, /ISSUE_NUMBER: \$\{\{ needs\.route\.outputs\.issue_number \}\}/);
   assert.match(handoff, /const issueNumber = Number\(process\.env\.ISSUE_NUMBER\)/);
+  assert.match(handoff, /cursor-classification-failure:kind=\$\{kind\};run=\$\{context\.runId\}/);
+  assert.match(handoff, /buildClassificationFailureMessage/);
+  assert.match(handoff, /steps\.research\.outcome/);
+  assert.match(handoff, /steps\.classify_agent\.outcome/);
+  assert.match(handoff, /steps\.validate_classification\.outcome/);
+  assert.match(handoff, /actions\/runs\/\$\{context\.runId\}/);
+  assert.match(handoff, /fs\.existsSync\(helper\)/);
+  assert.match(handoff, /const failureMessage = auto/);
+  assert.doesNotMatch(handoff, /自动复核没有安全完成/);
+  assert.match(workflow, /name: Validate classification result/);
+  assert.match(workflow, /auto\.parseClassificationFile\("\.cursor-runtime\/classification\.json"\)/);
+});
+
+test('implementation publish rechecks related work and records a deduplicated handoff', () => {
+  const workflow = fs.readFileSync(
+    path.join(__dirname, '..', '.github', 'workflows', 'cursor-automation.yml'),
+    'utf8',
+  );
+  const implement = workflow.match(
+    /\n  implement:\n[\s\S]*?(?=\n  publish_implement:\n)/,
+  )?.[0] || '';
+  const publish = workflow.match(
+    /\n  publish_implement:\n[\s\S]*?(?=\n  codex_loop:\n)/,
+  )?.[0] || '';
+  assert.match(implement, /cursor-existing-related-pr:\$\{existing\.number\}/);
+  assert.match(implement, /auto\.markNeedsHuman/);
+  assert.match(publish, /name: Skip publish if trusted related PR opened during implementation/);
+  assert.match(publish, /includeRelated: true/);
+  assert.match(publish, /auto\.markNeedsHuman/);
+  assert.match(publish, /cursor-existing-related-pr:\$\{existing\.number\}/);
+  assert.ok(
+    publish.indexOf('name: Skip publish if trusted related PR opened during implementation')
+      < publish.indexOf('name: Publish branch from fresh runner'),
+  );
+  assert.match(
+    publish,
+    /name: Publish branch from fresh runner\n\s+if: steps\.existing\.outputs\.exists != 'true'/,
+  );
+  const openPr = publish.match(
+    /- name: Open draft PR[\s\S]*?(?=\n\s{6}- name:)/,
+  )?.[0] || '';
+  assert.match(openPr, /findOpenPullForIssue/);
+  assert.match(openPr, /includeRelated: true/);
+  assert.match(openPr, /skip the duplicate/);
 });
 
 test('classification follow-up rate-limit handoff receives its issue number', () => {
@@ -2386,6 +3236,43 @@ test('research input replaces only successfully proxied GitHub image attachments
     auto.normalizeExternalResearchText(noResearchNeeded, { input: imageOnly }),
     noResearchNeeded,
   );
+
+  const mediaOnly = auto.rewriteExternalResearchInputAttachments(
+    { body: attachmentUrl },
+    [{ sourceUrl: attachmentUrl, kind: 'unsupported_media' }],
+  );
+  assert.match(mediaOnly.body, /video or audio attachment omitted/);
+  assert.doesNotMatch(mediaOnly.body, /https?:\/\//);
+  assert.equal(
+    auto.normalizeExternalResearchText(noResearchNeeded, { input: mediaOnly }),
+    noResearchNeeded,
+  );
+});
+
+test('GitHub attachment redirects distinguish images from video and reject other hosts', () => {
+  const redirect = (host, mediaType) => [
+    'HTTP/2 302',
+    `location: https://${host}/asset?response-content-type=${encodeURIComponent(mediaType)}`,
+    '',
+  ].join('\r\n');
+  assert.equal(
+    auto.classifyGithubUserAttachmentRedirect(
+      redirect('github-production-user-asset-6210df.s3.amazonaws.com', 'image/png'),
+    ),
+    'image',
+  );
+  assert.equal(
+    auto.classifyGithubUserAttachmentRedirect(
+      redirect('github-production-user-asset-6210df.s3.amazonaws.com', 'video/mp4'),
+    ),
+    'unsupported_media',
+  );
+  assert.equal(
+    auto.classifyGithubUserAttachmentRedirect(
+      redirect('example.com', 'image/png'),
+    ),
+    '',
+  );
 });
 
 test('normalizeExternalResearchText fails closed on blocked or unsourced research', () => {
@@ -2461,6 +3348,36 @@ test('parseExternalResearchStream requires a recorded web tool call and sources'
       body: 'See https://cursor.com/docs',
     }),
     /WebSearch\/WebFetch tool call/i,
+  );
+
+  const githubCaseStream = [
+    JSON.stringify({
+      type: 'tool_call',
+      subtype: 'completed',
+      tool_call: {
+        webSearchToolCall: {
+          result: {
+            success: {
+              content: 'Repository: https://github.com/ByteDance/trae-agent',
+            },
+          },
+        },
+      },
+    }),
+    JSON.stringify({
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      result: [
+        'RESEARCH_COMPLETE: Trae Agent is a CLI.',
+        'Sources:',
+        '- https://github.com/bytedance/trae-agent — official repository',
+      ].join('\n'),
+    }),
+  ].join('\n');
+  assert.match(
+    auto.parseExternalResearchStream(githubCaseStream, {}),
+    /^RESEARCH_COMPLETE:/,
   );
 });
 
@@ -3048,6 +3965,38 @@ test('parseExternalResearchStream rejects forged and unrelated web evidence', ()
   );
 });
 
+test('parseExternalResearchStream drops unverified sources when others are proven', () => {
+  const finalText = [
+    'RESEARCH_COMPLETE: known product with one hallucinated citation',
+    'Sources:',
+    '- https://official.example/result — verified page',
+    '- https://apps.microsoft.com/detail/xpdmd65pjwkc9c — unverified store page',
+  ].join('\n');
+  const stream = [
+    JSON.stringify({
+      type: 'tool_call',
+      subtype: 'completed',
+      tool_call: {
+        webFetchToolCall: {
+          args: { url: 'https://official.example/result' },
+          result: {
+            success: {
+              url: 'https://official.example/result',
+              markdown: 'Official product page',
+            },
+          },
+        },
+      },
+    }),
+    JSON.stringify({ type: 'result', subtype: 'success', result: finalText }),
+  ].join('\n');
+
+  const normalized = auto.parseExternalResearchStream(stream, {});
+  assert.match(normalized, /^RESEARCH_COMPLETE:/);
+  assert.match(normalized, /https:\/\/official\.example\/result/);
+  assert.doesNotMatch(normalized, /apps\.microsoft\.com/);
+});
+
 test('workflow confines forced WebSearch to isolated read-only research passes', () => {
   const workflow = fs.readFileSync(
     path.join(__dirname, '..', '.github', 'workflows', 'cursor-automation.yml'),
@@ -3125,8 +4074,10 @@ test('workflow sanitizes GitHub screenshots through pinned imgproxy before resea
     /git show "FETCH_HEAD:scripts\/prepare-cursor-research-input\.sh" > "\$RUNNER_TEMP\/prepare-cursor-research-input\.sh"/,
   );
   assert.match(attachmentProxy, /extractGithubUserAttachmentAssetUrls/);
+  assert.match(attachmentProxy, /classifyGithubUserAttachmentRedirect/);
   assert.match(attachmentProxy, /rewriteExternalResearchInputAttachments/);
   assert.match(attachmentProxy, /attachment_count > 4/);
+  assert.match(attachmentProxy, /unsupported_media/);
   assert.match(
     attachmentProxy,
     /IMGPROXY_ALLOWED_SOURCES=https:\/\/github\.com\/user-attachments\/assets\//,
@@ -3284,6 +4235,101 @@ test('shouldSkipExternalCodexRerequest matches trusted head sha marker only', ()
     auto.shouldSkipExternalCodexRerequest({
       headSha: sha,
       existingComments: [{ user: { login: 'github-actions[bot]' }, body: 'unrelated' }],
+    }),
+    false,
+  );
+});
+
+test('shouldSkipExternalCodexRerequest honors head pins; ignores plain unpinned @codex', () => {
+  const sha = 'deadbeefcafebabe000000000000000000000001';
+  const short = sha.slice(0, 12);
+  // Automation request with head pin but no external marker still dedupes.
+  assert.equal(
+    auto.shouldSkipExternalCodexRerequest({
+      headSha: sha,
+      ownActors: 'binaricat,netcatty-bot,github-actions[bot]',
+      existingComments: [
+        {
+          user: { login: 'binaricat' },
+          body: auto.buildCodexReviewRequestComment(1, sha),
+        },
+      ],
+    }),
+    true,
+  );
+  // Short SHA pin matches full head.
+  assert.equal(
+    auto.shouldSkipExternalCodexRerequest({
+      headSha: sha,
+      ownActors: 'binaricat',
+      existingComments: [
+        {
+          user: { login: 'binaricat' },
+          body: `<!-- cursor-automation -->\n\n@codex review\n\n<!-- cursor-codex-head:${short} -->`,
+        },
+      ],
+    }),
+    true,
+  );
+  // Plain unpinned @codex never suppresses — cannot know which SHA it meant.
+  assert.equal(
+    auto.shouldSkipExternalCodexRerequest({
+      headSha: sha,
+      ownActors: 'binaricat',
+      notBefore: '2026-08-05T14:00:00Z',
+      existingComments: [
+        {
+          user: { login: 'cursor[bot]' },
+          created_at: '2026-08-05T14:00:30Z',
+          body: '@codex review',
+        },
+      ],
+    }),
+    false,
+  );
+  assert.equal(
+    auto.shouldSkipExternalCodexRerequest({
+      headSha: sha,
+      ownActors: 'binaricat',
+      existingComments: [
+        {
+          user: { login: 'binaricat' },
+          created_at: '2026-08-05T14:00:10Z',
+          body: '@codex review',
+        },
+      ],
+    }),
+    false,
+  );
+  // Connector clean summary is not a request.
+  assert.equal(
+    auto.shouldSkipExternalCodexRerequest({
+      headSha: sha,
+      ownActors: 'binaricat',
+      existingComments: [
+        {
+          user: { login: 'chatgpt-codex-connector[bot]' },
+          created_at: '2026-08-05T14:00:59Z',
+          body: "Codex Review: Didn't find any major issues.\n\n**Reviewed commit:** `deadbeef`",
+        },
+      ],
+    }),
+    false,
+  );
+  // Different head pin does not skip.
+  assert.equal(
+    auto.shouldSkipExternalCodexRerequest({
+      headSha: sha,
+      ownActors: 'binaricat',
+      existingComments: [
+        {
+          user: { login: 'binaricat' },
+          body: auto.buildCodexReviewRequestComment(
+            1,
+            'ffffffffffffffffffffffffffffffffffffffff',
+          ),
+        },
+      ],
     }),
     false,
   );
@@ -3595,6 +4641,76 @@ test('applyClassification updates state before posting the final reply', async (
   assert.match(calls[1][1].body, /AsidePanel/);
 });
 
+test('applyClassification in triage-only never starts implement', async () => {
+  const previous = process.env.CURSOR_AUTOMATION_MODE;
+  process.env.CURSOR_AUTOMATION_MODE = 'triage_only';
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cursor-auto-triage-only-'));
+  const classificationPath = path.join(dir, 'classification.json');
+  fs.writeFileSync(
+    classificationPath,
+    JSON.stringify(
+      grounded({
+        category: 'bug_ready',
+        confidence: 0.92,
+        summary: 'clear local bug',
+        reasoning: 'KeychainManager.tsx drops the selected key on refresh.',
+        reply: '维护者会接着看这个密钥刷新的问题。',
+      }),
+    ),
+  );
+
+  const calls = [];
+  const github = {
+    rest: {
+      issues: {
+        async get() {
+          return {
+            data: {
+              number: 99,
+              state: 'open',
+              labels: [{ name: 'bug' }, { name: 'triage' }],
+            },
+          };
+        },
+        async createComment(args) {
+          calls.push(['createComment', args]);
+          return { data: { id: 1 } };
+        },
+        async update(args) {
+          calls.push(['update', args]);
+          return { data: {} };
+        },
+      },
+    },
+  };
+  const outputs = {};
+  const core = {
+    setOutput(key, value) {
+      outputs[key] = value;
+    },
+  };
+
+  try {
+    const classification = await auto.applyClassification({
+      github,
+      context: { repo: { owner: 'binaricat', repo: 'Netcatty' } },
+      core,
+      issueNumber: 99,
+      classificationPath,
+    });
+
+    assert.equal(classification.category, 'bug_ready');
+    assert.equal(classification.should_implement, false);
+    assert.equal(outputs.should_implement, 'false');
+    assert.ok(calls[0][1].labels.includes('ready-for-human'));
+    assert.ok(!calls[0][1].labels.includes('ready-for-agent'));
+  } finally {
+    if (previous == null) delete process.env.CURSOR_AUTOMATION_MODE;
+    else process.env.CURSOR_AUTOMATION_MODE = previous;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('applyClassification restores the original issue when its reply fails', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cursor-auto-rollback-'));
   const classificationPath = path.join(dir, 'classification.json');
@@ -3866,7 +4982,7 @@ const SAMPLE_BUG_BODY = [
   'Windows 11',
 ].join('\n');
 
-test('prepareIssueContext dedupes and limits needs-info author replies', async () => {
+test('prepareIssueContext dedupes and limits all managed issue author replies', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cursor-needs-info-'));
   const issue = {
     number: 99,
@@ -3878,12 +4994,17 @@ test('prepareIssueContext dedupes and limits needs-info author replies', async (
     author_association: 'NONE',
     labels: [{ name: 'needs-info' }],
   };
-  const run = async (comments, triggerCommentId, followupDailyLimit = 20) => {
+  const run = async (
+    comments,
+    triggerCommentId,
+    followupDailyLimit = 20,
+    labels = [{ name: 'needs-info' }],
+  ) => {
     const outputs = {};
     const github = {
       rest: {
         issues: {
-          get: async () => ({ data: issue }),
+          get: async () => ({ data: { ...issue, labels } }),
           listComments: Symbol('listComments'),
         },
       },
@@ -3931,6 +5052,34 @@ test('prepareIssueContext dedupes and limits needs-info author replies', async (
   assert.equal(rateLimited.result.rateLimited, true);
   assert.equal(rateLimited.outputs.rate_limited, 'true');
   assert.equal(rateLimited.outputs.pending_ids, '11');
+
+  const managedRateLimited = await run([
+    {
+      id: 10,
+      user: { login: 'netcatty-bot', type: 'User' },
+      body: '<!-- cursor-triage-watermark:comment-id=8 -->',
+      created_at: '2026-07-24T10:00:00Z',
+    },
+    {
+      id: 11,
+      user: { login: 'alice', type: 'User' },
+      body: '请重新检查这个聚焦方案',
+      created_at: '2026-07-24T11:00:00Z',
+    },
+  ], 11, 1, [{ name: 'ready-for-human' }, { name: 'triage:feature-defer' }]);
+  assert.equal(managedRateLimited.result.shouldRun, false);
+  assert.equal(managedRateLimited.outputs.rate_limited, 'true');
+
+  const managedProcessed = await run([
+    {
+      id: 10,
+      user: { login: 'netcatty-bot', type: 'User' },
+      body: '<!-- cursor-triage-watermark:comment-id=11 -->',
+      created_at: '2026-07-24T10:00:00Z',
+    },
+  ], 11, 20, [{ name: 'ready-for-agent' }]);
+  assert.equal(managedProcessed.result.shouldRun, false);
+  assert.match(managedProcessed.outputs.reason, /already processed/i);
 
   const burstComments = [
     {

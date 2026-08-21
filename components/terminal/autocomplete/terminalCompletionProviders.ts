@@ -13,6 +13,7 @@ import type { AutocompleteHistoryScope, Snippet } from '../../../domain/models';
 export interface TerminalCompletionProviderRequest {
   input: string;
   session: NetcattyTerminalSessionSnapshot;
+  hostGroup?: string;
   hostOs: 'linux' | 'windows' | 'macos';
   cwdSource?: AutocompleteCwdSource;
   snippets?: Snippet[];
@@ -23,6 +24,11 @@ export interface TerminalCompletionProviderRequest {
   pluginResponseTimeoutMs?: number;
   /** Host security/session cancellation propagated to the plugin bridge. */
   signal?: AbortSignal;
+  /**
+   * Forwarded to built-in getCompletions when a path listing finishes after the
+   * soft budget (cache-bypassed relative SSH cwd).
+   */
+  onLatePathSuggestions?: (suggestions: CompletionSuggestion[]) => void;
 }
 
 const DEFAULT_PLUGIN_COMPLETION_RESPONSE_TIMEOUT_MS = 800;
@@ -58,6 +64,7 @@ export async function provideTerminalCompletions(
 ): Promise<CompletionSuggestion[]> {
   const builtInPromise = getCompletions(request.input, {
     hostId: request.session.hostId,
+    hostGroup: request.hostGroup,
     os: request.hostOs,
     maxResults: request.maximum,
     sessionId: request.session.sessionId,
@@ -66,6 +73,7 @@ export async function provideTerminalCompletions(
     cwdSource: request.cwdSource,
     snippets: request.snippets,
     historyScope: request.historyScope,
+    onLatePathSuggestions: request.onLatePathSuggestions,
   });
   const pluginRequestController = new AbortController();
   const abortPluginRequest = () => pluginRequestController.abort();

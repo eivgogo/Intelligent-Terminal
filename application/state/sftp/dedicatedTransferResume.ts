@@ -29,6 +29,7 @@ import {
   isMissingDirectoryReplacePathError,
   promoteDirectoryReplaceStage as promoteDirectoryReplacePaths,
 } from "./directoryReplacePromotion";
+import { sftpTransferCenterStore } from "../sftpTransferCenterStore";
 
 export interface DedicatedResumeDeps {
   hosts: readonly Host[];
@@ -161,7 +162,6 @@ export async function openTransferSftpSession(
     if (
       !wantDedicated
       && options?.sourceSessionId
-      && !host.sftpSudo
       && bridge.openSftpForSession
     ) {
       try {
@@ -708,8 +708,19 @@ async function resumeSingleFileWithDedicatedSession(
             skipAdmission: true,
           });
 
-          if (streamResult?.error) {
-            throw new Error(streamResult.error);
+          if (streamResult?.superseded === true) {
+            // Live same-id owner still running; wait for terminal events only.
+            for (;;) {
+              if (shouldAbort?.()) throw new Error("Transfer cancelled");
+              const latest = sftpTransferCenterStore.getTask(task.id);
+              const status = latest?.status;
+              if (status === "completed") break;
+              if (status === "failed") throw new Error(latest?.error || "Transfer failed");
+              if (status === "cancelled") throw new Error("Transfer cancelled");
+              await new Promise((resolve) => setTimeout(resolve, 200));
+            }
+          } else if (streamResult?.error || streamResult?.cancelled) {
+            throw new Error(streamResult.error || "Transfer cancelled");
           }
         }, { retries: 1, delayMs: 600 });
         return { transferId: task.id };
@@ -1258,7 +1269,17 @@ async function resumeDirectoryWithDedicatedSession(
                 skipAdmission: true,
               });
 
-              if (streamResult?.error || streamResult?.cancelled) {
+              if (streamResult?.superseded === true) {
+                for (;;) {
+                  if (options?.shouldAbort?.()) throw new Error("Transfer cancelled");
+                  const latest = sftpTransferCenterStore.getTask(childBase.id);
+                  const status = latest?.status;
+                  if (status === "completed") break;
+                  if (status === "failed") throw new Error(latest?.error || "Transfer failed");
+                  if (status === "cancelled") throw new Error("Transfer cancelled");
+                  await new Promise((resolve) => setTimeout(resolve, 200));
+                }
+              } else if (streamResult?.error || streamResult?.cancelled) {
                 throw new Error(streamResult.error || "Transfer cancelled");
               }
 

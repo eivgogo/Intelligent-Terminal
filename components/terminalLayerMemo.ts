@@ -12,8 +12,8 @@ export const terminalLayerAreEqual = (
   prev.keys === next.keys &&
   prev.snippets === next.snippets &&
   prev.snippetPackages === next.snippetPackages &&
-  prev.notes === next.notes &&
-  prev.noteGroups === next.noteGroups &&
+  // notes / noteGroups / updateNotes / updateNoteGroups intentionally omitted —
+  // Notes + AI panels read notesStore.
   prev.openNoteRequest === next.openNoteRequest &&
   prev.onOpenVaultNoteFromChat === next.onOpenVaultNoteFromChat &&
   prev.onOpenVaultHostFromChat === next.onOpenVaultHostFromChat &&
@@ -32,8 +32,8 @@ export const terminalLayerAreEqual = (
   prev.followAppTerminalTheme === next.followAppTerminalTheme &&
   prev.pickTerminalTheme === next.pickTerminalTheme &&
   prev.resolveSessionAppearance === next.resolveSessionAppearance &&
-  prev.accentMode === next.accentMode &&
-  prev.customAccent === next.customAccent &&
+  // accentMode / customAccent intentionally omitted — Terminal reads
+  // appearanceChromeStore so accent drag does not rebuild TerminalLayer.
   prev.terminalSettings === next.terminalSettings &&
   prev.fontSize === next.fontSize &&
   prev.terminalFontFamilyId === next.terminalFontFamilyId &&
@@ -63,6 +63,7 @@ export const terminalLayerAreEqual = (
   prev.onUpdateSessionRestoreCwd === next.onUpdateSessionRestoreCwd &&
   prev.onUpdateHost === next.onUpdateHost &&
   prev.onAddKnownHost === next.onAddKnownHost &&
+  prev.onDeleteShellHistoryEntry === next.onDeleteShellHistoryEntry &&
   prev.onToggleWorkspaceViewMode === next.onToggleWorkspaceViewMode &&
   prev.onSetWorkspaceFocusedSession === next.onSetWorkspaceFocusedSession &&
   prev.onReorderWorkspaceSessions === next.onReorderWorkspaceSessions &&
@@ -74,8 +75,6 @@ export const terminalLayerAreEqual = (
   prev.onToggleBroadcast === next.onToggleBroadcast &&
   prev.updateSnippets === next.updateSnippets &&
   prev.updateSnippetPackages === next.updateSnippetPackages &&
-  prev.updateNotes === next.updateNotes &&
-  prev.updateNoteGroups === next.updateNoteGroups &&
   prev.toggleScriptsSidePanelRef === next.toggleScriptsSidePanelRef &&
   prev.toggleSidePanelRef === next.toggleSidePanelRef &&
   prev.identities === next.identities

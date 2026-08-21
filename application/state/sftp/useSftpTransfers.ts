@@ -12,6 +12,7 @@ import {
   describeSftpExistingKind,
   describeSftpIncomingKind,
   getSftpConflictTypeKey,
+  shouldUnlinkSftpConflictBeforeReplace,
 } from "../../../domain/sftpConflict";
 import {
   findActivePathConflict,
@@ -23,6 +24,7 @@ import { netcattyBridge } from "../../../infrastructure/services/netcattyBridge"
 import { logger } from "../../../lib/logger";
 import { sftpTransferCenterStore } from "../sftpTransferCenterStore";
 import { SftpPane } from "./types";
+import { isMissingStatError } from "./errors";
 import { useSftpDirectoryTransferOps } from "./transferDirectoryOps";
 import { useSftpTransferConflictOps } from "./transferConflictOps";
 import { useSftpTransferTaskOps } from "./transferTaskOps";
@@ -60,6 +62,10 @@ import {
 } from "./transferConflictLifecycle";
 import { getParentPath, joinPath } from "./utils";
 import { promoteDirectoryReplaceStage as promoteDirectoryReplacePaths } from "./directoryReplacePromotion";
+import {
+  isExternalDragDropFileUpload,
+  retryExternalDragDropFileUpload,
+} from "./externalDragDropRetry";
 
 /** Keep the MutableRefObject mirror in sync with the process-global latch set. */
 function syncPausedTasksRef(ref: { current: Set<string> }, taskId: string, latched: boolean) {
@@ -440,7 +446,7 @@ export const useSftpTransfers = ({
     cleanupTaskArtifacts,
   });
 
-  const { statTargetPath, getDuplicateTarget } = useSftpTransferConflictOps();
+  const { statTargetPath, getDuplicateTarget, deleteTargetPath } = useSftpTransferConflictOps();
 
   const { transferFile, transferDirectory } = useSftpDirectoryTransferOps({
     ownerId,
@@ -736,8 +742,10 @@ export const useSftpTransfers = ({
               newModified: sourceStat?.mtime || Date.now(),
             };
           }
-        } catch {
-          // ignore
+        } catch (error) {
+          // Missing path = no conflict. ENOTSUP / unknown type fail closed.
+          if (isMissingStatError(error)) return null;
+          throw error;
         }
         return null;
       })();
@@ -777,6 +785,13 @@ export const useSftpTransfers = ({
               retryable: false,
             });
             return "failed";
+          }
+
+          if (
+            defaultAction === "replace"
+            && shouldUnlinkSftpConflictBeforeReplace(conflict.existingType)
+          ) {
+            await deleteTargetPath(task, targetPane, targetSftpId, targetEncoding, "symlink");
           }
 
           const duplicateTarget = defaultAction === "duplicate"
@@ -1294,8 +1309,62 @@ export const useSftpTransfers = ({
 
   const retryTransfer = useCallback(
     async (transferId: string) => {
-      const task = transfersRef.current.find((t) => t.id === transferId);
+      // Prefer the live owner list; fall back to the center store (drag-drop
+      // children are upserted there and mirrored via subscribe).
+      const task = transfersRef.current.find((t) => t.id === transferId)
+        ?? sftpTransferCenterStore.getTask(transferId);
       if (!task || task.retryable === false) return;
+
+      // Progressive / external drag-drop children never have dual-pane endpoints
+      // (sourceConnectionId is "external"). Re-run startStreamTransfer in place.
+      if (isExternalDragDropFileUpload(task)) {
+        if (inFlightTransferIdsRef.current.has(transferId)) return;
+        inFlightTransferIdsRef.current.add(transferId);
+        clearTransferCancelled(transferId);
+        cancelledTasksRef.current.delete(transferId);
+        try {
+          const result = await retryExternalDragDropFileUpload(task, {
+            getBrowseSftpId: (connectionId) => sftpSessionsRef.current.get(connectionId),
+            acquireTransferSession: acquireTransferSession
+              ? (hostId, id) => acquireTransferSession(hostId, id)
+              : undefined,
+            startStreamTransfer: async (options) => {
+              const bridge = netcattyBridge.get();
+              if (!bridge?.startStreamTransfer) {
+                return { error: "Stream transfer is unavailable" };
+              }
+              return bridge.startStreamTransfer(options);
+            },
+            clearPendingCancel: (id) => netcattyBridge.get()?.clearPendingTransferCancel?.(id),
+            cleanupArtifacts: cleanupTaskArtifacts,
+            getTask: (id) => sftpTransferCenterStore.getTask(id)
+              ?? transfersRef.current.find((row) => row.id === id),
+            getChildTasks: (parentId) => {
+              const fromStore = sftpTransferCenterStore.getOwnerTasks(ownerId)
+                .filter((row) => row.parentTaskId === parentId);
+              if (fromStore.length > 0) return fromStore;
+              return transfersRef.current.filter((row) => row.parentTaskId === parentId);
+            },
+            onPatch: (taskId, updates) => {
+              transferRuntime.patchTask(taskId, updates);
+              setTransfers((prev) => {
+                if (!prev.some((row) => row.id === taskId)) {
+                  // Store-only child: mirror the patch by re-pulling owner rows.
+                  return sftpTransferCenterStore.getOwnerTasks(ownerId);
+                }
+                return prev.map((row) => (row.id === taskId ? { ...row, ...updates } : row));
+              });
+            },
+          });
+          if (!result.success && result.error && !/cancelled/i.test(result.error)) {
+            notify.warning(result.error, "SFTP");
+          }
+        } finally {
+          inFlightTransferIdsRef.current.delete(transferId);
+        }
+        return;
+      }
+
       await cleanupTaskArtifacts(task);
 
       const retriedTask: TransferTask = {
@@ -1316,7 +1385,13 @@ export const useSftpTransfers = ({
       };
 
       const endpoints = resolveTaskEndpoints(task);
-      if (!endpoints) return;
+      if (!endpoints) {
+        notify.warning(
+          "Could not resolve transfer endpoints for retry. Reconnect the target and try again.",
+          "SFTP",
+        );
+        return;
+      }
       const { targetSide, sourcePane, targetPane } = endpoints;
 
       const completionHandler = completionHandlersRef.current.get(transferId);
@@ -1335,7 +1410,7 @@ export const useSftpTransfers = ({
       await processTransfer(retriedTask, sourcePane, targetPane, targetSide);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- processTransfer is defined inline
-    [cleanupTaskArtifacts, resolveTaskEndpoints, setTransfers],
+    [acquireTransferSession, cleanupTaskArtifacts, ownerId, resolveTaskEndpoints, setTransfers, sftpSessionsRef],
   );
 
   const clearCompletedTransfers = useCallback(() => {
@@ -1473,6 +1548,7 @@ export const useSftpTransfers = ({
 
       const updatedTasks: TransferTask[] = [];
       const blockedReplaceTasks: Array<{ task: TransferTask; conflict: FileConflict }> = [];
+      const failedReplaceTasks: Array<{ task: TransferTask; error: string }> = [];
 
       for (const affectedTask of affectedTasks) {
         if (cancelledTasksRef.current.has(affectedTask.id)) continue;
@@ -1503,6 +1579,34 @@ export const useSftpTransfers = ({
           ) {
             blockedReplaceTasks.push({ task: affectedTask, conflict: affectedConflict });
             continue;
+          }
+          if (
+            affectedConflict
+            && shouldUnlinkSftpConflictBeforeReplace(affectedConflict.existingType)
+          ) {
+            const endpoints = resolveTaskEndpoints(affectedTask);
+            if (!endpoints?.targetPane.connection) continue;
+            const targetSftpId = endpoints.targetPane.connection.isLocal
+              ? null
+              : sftpSessionsRef.current.get(endpoints.targetPane.connection.id) ?? null;
+            const targetEncoding = endpoints.targetPane.connection.isLocal
+              ? "auto"
+              : endpoints.targetPane.filenameEncoding || "auto";
+            try {
+              await deleteTargetPath(
+                affectedTask,
+                endpoints.targetPane,
+                targetSftpId,
+                targetEncoding,
+                "symlink",
+              );
+            } catch (error) {
+              failedReplaceTasks.push({
+                task: affectedTask,
+                error: error instanceof Error ? error.message : String(error),
+              });
+              continue;
+            }
           }
           updatedTask = {
             ...affectedTask,
@@ -1539,6 +1643,24 @@ export const useSftpTransfers = ({
                 conflict: undefined,
               }
             : t,
+          ),
+        );
+      }
+
+      if (failedReplaceTasks.length > 0) {
+        const failedErrors = new Map(
+          failedReplaceTasks.map(({ task: failedTask, error }) => [failedTask.id, error]),
+        );
+        setTransfers((prev) =>
+          prev.map((candidate) => failedErrors.has(candidate.id)
+            ? {
+                ...candidate,
+                status: "failed" as TransferStatus,
+                endTime: Date.now(),
+                error: failedErrors.get(candidate.id),
+                conflict: undefined,
+              }
+            : candidate,
           ),
         );
       }

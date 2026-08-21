@@ -109,6 +109,7 @@ test("enabled convergent startup checks preview empty-vault recovery before sync
     "conflictActionOverride: 'download-remote'",
     recoveryPromptIndex,
   );
+  const manualTriggerIndex = source.indexOf("trigger: 'manual'", recoveryPromptIndex);
   const normalSyncIndex = source.indexOf(
     "syncNowRef.current({ notifyOnFailure, allowEmptyConvergentSync })",
     cloudWinsIndex,
@@ -118,13 +119,38 @@ test("enabled convergent startup checks preview empty-vault recovery before sync
   assert.notEqual(previewIndex, -1);
   assert.notEqual(recoveryPromptIndex, -1);
   assert.notEqual(cloudWinsIndex, -1);
+  assert.notEqual(manualTriggerIndex, -1);
   assert.notEqual(normalSyncIndex, -1);
   assert.ok(
     convergentGuardIndex < previewIndex
       && previewIndex < recoveryPromptIndex
-      && recoveryPromptIndex < cloudWinsIndex
+      && recoveryPromptIndex < manualTriggerIndex
+      && manualTriggerIndex < cloudWinsIndex
       && cloudWinsIndex < normalSyncIndex,
     "v2 startup must offer recovery and use cloud-wins before the normal CRDT sync path",
+  );
+});
+
+test("empty-vault recovery restore bypasses the auto-sync preference gate", () => {
+  const source = readFileSync(new URL("./useAutoSync.ts", import.meta.url), "utf8");
+  const recoveryPromptIndex = source.indexOf("requestEmptyVaultRecovery(recoveryPayload)");
+  const restoreCallIndex = source.indexOf("syncNowRef.current({", recoveryPromptIndex);
+  const triggerIndex = source.indexOf("trigger: 'manual'", restoreCallIndex);
+  const conflictIndex = source.indexOf(
+    "conflictActionOverride: 'download-remote'",
+    restoreCallIndex,
+  );
+  const callEndIndex = source.indexOf("});", conflictIndex);
+
+  assert.notEqual(recoveryPromptIndex, -1);
+  assert.notEqual(restoreCallIndex, -1);
+  assert.notEqual(triggerIndex, -1);
+  assert.notEqual(conflictIndex, -1);
+  assert.ok(
+    restoreCallIndex < triggerIndex
+      && triggerIndex < conflictIndex
+      && conflictIndex < callEndIndex,
+    "recovery Restore must pass trigger:manual so disabled auto-sync cannot block it",
   );
 });
 
@@ -189,5 +215,82 @@ test("auto-sync skips only the exact remote-applied data hash", () => {
   assert.ok(
     interruptedGuardIndex < syncNowIndex && syncNowIndex < clearAfterSyncIndex,
     "remote-apply skip hash must survive temporary sync blockers and clear only after a successful sync",
+  );
+});
+
+test("auto syncNow and debounce re-check manager autoSyncEnabled before pushing", () => {
+  const source = readFileSync(new URL("./useAutoSync.ts", import.meta.url), "utf8");
+  const helperIndex = source.indexOf("function isPersistedAutoSyncEnabled");
+  const syncNowIndex = source.indexOf("const syncNow = useCallback");
+  const autoGateIndex = source.indexOf(
+    "if (trigger === 'auto' && !isPersistedAutoSyncEnabled(manager.getState().autoSyncEnabled))",
+    syncNowIndex,
+  );
+  const debounceIndex = source.indexOf("// Debounced auto-sync when data changes");
+  const fireTimeGateIndex = source.indexOf(
+    "if (!isPersistedAutoSyncEnabled(manager.getState().autoSyncEnabled))",
+    debounceIndex,
+  );
+  const clearTimerIndex = source.indexOf(
+    "if (syncTimeoutRef.current) {\n        clearTimeout(syncTimeoutRef.current);\n        syncTimeoutRef.current = null;\n      }\n      return;",
+    debounceIndex,
+  );
+
+  assert.notEqual(helperIndex, -1);
+  assert.notEqual(syncNowIndex, -1);
+  assert.notEqual(autoGateIndex, -1);
+  assert.notEqual(fireTimeGateIndex, -1);
+  assert.notEqual(clearTimerIndex, -1);
+  assert.ok(
+    helperIndex < syncNowIndex
+      && syncNowIndex < autoGateIndex
+      && debounceIndex < fireTimeGateIndex
+      && debounceIndex < clearTimerIndex,
+    "auto-sync off must gate both syncNow(auto) and the debounced timer path",
+  );
+});
+
+test("startup local-wins and merge round-trips refuse device-bound credential placeholders", () => {
+  const source = readFileSync(new URL("./useAutoSync.ts", import.meta.url), "utf8");
+  const uploadLocalIndex = source.indexOf("if (conflictAction === 'upload-local')");
+  const uploadGuardIndex = source.indexOf(
+    "findSyncPayloadEncryptedCredentialPaths(localPayload)",
+    uploadLocalIndex,
+  );
+  const uploadPushIndex = source.indexOf("manager.syncAllProviders(localPayload)", uploadGuardIndex);
+  const mergeRoundTripBlockIndex = source.indexOf(
+    "stripSyncPayloadEncryptedCredentials(mergeResult.payload)",
+  );
+  const mergeLocalHealIndex = source.indexOf(
+    "healPoisonedSecretsForMerge(localPayload, remoteRaw, base)",
+  );
+  const mergeRemoteHealIndex = source.indexOf(
+    "healPoisonedSecretsForMerge(remoteRaw, localPayload, base)",
+  );
+  const mergePushIndex = source.indexOf(
+    "manager.syncAllProviders(portableMerge)",
+    mergeRoundTripBlockIndex,
+  );
+  const stripRemoteIndex = source.indexOf(
+    "stripSyncPayloadEncryptedCredentials(remoteRaw)",
+  );
+
+  assert.notEqual(uploadLocalIndex, -1);
+  assert.notEqual(uploadGuardIndex, -1);
+  assert.notEqual(uploadPushIndex, -1);
+  assert.notEqual(mergeLocalHealIndex, -1);
+  assert.notEqual(mergeRemoteHealIndex, -1);
+  assert.notEqual(mergeRoundTripBlockIndex, -1);
+  assert.notEqual(mergePushIndex, -1);
+  assert.notEqual(stripRemoteIndex, -1);
+  assert.ok(
+    uploadGuardIndex < uploadPushIndex,
+    "startup local-wins must guard placeholders before syncAllProviders",
+  );
+  assert.ok(
+    mergeLocalHealIndex < mergeRoundTripBlockIndex
+      && mergeRemoteHealIndex < mergeRoundTripBlockIndex
+      && mergeRoundTripBlockIndex < mergePushIndex,
+    "startup merge must heal local+remote secrets, then strip, then upload",
   );
 });

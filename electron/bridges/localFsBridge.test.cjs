@@ -12,11 +12,30 @@ const {
   WINDOWS_ATTRIB_TIMEOUT_MS,
   parseAttribOutput,
   listWindowsHiddenBasenames,
+  statLocal,
+  lstatLocal,
+  deleteLocalFile,
 } = require("./localFsBridge.cjs");
 
 test("local tree traversal defaults match the remote traversal safety budget", () => {
   assert.equal(MAX_LOCAL_TREE_DIRECTORIES, 50_000);
   assert.equal(MAX_LOCAL_TREE_ENTRIES, 200_000);
+});
+
+test("expected symlink delete refuses a replacement file", async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-delete-type-"));
+  const target = path.join(root, "target");
+  t.after(async () => fs.promises.rm(root, { recursive: true, force: true }));
+  await fs.promises.writeFile(target, "new owner");
+
+  await assert.rejects(
+    () => deleteLocalFile(null, { path: target, expectedType: "symlink" }),
+    (error) => {
+      assert.equal(error.code, "ESTALE");
+      return true;
+    },
+  );
+  assert.equal(await fs.promises.readFile(target, "utf8"), "new owner");
 });
 
 test("parseAttribOutput returns an empty set for empty input", () => {
@@ -183,6 +202,56 @@ test("collectLocalTreeEntries preserves empty directories in selected folders", 
   }
 });
 
+test("collectLocalTreeEntries reports progressive file counts during scan", async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-upload-tree-progress-"));
+  const selected = path.join(root, "project");
+  await fs.promises.mkdir(path.join(selected, "src"), { recursive: true });
+  await fs.promises.writeFile(path.join(selected, "readme.txt"), "hi");
+  await fs.promises.writeFile(path.join(selected, "src", "main.txt"), "hello");
+
+  const progress = [];
+  try {
+    const entries = await collectLocalTreeEntries(selected, {}, (stats) => {
+      progress.push({ ...stats });
+    });
+    assert.equal(entries.filter((entry) => entry.type === "file").length, 2);
+    assert.ok(progress.length >= 1, "expected at least one progress event");
+    const final = progress[progress.length - 1];
+    assert.equal(final.fileCount, 2);
+    assert.equal(final.directoryCount, 2);
+    assert.equal(final.entryCount, 4);
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("collectLocalTreeEntries aborts when cancelled mid-scan", async () => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-upload-tree-cancel-"));
+  const selected = path.join(root, "project");
+  await fs.promises.mkdir(path.join(selected, "a"), { recursive: true });
+  await fs.promises.mkdir(path.join(selected, "b"), { recursive: true });
+  await fs.promises.writeFile(path.join(selected, "a", "1.txt"), "1");
+  await fs.promises.writeFile(path.join(selected, "b", "2.txt"), "2");
+
+  let cancel = false;
+  try {
+    await assert.rejects(
+      () => collectLocalTreeEntries(
+        selected,
+        {},
+        () => {
+          // Cancel as soon as progress starts flowing.
+          cancel = true;
+        },
+        () => cancel,
+      ),
+      /cancelled/i,
+    );
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("collectLocalTreeEntries bounds and parallelizes metadata reads within a directory", async (t) => {
   const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-upload-tree-parallel-"));
   const selected = path.join(root, "project");
@@ -213,6 +282,34 @@ test("collectLocalTreeEntries bounds and parallelizes metadata reads within a di
   assert.equal(entries.length, 65);
   assert.ok(maxActive > 1, `expected concurrent lstat calls, got ${maxActive}`);
   assert.ok(maxActive <= 32, `metadata concurrency must stay bounded, got ${maxActive}`);
+});
+
+test("collectLocalTreeEntries skips a child that disappears during inspection", async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-upload-tree-vanished-"));
+  const selected = path.join(root, "project");
+  await fs.promises.mkdir(selected, { recursive: true });
+  await fs.promises.writeFile(path.join(selected, "stable.txt"), "stable");
+  await fs.promises.writeFile(path.join(selected, "vanished.txt"), "vanished");
+
+  const originalLstat = fs.promises.lstat;
+  fs.promises.lstat = async (candidate, ...args) => {
+    if (candidate === path.join(selected, "vanished.txt")) {
+      const error = new Error("file disappeared");
+      error.code = "ENOENT";
+      throw error;
+    }
+    return originalLstat.call(fs.promises, candidate, ...args);
+  };
+  t.after(async () => {
+    fs.promises.lstat = originalLstat;
+    await fs.promises.rm(root, { recursive: true, force: true });
+  });
+
+  const entries = await collectLocalTreeEntries(selected);
+  assert.deepEqual(entries.map((entry) => entry.relativePath), [
+    "project",
+    "project/stable.txt",
+  ]);
 });
 
 test("collectLocalTreeEntries does not follow a directory symlink cycle", async (t) => {
@@ -355,6 +452,60 @@ test("collectLocalTreeEntries follows a non-cyclic directory symlink for folder 
     assert.equal(linkedDirectory?.type, "directory");
     assert.equal(linkedFile?.type, "file");
     assert.equal(linkedFile?.localPath, path.join(link, "logo.txt"));
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("statLocal follows symlinks and reports target size for resume sizing", async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-stat-local-follow-"));
+  const target = path.join(root, "outside.bin");
+  const link = path.join(root, "tool.sh");
+  await fs.promises.writeFile(target, "target-bytes-longer");
+  try {
+    await fs.promises.symlink(target, link, "file");
+  } catch (error) {
+    await fs.promises.rm(root, { recursive: true, force: true });
+    t.skip(`symlink creation unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+
+  try {
+    const linkStat = await fs.promises.lstat(link);
+    const targetStat = await fs.promises.stat(target);
+    assert.notEqual(linkStat.size, targetStat.size, "fixture must distinguish link metadata from target");
+
+    const result = await statLocal(null, { path: link });
+    assert.equal(result.type, "file");
+    assert.equal(result.size, targetStat.size);
+    assert.equal(result.lastModified, targetStat.mtime.getTime());
+  } finally {
+    await fs.promises.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("lstatLocal classifies symlinks without following the target", async (t) => {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "netcatty-lstat-local-link-"));
+  const target = path.join(root, "outside.bin");
+  const link = path.join(root, "tool.sh");
+  await fs.promises.writeFile(target, "target-bytes-longer");
+  try {
+    await fs.promises.symlink(target, link, "file");
+  } catch (error) {
+    await fs.promises.rm(root, { recursive: true, force: true });
+    t.skip(`symlink creation unavailable: ${error instanceof Error ? error.message : String(error)}`);
+    return;
+  }
+
+  try {
+    const linkStat = await fs.promises.lstat(link);
+    const targetStat = await fs.promises.stat(target);
+    assert.notEqual(linkStat.size, targetStat.size, "fixture must distinguish link metadata from target");
+
+    const result = await lstatLocal(null, { path: link });
+    assert.equal(result.type, "symlink");
+    assert.equal(result.size, linkStat.size);
+    assert.equal(result.lastModified, linkStat.mtime.getTime());
   } finally {
     await fs.promises.rm(root, { recursive: true, force: true });
   }

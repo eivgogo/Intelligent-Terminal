@@ -5,6 +5,7 @@ import type {
   AIProviderId,
   ExternalAgentConfig,
   ProviderAdvancedParams,
+  OpenAIApiFormat,
   ProviderStyle,
 } from "../../../../infrastructure/ai/types";
 
@@ -124,6 +125,7 @@ export interface ProviderFormState {
   skipTLSVerify: boolean;
   advancedParams: ProviderAdvancedParams;
   style: ProviderStyle | "";  // "" means inherit-from-providerId
+  openaiApi: OpenAIApiFormat;
   iconId: string;             // "" means no built-in pick (fall back to providerId)
   iconDataUrl: string;        // "" means no upload override
 }
@@ -135,7 +137,7 @@ export interface FetchedModel {
 }
 
 export interface FetchBridge {
-  aiFetch?: (url: string, method?: string, headers?: Record<string, string>, body?: string, providerId?: string, skipHostCheck?: boolean, followRedirects?: boolean, skipTLSVerify?: boolean) => Promise<{ ok: boolean; data: string; error?: string }>;
+  aiFetch?: (url: string, method?: string, headers?: Record<string, string>, body?: string, providerId?: string, skipHostCheck?: boolean, followRedirects?: boolean, skipTLSVerify?: boolean) => Promise<{ ok: boolean; status?: number; data: string; error?: string }>;
   aiAllowlistAddHost?: (baseURL: string) => Promise<{ ok: boolean }>;
 }
 

@@ -125,7 +125,17 @@ declare global {
       env?: Record<string, string>;
       sessionLog?: { enabled: boolean; directory: string; format: string; timestampsEnabled?: boolean };
     }): Promise<string>;
-    startLocalSession?(options: { sessionId?: string; cols?: number; rows?: number; shell?: string; shellArgs?: string[]; cwd?: string; env?: Record<string, string>; sessionLog?: { enabled: boolean; directory: string; format: string; timestampsEnabled?: boolean } }): Promise<string>;
+    startLocalSession?(options: {
+      sessionId?: string;
+      cols?: number;
+      rows?: number;
+      shell?: string;
+      shellArgs?: string[];
+      cwd?: string;
+      env?: Record<string, string>;
+      sessionLog?: { enabled: boolean; directory: string; format: string; timestampsEnabled?: boolean };
+      bootEpoch?: number;
+    }): Promise<string>;
     startSerialSession?(options: {
       sessionId?: string;
       path: string;
@@ -219,7 +229,11 @@ declare global {
     /** Get current working directory from an active SSH session */
     getSessionPwd?(
       sessionId: string,
-      options?: { allowHomeFallback?: boolean; timeoutMs?: number },
+      options?: {
+        allowHomeFallback?: boolean;
+        allowLoginShellFallback?: boolean;
+        timeoutMs?: number;
+      },
     ): Promise<{ success: boolean; cwd?: string; error?: string }>;
     /**
      * Get metadata about an already-connected SSH session — currently the
@@ -283,10 +297,12 @@ declare global {
         diskUsed: number | null;      // Disk used in GB
         diskTotal: number | null;     // Total disk in GB
         disks: Array<{                // All mounted disks
+          capacityKey?: string;       // Filesystem or shared-pool identity
           mountPoint: string;
           used: number;               // Used in GB
           total: number;              // Total in GB
           percent: number;            // Usage percentage
+          filesystemType?: string;    // Filesystem type reported by df
         }>;
         netRxSpeed: number;           // Total network receive speed (bytes/sec)
         netTxSpeed: number;           // Total network transmit speed (bytes/sec)
@@ -347,7 +363,7 @@ declare global {
     respondTerminalOutputDrain?(requestId: string): void;
     notifyTerminalSessionDisplayReady?(sessionId: string): void;
     ackSessionFlow(sessionId: string, bytes: number): void;
-    closeSession(sessionId: string): void | Promise<void>;
+    closeSession(sessionId: string, options?: { bootEpoch?: number; retainOwnership?: boolean }): void | Promise<void>;
     /** Move a live session's output port to this renderer (same PTY). */
     rebindTerminalSessionOutput?(sessionId: string, authorization: string): Promise<{
       success: boolean;
@@ -489,16 +505,16 @@ declare global {
     ): () => void;
     onTelnetAutoLoginComplete?(
       sessionId: string,
-      cb: (evt: { sessionId: string }) => void
+      cb: (evt: { sessionId: string; bootEpoch?: number }) => void
     ): () => void;
     onTelnetAutoLoginCancelled?(
       sessionId: string,
-      cb: (evt: { sessionId: string }) => void
+      cb: (evt: { sessionId: string; bootEpoch?: number }) => void
     ): () => void;
     /** Fires after Mosh swaps from the SSH handshake PTY to mosh-client. */
     onMoshSessionReady?(
       sessionId: string,
-      cb: (evt: { sessionId: string }) => void
+      cb: (evt: { sessionId: string; bootEpoch?: number }) => void
     ): () => void;
     onTelnetEchoMode?(
       sessionId: string,
@@ -530,6 +546,7 @@ declare global {
         /** When false, UI must not offer saving the response as the host password. */
         allowSavePassword?: boolean;
         scope?: "terminal" | "external";
+        bootEpoch?: number;
       }) => void
     ): () => void;
     onKeyboardInteractiveCancelled?(
@@ -557,6 +574,7 @@ declare global {
         publicKey?: string;
         knownHostId?: string;
         knownFingerprint?: string;
+        bootEpoch?: number;
       }) => void
     ): () => void;
     respondHostKeyVerification?(
@@ -573,6 +591,8 @@ declare global {
         keyName: string;
         hostname?: string;
         passphraseInvalid?: boolean;
+        sessionId?: string;
+        bootEpoch?: number;
       }) => void
     ): () => void;
     respondPassphrase?(

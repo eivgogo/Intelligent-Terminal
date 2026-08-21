@@ -9,6 +9,7 @@ import {
 import { mapCattyStreamChunkToAgentEvents } from '../agentEventAdapter';
 import type { AgentEvent } from '../types';
 import type { ProviderAdvancedParams } from '../../types';
+import type { CattyReasoningProviderOptions } from '../../cattyReasoning';
 import { createModelFromConfig } from '../../sdk/providers';
 import type { CattyToolsBundle } from '../capabilityTools';
 import { buildCattyToolApproval } from '../cattyToolApproval';
@@ -37,7 +38,7 @@ import {
   type ToolErrorChunk,
   type ToolOutputDeniedChunk,
   type ToolResultChunk,
-} from '../../../../components/ai/hooks/aiChatStreamingSupport';
+} from '../../aiChatStreamingSupport';
 import type { ChatMessage } from '../../types';
 
 export type CattyModel = ReturnType<typeof createModelFromConfig>;
@@ -57,6 +58,7 @@ export interface ProcessCattyStreamInput {
   currentAssistantMsgId: string;
   maxIterations: number;
   advancedParams?: ProviderAdvancedParams;
+  reasoningProviderOptions?: CattyReasoningProviderOptions;
   continuationContext?: CattyProviderContinuationContext;
   turnId?: string;
   commandTimeoutMs?: number;
@@ -100,6 +102,7 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
     currentAssistantMsgId,
     maxIterations,
     advancedParams,
+    reasoningProviderOptions,
     continuationContext,
     turnId,
     commandTimeoutMs,
@@ -206,6 +209,7 @@ export async function processCattyStream(input: ProcessCattyStreamInput): Promis
     ...(advancedParams?.topP != null && { topP: advancedParams.topP }),
     ...(advancedParams?.frequencyPenalty != null && { frequencyPenalty: advancedParams.frequencyPenalty }),
     ...(advancedParams?.presencePenalty != null && { presencePenalty: advancedParams.presencePenalty }),
+    ...(reasoningProviderOptions ? { providerOptions: reasoningProviderOptions } : {}),
   });
 
   let activeMsgId = currentAssistantMsgId;

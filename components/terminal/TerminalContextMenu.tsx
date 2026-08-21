@@ -27,7 +27,8 @@ import {
   ContextMenuShortcut,
   ContextMenuTrigger,
 } from '../ui/context-menu';
-import { isMiddleClickContextMenuEvent } from './runtime/middleClickBehavior';
+import { isMiddleClickContextMenuEvent, isMouseTrackingActive } from './runtime/middleClickBehavior';
+import { isHistoryPreviewContextMenuTarget } from './runtime/terminalHistoryScrollOverride';
 import { collectOwnedPluginMenus, comparePluginMenus, usePluginContributions } from '../../application/state/usePluginContributions';
 import { buildTerminalPluginContributionContext } from '../../application/state/pluginContributionContexts';
 import { PluginContributionIcon } from '../plugins/PluginContributionIcon';
@@ -44,6 +45,8 @@ export interface TerminalContextMenuProps {
   keyBindings?: KeyBinding[];
   rightClickBehavior?: RightClickBehavior;
   isAlternateScreen?: boolean;
+  /** Read the current xterm mouse-tracking mode when handling a right-click. */
+  getMouseTrackingMode?: () => string | undefined;
   /** When true, show the app context menu even while a fullscreen app (tmux/vim) holds mouse tracking. */
   showContextMenuOverFullscreenApps?: boolean;
   onCopy?: () => void;
@@ -75,13 +78,25 @@ export const shouldShowReconnectAction = ({
 
 export const shouldSuppressMouseTrackingContextMenu = ({
   isAlternateScreen,
+  terminalMouseTrackingMode,
   showReconnectAction,
   forceMenuInAlternateScreen,
+  isHistoryPreviewTarget,
 }: {
   isAlternateScreen?: boolean;
+  terminalMouseTrackingMode?: string;
   showReconnectAction?: boolean;
   forceMenuInAlternateScreen?: boolean;
-}): boolean => Boolean(isAlternateScreen && !showReconnectAction && !forceMenuInAlternateScreen);
+  isHistoryPreviewTarget?: boolean;
+}): boolean => Boolean(
+  !isHistoryPreviewTarget
+  && isMouseTrackingActive({
+    mouseTracking: Boolean(isAlternateScreen),
+    terminalMouseTrackingMode,
+  })
+  && !showReconnectAction
+  && !forceMenuInAlternateScreen,
+);
 
 export const shouldShowAddSelectionToAIContextMenuAction = (
   onAddSelectionToAI?: () => void,
@@ -93,54 +108,84 @@ export const shouldShowUploadClipboardImageContextMenuAction = (
 
 export const shouldRenderTerminalContextMenuContent = ({
   isAlternateScreen,
+  terminalMouseTrackingMode,
   showReconnectAction,
   allowSuppressedMenuContent,
   forceMenuInAlternateScreen,
+  isHistoryPreviewTarget,
 }: {
   isAlternateScreen?: boolean;
+  terminalMouseTrackingMode?: string;
   showReconnectAction?: boolean;
   allowSuppressedMenuContent?: boolean;
   forceMenuInAlternateScreen?: boolean;
+  isHistoryPreviewTarget?: boolean;
 }): boolean =>
   allowSuppressedMenuContent ||
-  !shouldSuppressMouseTrackingContextMenu({ isAlternateScreen, showReconnectAction, forceMenuInAlternateScreen });
+  !shouldSuppressMouseTrackingContextMenu({
+    isAlternateScreen,
+    terminalMouseTrackingMode,
+    showReconnectAction,
+    forceMenuInAlternateScreen,
+    isHistoryPreviewTarget,
+  });
 
 export const shouldAllowSuppressedTerminalContextMenuContent = ({
   event,
   isAlternateScreen,
+  terminalMouseTrackingMode,
   showReconnectAction,
   forceMenuInAlternateScreen,
+  isHistoryPreviewTarget,
 }: {
   event: { shiftKey?: boolean; nativeEvent: MouseEvent };
   isAlternateScreen?: boolean;
+  terminalMouseTrackingMode?: string;
   showReconnectAction?: boolean;
   forceMenuInAlternateScreen?: boolean;
+  isHistoryPreviewTarget?: boolean;
 }): boolean =>
   isMiddleClickContextMenuEvent(event.nativeEvent)
-  || Boolean(event.shiftKey && shouldSuppressMouseTrackingContextMenu({ isAlternateScreen, showReconnectAction, forceMenuInAlternateScreen }));
+  || Boolean(isHistoryPreviewTarget)
+  || Boolean(event.shiftKey && shouldSuppressMouseTrackingContextMenu({
+    isAlternateScreen,
+    terminalMouseTrackingMode,
+    showReconnectAction,
+    forceMenuInAlternateScreen,
+  }));
 
 export const shouldOpenTerminalContextMenu = ({
   event,
   rightClickBehavior = 'context-menu',
   isAlternateScreen,
+  terminalMouseTrackingMode,
   showReconnectAction,
   forceMenuInAlternateScreen,
+  isHistoryPreviewTarget,
 }: {
   event: { shiftKey?: boolean; nativeEvent: MouseEvent };
   rightClickBehavior?: RightClickBehavior;
   isAlternateScreen?: boolean;
+  terminalMouseTrackingMode?: string;
   showReconnectAction?: boolean;
   forceMenuInAlternateScreen?: boolean;
+  isHistoryPreviewTarget?: boolean;
 }): boolean => {
   if (isMiddleClickContextMenuEvent(event.nativeEvent)) {
     return true;
   }
 
-  if (event.shiftKey) {
+  if (event.shiftKey || isHistoryPreviewTarget) {
     return true;
   }
 
-  if (shouldSuppressMouseTrackingContextMenu({ isAlternateScreen, showReconnectAction, forceMenuInAlternateScreen })) {
+  if (shouldSuppressMouseTrackingContextMenu({
+    isAlternateScreen,
+    terminalMouseTrackingMode,
+    showReconnectAction,
+    forceMenuInAlternateScreen,
+    isHistoryPreviewTarget,
+  })) {
     return false;
   }
 
@@ -159,6 +204,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   keyBindings,
   rightClickBehavior = 'context-menu',
   isAlternateScreen = false,
+  getMouseTrackingMode,
   showContextMenuOverFullscreenApps = false,
   onCopy,
   onPaste,
@@ -233,6 +279,8 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
   const clearShortcut = getShortcut('clear-buffer');
   const showReconnectAction = shouldShowReconnectAction({ isReconnectable, onReconnect });
 
+  const terminalMouseTrackingMode = getMouseTrackingMode?.();
+
   // Handle right-click: intercept for paste/select-word unless Shift is held
   // or rightClickBehavior is 'context-menu'. The ContextMenuTrigger stays always
   // enabled so Shift+Right-Click opens the menu on the first click.
@@ -241,15 +289,25 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
       // In alternate screen (tmux, vim, etc.), let the terminal application
       // handle right-click natively to avoid conflicting menus. Reconnect is
       // still available after disconnect, even if mouse tracking was left on.
+      const currentMouseTrackingMode = getMouseTrackingMode?.();
+      const isHistoryPreviewTarget = isHistoryPreviewContextMenuTarget(e.target);
       const shouldOpenMenu = shouldOpenTerminalContextMenu({
         event: e,
         rightClickBehavior,
         isAlternateScreen,
+        terminalMouseTrackingMode: currentMouseTrackingMode,
         showReconnectAction,
         forceMenuInAlternateScreen: showContextMenuOverFullscreenApps,
+        isHistoryPreviewTarget,
       });
 
-      if (!shouldOpenMenu && shouldSuppressMouseTrackingContextMenu({ isAlternateScreen, showReconnectAction, forceMenuInAlternateScreen: showContextMenuOverFullscreenApps })) {
+      if (!shouldOpenMenu && shouldSuppressMouseTrackingContextMenu({
+        isAlternateScreen,
+        terminalMouseTrackingMode: currentMouseTrackingMode,
+        showReconnectAction,
+        forceMenuInAlternateScreen: showContextMenuOverFullscreenApps,
+        isHistoryPreviewTarget,
+      })) {
         e.preventDefault();
         return;
       }
@@ -265,8 +323,10 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
         setAllowSuppressedMenuContent(shouldAllowSuppressedTerminalContextMenuContent({
           event: e,
           isAlternateScreen,
+          terminalMouseTrackingMode: currentMouseTrackingMode,
           showReconnectAction,
           forceMenuInAlternateScreen: showContextMenuOverFullscreenApps,
+          isHistoryPreviewTarget,
         }));
         return;
       }
@@ -279,7 +339,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
         onSelectWord?.();
       }
     },
-    [rightClickBehavior, onPaste, onSelectWord, isAlternateScreen, showReconnectAction, showContextMenuOverFullscreenApps],
+    [rightClickBehavior, onPaste, onSelectWord, isAlternateScreen, getMouseTrackingMode, showReconnectAction, showContextMenuOverFullscreenApps],
   );
 
   // Always use ContextMenu wrapper to maintain consistent React tree structure
@@ -294,6 +354,7 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
       </ContextMenuTrigger>
       {shouldRenderTerminalContextMenuContent({
         isAlternateScreen,
+        terminalMouseTrackingMode,
         showReconnectAction,
         allowSuppressedMenuContent,
         forceMenuInAlternateScreen: showContextMenuOverFullscreenApps,
@@ -364,15 +425,15 @@ export const TerminalContextMenu: React.FC<TerminalContextMenuProps> = ({
 
           <ContextMenuSeparator />
 
-          <ContextMenuItem onClick={onSplitVertical}>
-            <SplitSquareHorizontal size={14} className="mr-2" />
-            {t('terminal.menu.splitHorizontal')}
-            <ContextMenuShortcut>{splitVShortcut}</ContextMenuShortcut>
-          </ContextMenuItem>
           <ContextMenuItem onClick={onSplitHorizontal}>
             <SplitSquareVertical size={14} className="mr-2" />
-            {t('terminal.menu.splitVertical')}
+            {t('terminal.menu.splitHorizontal')}
             <ContextMenuShortcut>{splitHShortcut}</ContextMenuShortcut>
+          </ContextMenuItem>
+          <ContextMenuItem onClick={onSplitVertical}>
+            <SplitSquareHorizontal size={14} className="mr-2" />
+            {t('terminal.menu.splitVertical')}
+            <ContextMenuShortcut>{splitVShortcut}</ContextMenuShortcut>
           </ContextMenuItem>
 
           <ContextMenuSeparator />

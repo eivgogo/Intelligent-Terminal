@@ -17,8 +17,10 @@ import {
     withRestoreBarrier,
 } from '../application/localVaultBackups';
 import { useI18n } from '../application/i18n/I18nProvider';
+import { useOptionalSettingsFocus } from './settings/SettingsFocusContext';
 import {
     findSyncPayloadEncryptedCredentialPaths,
+    stripSyncPayloadEncryptedCredentials,
 } from '../domain/credentials';
 import {
     isProviderReadyForSync,
@@ -136,10 +138,14 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
         }
         sync.cancelOAuthConnect();
         if (sync.convergentSyncConfig.initialized) return;
-        const providers: CloudProvider[] = ['github', 'google', 'onedrive', 'webdav', 's3'];
+        const providers = new Set<CloudProvider>(['github', 'google', 'onedrive', 'webdav', 's3']);
+        for (const id of Object.keys(sync.providers)) {
+            providers.add(id as CloudProvider);
+        }
         for (const provider of providers) {
             if (provider === current) continue;
-            if (isProviderReadyForSync(sync.providers[provider])) {
+            const conn = sync.providers[provider];
+            if (conn && isProviderReadyForSync(conn)) {
                 await sync.disconnectProvider(provider);
             }
         }
@@ -176,18 +182,23 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
     );
 
     const isConnectDisabled = (provider: CloudProvider): boolean => {
+        const connection = sync.providers[provider];
         if (pendingConnectProvider && pendingConnectProvider !== provider) {
             return true;
         }
         if (pendingConnectProvider === provider) {
             return true;
         }
-        if (hasConnectingProvider && sync.providers[provider].status !== 'connecting') {
+        if (hasConnectingProvider && connection?.status !== 'connecting') {
             return true;
+        }
+        // Never-connected plugin providers still honor the single-provider gate.
+        if (!connection) {
+            return !sync.convergentSyncConfig.initialized && sync.hasAnyConnectedProvider;
         }
         return !sync.convergentSyncConfig.initialized
             && sync.hasAnyConnectedProvider
-            && !isProviderReadyForSync(sync.providers[provider]);
+            && !isProviderReadyForSync(connection);
     };
 
     const beginPendingConnect = (provider: CloudProvider): boolean => {
@@ -263,6 +274,15 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
     // Active tab state — lets the banner's "Restore" button switch to the
     // local-backups tab without a separate DOM query.
     const [activeTab, setActiveTab] = useState<'providers' | 'status'>('providers');
+    const settingsFocus = useOptionalSettingsFocus();
+
+    useEffect(() => {
+        const request = settingsFocus?.request;
+        if (request?.tab !== 'sync' || !request.syncSubTab) return;
+        if (request.syncSubTab === 'providers' || request.syncSubTab === 'status') {
+            setActiveTab(request.syncSubTab);
+        }
+    }, [settingsFocus?.request]);
 
     const [preparedConvergentMigration, setPreparedConvergentMigration] = useState<PreparedConvergentMigration | null>(null);
     const [convergentPreview, setConvergentPreview] = useState<ConvergentMigrationPreview | null>(null);
@@ -666,9 +686,10 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
             // requested provider fails, another provider can verify a newer
             // joined replica that must be applied before reporting the error.
             if (result.mergedPayload && !result.mergedPayloadApplied && onApplyPayload) {
-                await Promise.resolve(onApplyPayload(result.mergedPayload));
+                const portableMerged = stripSyncPayloadEncryptedCredentials(result.mergedPayload);
+                await Promise.resolve(onApplyPayload(portableMerged));
                 if (result.remoteFile) {
-                    await sync.commitRemoteInspection(result.provider, result.remoteFile, result.mergedPayload, {
+                    await sync.commitRemoteInspection(result.provider, result.remoteFile, portableMerged, {
                         recordDownload: true,
                     });
                 }
@@ -694,13 +715,14 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                 // USE_REMOTE applies cloud data over local — same data-loss
                 // shape as a local backup restore, so gate auto-sync in
                 // every other window the same way.
+                const portableRemote = stripSyncPayloadEncryptedCredentials(remoteResult.payload);
                 await withRestoreBarrier(async () => {
-                    await Promise.resolve(onApplyPayload(remoteResult.payload));
+                    await Promise.resolve(onApplyPayload(portableRemote));
                 });
                 await sync.commitRemoteInspection(
                     remoteResult.provider,
                     remoteResult.remoteFile,
-                    remoteResult.payload,
+                    portableRemote,
                     { recordDownload: true },
                 );
                 toast.success(t('cloudSync.resolve.downloaded'));
@@ -737,9 +759,10 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                     // reflects what's now on cloud (in case remote changed during the merge).
                     for (const result of (results as Map<CloudProvider, SyncResult>).values()) {
                         if (result.mergedPayload && !result.mergedPayloadApplied) {
-                            await Promise.resolve(onApplyPayload(result.mergedPayload));
+                            const portableMerged = stripSyncPayloadEncryptedCredentials(result.mergedPayload);
+                            await Promise.resolve(onApplyPayload(portableMerged));
                             if (result.remoteFile) {
-                                await sync.commitRemoteInspection(result.provider, result.remoteFile, result.mergedPayload, {
+                                await sync.commitRemoteInspection(result.provider, result.remoteFile, portableMerged, {
                                     recordDownload: true,
                                 });
                             }
@@ -910,6 +933,7 @@ const SyncDashboard: React.FC<SyncDashboardProps> = ({
                 }}
                 onResolveConvergentConflict={handleResolveConvergentConflict}
                 onDowngradeConvergent={handleDowngradeConvergent}
+                disconnectOtherProviders={disconnectOtherProviders}
             />
 
             <CloudSyncDialogs

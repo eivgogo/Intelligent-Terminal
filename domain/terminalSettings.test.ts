@@ -106,6 +106,23 @@ test("normalizeTerminalSettings falls back for unsupported dynamic tab title mod
   );
 });
 
+test("normalizeTerminalSettings enables OSC desktop notifications by default", () => {
+  assert.equal(normalizeTerminalSettings().oscNotifications, "always");
+});
+
+test("normalizeTerminalSettings preserves supported OSC notification modes", () => {
+  assert.equal(normalizeTerminalSettings({ oscNotifications: "off" }).oscNotifications, "off");
+  assert.equal(normalizeTerminalSettings({ oscNotifications: "unfocused" }).oscNotifications, "unfocused");
+  assert.equal(normalizeTerminalSettings({ oscNotifications: "always" }).oscNotifications, "always");
+});
+
+test("normalizeTerminalSettings falls back for unsupported OSC notification modes", () => {
+  assert.equal(
+    normalizeTerminalSettings({ oscNotifications: "legacy" as never }).oscNotifications,
+    "always",
+  );
+});
+
 test("normalizeTerminalSettings enables font smoothing by default", () => {
   assert.equal(normalizeTerminalSettings().fontSmoothing, true);
 });
@@ -133,6 +150,22 @@ test("normalizeTerminalSettings shows the host information bar by default", () =
 
 test("normalizeTerminalSettings preserves a hidden host information bar", () => {
   assert.equal(normalizeTerminalSettings({ showHostInfoBar: false }).showHostInfoBar, false);
+});
+
+test("normalizeTerminalSettings defaults host info bar title mode to address", () => {
+  assert.equal(normalizeTerminalSettings().hostInfoBarTitleMode, "address");
+});
+
+test("normalizeTerminalSettings preserves supported host info bar title modes", () => {
+  assert.equal(normalizeTerminalSettings({ hostInfoBarTitleMode: "label" }).hostInfoBarTitleMode, "label");
+  assert.equal(normalizeTerminalSettings({ hostInfoBarTitleMode: "address" }).hostInfoBarTitleMode, "address");
+});
+
+test("normalizeTerminalSettings falls back for unsupported host info bar title modes", () => {
+  assert.equal(
+    normalizeTerminalSettings({ hostInfoBarTitleMode: "both" as never }).hostInfoBarTitleMode,
+    "address",
+  );
 });
 
 test("normalizeTerminalSettings disables hibernate for hidden tabs by default", () => {
@@ -209,4 +242,22 @@ test("normalizeTerminalSettings prefers explicit middle-click behavior over lega
 
   assert.equal(settings.middleClickBehavior, "context-menu");
   assert.equal(settings.middleClickPaste, false);
+});
+
+test("normalizeTerminalSettings migrates legacy autocompleteMaxSuggestions default 8 to 50", () => {
+  assert.equal(
+    normalizeTerminalSettings({ autocompleteMaxSuggestions: 8 }).autocompleteMaxSuggestions,
+    50,
+  );
+});
+
+test("normalizeTerminalSettings preserves intentional custom autocompleteMaxSuggestions", () => {
+  assert.equal(
+    normalizeTerminalSettings({ autocompleteMaxSuggestions: 6 }).autocompleteMaxSuggestions,
+    6,
+  );
+  assert.equal(
+    normalizeTerminalSettings({ autocompleteMaxSuggestions: 20 }).autocompleteMaxSuggestions,
+    20,
+  );
 });

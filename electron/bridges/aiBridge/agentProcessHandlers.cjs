@@ -27,6 +27,16 @@ function registerAgentProcessHandlers(ctx) {
     return { ok: true, count: list.length };
   });
 
+  // App-owned live session state is independent of the optional External MCP
+  // surface. It lets host_open-owned chat scopes observe connection changes
+  // even when the opened terminal never mounts its own AI side panel.
+  ipcMain.handle("netcatty:ai:mcp:update-live-sessions", async (event, { sessions: sessionList }) => {
+    if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
+    return mcpServerBridge.updateLiveSessionMetadata(
+      Array.isArray(sessionList) ? sessionList : [],
+    );
+  });
+
   // Merge (do not replace) session metadata into a chat scope. Used when agents
   // open a host mid-turn so terminal tools can target the new sessionId
   // without waiting for the next full scope push.
@@ -130,6 +140,13 @@ function registerAgentProcessHandlers(ctx) {
     if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
     mcpServerBridge.resolveApprovalFromRenderer(approvalId, approved);
     return { ok: true };
+  });
+
+  // Cancel MCP approval auto-deny after the user starts reviewing the card.
+  ipcMain.handle("netcatty:ai:mcp:approval-cancel-timeout", async (event, { approvalId }) => {
+    if (!validateSenderOrSettings(event)) return { ok: false, error: "Unauthorized IPC sender" };
+    const cancelled = mcpServerBridge.cancelApprovalTimeoutFromRenderer?.(approvalId) === true;
+    return { ok: true, cancelled };
   });
   }
 }

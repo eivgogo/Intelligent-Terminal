@@ -11,6 +11,7 @@ import { getSftpTransferResourceKeys, globalSftpTransferScheduler } from '../sta
 import { hasNewSourceFingerprint } from '../state/sftp/transferProgressMetadata';
 import { STORAGE_KEY_AUTO_UPDATE_ENABLED, STORAGE_KEY_SFTP_TRANSFER_CONCURRENCY } from '../../infrastructure/config/storageKeys';
 import type { TransferTask } from '../../domain/models';
+import { isTerminalBootEpochCurrent } from '../../domain/terminalBootEpoch';
 import {
   canApplyDedicatedResumeProgress,
   createDedicatedResumeChildUpdateBatcher,
@@ -24,8 +25,10 @@ type KeyboardInteractiveRequestLike = {
   scope?: KeyboardInteractiveScope;
   sessionId?: string;
   hostId?: string;
+  requestId?: string;
+  bootEpoch?: number;
 };
-type SessionIdLike = { id: string; hostId?: string; hostname?: string };
+type SessionIdLike = { id: string; hostId?: string; hostname?: string; status?: string };
 type KeyboardInteractiveQueueItem = { requestId: string };
 
 export function shouldQueueKeyboardInteractiveRequest(
@@ -34,7 +37,14 @@ export function shouldQueueKeyboardInteractiveRequest(
 ): boolean {
   if (request.scope !== "terminal") return true;
   if (!request.sessionId) return false;
-  return sessions.some((session) => session.id === request.sessionId);
+  const session = sessions.find((entry) => entry.id === request.sessionId);
+  if (!session) return false;
+  // Status-bar disconnect keeps the tab; do not queue MFA for aborted panes.
+  if (session.status === "disconnected") return false;
+  // After disconnect → reconnect the tab is connecting again; reject MFA from
+  // a superseded SSH start that still shares this sessionId.
+  if (!isTerminalBootEpochCurrent(request.sessionId, request.bootEpoch)) return false;
+  return true;
 }
 
 export function removeKeyboardInteractiveRequest<T extends KeyboardInteractiveQueueItem>(
@@ -203,6 +213,7 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
   }, [dedicatedResumeHosts, enabled, identities, isVaultInitialized, keys, knownHosts, terminalSettings]);
 
   // Show toast notification when update is available (only when auto-download is idle)
+  const toastedUpdateVersionRef = useRef<string | null>(null);
   useEffect(() => {
     if (!enabled) return;
     // Skip "update available" toast if auto-download has already started or completed
@@ -211,6 +222,8 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
     if (localStorageAdapter.readString(STORAGE_KEY_AUTO_UPDATE_ENABLED) !== 'true') return;
     if (updateState.hasUpdate && updateState.latestRelease) {
       const version = updateState.latestRelease.version;
+      if (toastedUpdateVersionRef.current === version) return;
+      toastedUpdateVersionRef.current = version;
       toast.info(
         t('update.available.message', { version }),
         {
@@ -409,6 +422,9 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
               targetType: task.direction === "download" ? "local" : "sftp",
               sourceSftpId: task.direction === "download" ? sftpId : undefined,
               targetSftpId: task.direction === "upload" ? sftpId : undefined,
+              // Keep host-scoped path gates across session reopen (Codex P1).
+              sourceHostId: task.sourceHostId,
+              targetHostId: task.targetHostId,
               totalBytes: task.totalBytes,
               resumable: task.resumable !== false,
               checkpointBytes,
@@ -420,7 +436,30 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
             });
           },
         );
-        if (result?.cancelled || result?.error === "Transfer cancelled") {
+        // Same-id retry stole ownership; wait for the live owner's terminal
+        // status instead of treating this invoke as completed (Codex P2).
+        if (result?.superseded === true) {
+          // Wait for live owner terminal status only (no fixed deadline).
+          for (;;) {
+            const latest = sftpTransferCenterStore.getSnapshot().tasks.find((candidate) => candidate.id === task.id);
+            const status = latest?.status;
+            if (status === "completed" || status === "cancelled" || status === "failed") {
+              if (status === "failed") {
+                throw new Error(latest?.error || "Transfer failed");
+              }
+              if (status === "cancelled") {
+                sftpTransferCenterStore.ingestBackgroundEvent({
+                  type: "cancelled",
+                  transferId: task.id,
+                  endedAt: Date.now(),
+                });
+              }
+              // completed: events already applied; cancelled handled above.
+              break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 200));
+          }
+        } else if (result?.cancelled || result?.error === "Transfer cancelled") {
           sftpTransferCenterStore.ingestBackgroundEvent({ type: "cancelled", transferId: task.id, endedAt: Date.now() });
         } else if (result?.error) {
           throw new Error(result.error);
@@ -493,7 +532,12 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
     if (!bridge?.onKeyboardInteractive) return;
 
     const unsubscribe = bridge.onKeyboardInteractive((request) => {
-      if (!shouldQueueKeyboardInteractiveRequest(request, sessionsRef.current)) return;
+      if (!shouldQueueKeyboardInteractiveRequest(request, sessionsRef.current)) {
+        if (request.scope === "terminal" && request.requestId) {
+          void bridge.respondKeyboardInteractive?.(request.requestId, [], true);
+        }
+        return;
+      }
       console.log('[App] Keyboard-interactive request received:', request);
       // Add to queue instead of replacing - supports multiple concurrent sessions
       setKeyboardInteractiveQueue(prev => [...prev, {
@@ -511,10 +555,23 @@ export function useAppStartupEffects(ctx: StartupEffectsContext) {
     const unsubscribeCancelled = bridge.onKeyboardInteractiveCancelled?.((event) => {
       setKeyboardInteractiveQueue(prev => removeKeyboardInteractiveRequest(prev, event.requestId));
     });
+    const onTerminalDisconnected = (event: Event) => {
+      const sessionId = (event as CustomEvent<{ sessionId?: string }>).detail?.sessionId;
+      if (!sessionId) return;
+      setKeyboardInteractiveQueue((prev) => {
+        const doomed = prev.filter((request) => request.sessionId === sessionId);
+        for (const request of doomed) {
+          void bridge.respondKeyboardInteractive?.(request.requestId, [], true);
+        }
+        return prev.filter((request) => request.sessionId !== sessionId);
+      });
+    };
+    window.addEventListener("netcatty:terminal-session-disconnected", onTerminalDisconnected);
 
     return () => {
       unsubscribe?.();
       unsubscribeCancelled?.();
+      window.removeEventListener("netcatty:terminal-session-disconnected", onTerminalDisconnected);
     };
   }, [enabled, setKeyboardInteractiveQueue]);
 

@@ -1,9 +1,11 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronsLeft, GripVertical, Network, X as XIcon } from 'lucide-react';
+import { isSessionReconnectDisabled } from '../top-tabs/SessionTabContextMenuContent';
 
 import { resolveEffectiveTerminalProtocol } from '../../domain/terminalProtocol';
 import { classifyDistroId } from '../../domain/host';
+import type { HostInfoBarTitleMode } from '../../domain/models';
 import { useNetworkDeviceModeSuggestion } from '../../application/state/useNetworkDeviceModeSuggestion';
 import { isPluginHostProtocol } from '../../domain/pluginConnection';
 import { OSC7_SETUP_TARGETS } from './osc7Setup';
@@ -23,6 +25,7 @@ import {
   DialogTitle,
 } from '../ui/dialog';
 import { TerminalSelectionAIOverlay } from './TerminalSelectionAIOverlay';
+import { getHistoryPreviewSelectionFromRoot } from './runtime/terminalHistoryScrollOverride';
 
 type TerminalViewContext = Record<string, any>;
 type HostLineTimestampToggle = {
@@ -44,6 +47,32 @@ export function shouldShowLineTimestampToolbarToggle(
   onUpdateHost: unknown,
 ): boolean {
   return lineTimestampsAvailable !== false && Boolean(onUpdateHost);
+}
+
+/** Keep the tab/pane; only tear down the live transport. */
+export function shouldEnableStatusBarDisconnect(
+  status: 'connecting' | 'connected' | 'disconnected' | undefined,
+): boolean {
+  return status === 'connected' || status === 'connecting';
+}
+
+export function shouldEnableStatusBarReconnect(
+  status: 'connecting' | 'connected' | 'disconnected' | undefined,
+): boolean {
+  if (!status) return false;
+  return !isSessionReconnectDisabled(status);
+}
+
+export function shouldShowStatusBarConnectionControls({
+  showConnectionControls,
+  hasDisconnectHandler,
+  hasReconnectHandler,
+}: {
+  showConnectionControls?: boolean;
+  hasDisconnectHandler?: boolean;
+  hasReconnectHandler?: boolean;
+}): boolean {
+  return Boolean(showConnectionControls && (hasDisconnectHandler || hasReconnectHandler));
 }
 
 export function shouldEnableYmodemAction({
@@ -167,6 +196,40 @@ export function formatTerminalTitleConnectionAddress(host?: TerminalTitleAddress
   return `${username}${host.hostname}${port}`;
 }
 
+/** Host info bar label: vault name or user@host, based on settings. */
+export function formatTerminalHostInfoBarTitle({
+  serverName,
+  connectionAddress,
+  mode = "address",
+}: {
+  serverName?: string | null;
+  connectionAddress?: string | null;
+  mode?: HostInfoBarTitleMode;
+}): string {
+  const name = (serverName || "").trim();
+  const address = (connectionAddress || "").trim();
+  if (mode === "label") {
+    return name || address;
+  }
+  return address || name;
+}
+
+/** Hover tooltip can show both name and address without consuming bar width. */
+export function formatTerminalHostInfoBarTooltip({
+  serverName,
+  connectionAddress,
+}: {
+  serverName?: string | null;
+  connectionAddress?: string | null;
+}): string {
+  const name = (serverName || "").trim();
+  const address = (connectionAddress || "").trim();
+  if (name && address && name !== address) {
+    return `${name} · ${address}`;
+  }
+  return name || address;
+}
+
 /** Height (px) of the one-line "enable Network Device Mode" tip strip. */
 export const NETWORK_DEVICE_TIP_HEIGHT = 28;
 
@@ -252,7 +315,7 @@ function terminalViewCtxEqual(
 }
 
 function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
-  const { Activity, Button, Clock3, Copy, Maximize2, Radio, SquareArrowOutUpRight, TerminalAutocomplete, TerminalComposeBar, TerminalConnectionDialog, TerminalContextMenu, TerminalSearchBar, Tooltip, TooltipContent, TooltipTrigger, ZmodemOverwriteDialog, ZmodemProgressIndicator, auth, autocompleteAcceptTextRef, autocompleteCloseRef, autocompleteHostOs, autocompleteInputRef, autocompleteKeyEventRef, autocompleteRepositionRef, autocompleteSettings, canUpdateHost, chainProgress, cn, compactToolbar, lineTimestampsAvailable, containerRef, effectiveFontSize, effectiveFontWeight, effectiveTerminalProtocol, effectiveTheme, error, executeSnippet, executeSnippetCommand, handleAddSelectionToAI, handleCancelConnect, handleCloseDisconnectedSession, handleCloseSearch, handleDismissDisconnectedDialog, handleDragEnter, handleDragLeave, handleDragOver, handleDrop, handleFindNext, handleFindPrevious, handleHostKeyAddAndContinue, handleHostKeyClose, handleHostKeyContinue, handleOsc52ReadResponse, handleOsc7SetupConfirm, handleOsc7SetupOpenChange, handleReceiveYmodem, handleRetry, handleSearch, handleSendYmodem, handleTopOverlayMouseDownCapture, hasMouseTracking, host, hotkeyScheme, inWorkspace, isBroadcastEnabled, isCancelling, isComposeBarOpen, isConnectionAwaitingUserInput, isDraggingOver, isFocusMode, isFocusedPane, isLocalConnection, remoteDragDropUsesZmodem, isPluginTerminalProviderAvailable, isSerialConnection, isSearchOpen, isSupportedOs, isSystemSidebarEligible, isVisible, keyBindings, keys, knownCwdRef, needsHostKeyVerification, onCloseSession, onDetach, onDetachPointerDown, onExpandToFocus, onOpenSystem, onRename, onSplitHorizontal, onSplitVertical, onToggleBroadcast, onUpdateHost, osc52ReadPromptVisible, osc7SetupOpen, osc7SetupRunning, passwordPromptActiveRef, pendingHostKeyInfo, progressLogs, progressValue, renderControls, resolvedFontFamily, restoreState, scriptExecutionOverlay, searchMatchCount, searchFocusToken, sessionDisplayName, sessionId, workspaceId, sessionRef, setIsComposeBarOpen, setShowLogs, shouldShowConnectionDialog, showLogs, showSelectionAIAction, isRestoringSelectionRef, snippets, status, sudoHintRef, sudoHintText, passwordPickerState, onPasswordPickerSelect, passwordPickerTitle, passwordPickerEmptyText, t, termRef, terminalContextActions, terminalCwdTracker, terminalPreviewVars, terminalSettings, timeLeft, toast, zmodem } = ctx;
+  const { Activity, Button, Clock3, Copy, Maximize2, Radio, RefreshCcw, SquareArrowOutUpRight, TerminalAutocomplete, TerminalComposeBar, TerminalConnectionDialog, TerminalContextMenu, TerminalSearchBar, Tooltip, TooltipContent, TooltipTrigger, Unplug, ZmodemOverwriteDialog, ZmodemProgressIndicator, auth, autocompleteAcceptTextRef, autocompleteCloseRef, autocompleteHostOs, autocompleteInputRef, autocompleteKeyEventRef, autocompleteRepositionRef, autocompleteSettings, canUpdateHost, chainProgress, cn, compactToolbar, lineTimestampsAvailable, containerRef, effectiveFontSize, effectiveFontWeight, effectiveTerminalProtocol, effectiveTheme, error, executeSnippet, executeSnippetCommand, handleAddSelectionToAI, handleCancelConnect, handleCloseDisconnectedSession, handleCloseSearch, handleDisconnect, handleDismissDisconnectedDialog, handleDragEnter, handleDragLeave, handleDragOver, handleDrop, handleFindNext, handleFindPrevious, handleHostKeyAddAndContinue, handleHostKeyClose, handleHostKeyContinue, handleOsc52ReadResponse, handleOsc7SetupConfirm, handleOsc7SetupOpenChange, handleReceiveYmodem, handleRetry, handleSearch, handleSendYmodem, handleTopOverlayMouseDownCapture, hasMouseTracking, host, hotkeyScheme, inWorkspace, isBroadcastEnabled, isCancelling, isComposeBarOpen, isConnectionAwaitingUserInput, isDraggingOver, isFocusMode, isFocusedPane, isLocalConnection, remoteDragDropUsesZmodem, isPluginTerminalProviderAvailable, isSerialConnection, isSearchOpen, isSupportedOs, isSystemSidebarEligible, isVisible, keyBindings, keys, knownCwdRef, needsHostKeyVerification, onCloseSession, onDetach, onDetachPointerDown, onExpandToFocus, onOpenSystem, onRename, onSplitHorizontal, onSplitVertical, onToggleBroadcast, onUpdateHost, osc52ReadPromptVisible, osc7SetupOpen, osc7SetupRunning, passwordPromptActiveRef, pendingHostKeyInfo, progressLogs, progressValue, renderControls, resolvedFontFamily, restoreState, scriptExecutionOverlay, searchMatchCount, searchFocusToken, sessionDisplayName, sessionId, workspaceId, sessionRef, setIsComposeBarOpen, setShowLogs, shouldShowConnectionDialog, showConnectionControls, showLogs, showSelectionAIAction, isRestoringSelectionRef, snippets, status, sudoHintRef, sudoHintText, passwordPickerState, onPasswordPickerSelect, passwordPickerTitle, passwordPickerEmptyText, t, termRef, terminalContextActions, terminalCwdTracker, terminalPreviewVars, terminalSettings, timeLeft, toast, zmodem } = ctx;
   // Context menu only needs a snapshot at open; avoid selection state lifting into Terminal.
   const [contextMenuHasSelection, setContextMenuHasSelection] = useState(false);
   const isNetworkDevice = host.deviceType === 'network'
@@ -365,6 +428,18 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
     });
   }, [host.id, onUpdateHost, showLineTimestampGutter]);
   const titleConnectionAddress = formatTerminalTitleConnectionAddress(host);
+  // Prefer vault host.label over sessionDisplayName so dynamic tab titles
+  // (cwd / coding-cli) do not replace the stable server name in this bar.
+  const hostInfoBarServerName = host.label || sessionDisplayName;
+  const hostInfoBarTitle = formatTerminalHostInfoBarTitle({
+    serverName: hostInfoBarServerName,
+    connectionAddress: titleConnectionAddress,
+    mode: terminalSettings?.hostInfoBarTitleMode ?? "address",
+  });
+  const hostInfoBarTooltip = formatTerminalHostInfoBarTooltip({
+    serverName: hostInfoBarServerName,
+    connectionAddress: titleConnectionAddress,
+  });
   const hasBlockingReconnectOverlay = Boolean(osc52ReadPromptVisible || osc7SetupOpen || scriptExecutionOverlay || zmodem.active || zmodem.overwriteRequest);
   const showEnterReconnectHint = shouldReconnectTerminalOnEnterKey({
     key: "Enter",
@@ -418,6 +493,7 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
       keyBindings={keyBindings}
       rightClickBehavior={terminalSettings?.rightClickBehavior}
       isAlternateScreen={hasMouseTracking}
+      getMouseTrackingMode={() => termRef.current?.modes.mouseTrackingMode}
       showContextMenuOverFullscreenApps={terminalSettings?.showContextMenuOverFullscreenApps}
       onCopy={terminalContextActions.onCopy}
       onPaste={terminalContextActions.onPaste}
@@ -439,7 +515,11 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
     >
       <div
         onContextMenu={() => {
-          setContextMenuHasSelection(Boolean(termRef.current?.hasSelection()));
+          const term = termRef.current;
+          setContextMenuHasSelection(Boolean(
+            term?.hasSelection()
+            || getHistoryPreviewSelectionFromRoot(term?.element?.parentElement),
+          ));
         }}
         className={cn(
           "relative h-full w-full flex min-h-0 overflow-hidden",
@@ -530,8 +610,8 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
                     data-terminal-detach-drag-handle={inWorkspace && onDetachPointerDown ? "true" : undefined}
                     onPointerDown={onDetachPointerDown}
                   >
-                    <span className="whitespace-nowrap truncate min-w-0 max-w-[18rem]" title={titleConnectionAddress || sessionDisplayName || host.label}>
-                      {titleConnectionAddress || sessionDisplayName || host.label}
+                    <span className="whitespace-nowrap truncate min-w-0 max-w-[18rem]" title={hostInfoBarTooltip || hostInfoBarTitle}>
+                      {hostInfoBarTitle}
                     </span>
                   </div>}
                   {host.protocol !== "local" && host.hostname && host.hostname !== "localhost" && (
@@ -598,6 +678,60 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
                       </TooltipTrigger>
                       <TooltipContent side="bottom">{t("terminal.layer.system")}</TooltipContent>
                     </Tooltip>
+                  )}
+                  {shouldShowStatusBarConnectionControls({
+                    showConnectionControls,
+                    hasDisconnectHandler: Boolean(handleDisconnect),
+                    hasReconnectHandler: Boolean(handleRetry),
+                  }) && (
+                    <>
+                      {handleDisconnect && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              className={cn(
+                                "ml-0.5 p-0.5 rounded transition-colors flex-shrink-0",
+                                "hover:bg-[color:var(--terminal-toolbar-btn-hover)]",
+                                shouldEnableStatusBarDisconnect(status)
+                                  ? "opacity-60 hover:opacity-100"
+                                  : "opacity-30 cursor-not-allowed",
+                              )}
+                              onPointerDown={(event) => event.stopPropagation()}
+                              onClick={handleDisconnect}
+                              disabled={!shouldEnableStatusBarDisconnect(status)}
+                              aria-label={t("terminal.statusbar.disconnect.label")}
+                            >
+                              <Unplug size={10} />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">{t("terminal.statusbar.disconnect.tooltip")}</TooltipContent>
+                        </Tooltip>
+                      )}
+                      {handleRetry && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              className={cn(
+                                "ml-0.5 p-0.5 rounded transition-colors flex-shrink-0",
+                                "hover:bg-[color:var(--terminal-toolbar-btn-hover)]",
+                                shouldEnableStatusBarReconnect(status)
+                                  ? "opacity-60 hover:opacity-100"
+                                  : "opacity-30 cursor-not-allowed",
+                              )}
+                              onPointerDown={(event) => event.stopPropagation()}
+                              onClick={handleRetry}
+                              disabled={!shouldEnableStatusBarReconnect(status)}
+                              aria-label={t("terminal.statusbar.reconnect.label")}
+                            >
+                              <RefreshCcw size={10} />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom">{t("terminal.statusbar.reconnect.tooltip")}</TooltipContent>
+                        </Tooltip>
+                      )}
+                    </>
                   )}
                 </div>
                 {showHostInfoBar && !compactToolbar && (
@@ -864,11 +998,13 @@ function TerminalViewInner({ ctx }: { ctx: TerminalViewContext }) {
             termRef={termRef}
             sessionId={sessionId}
             hostId={host.id}
+            hostGroup={host.group}
             hostOs={autocompleteHostOs}
             settings={autocompleteSettings}
             protocol={effectiveTerminalProtocol ?? resolveEffectiveTerminalProtocol(host)}
             workspaceId={workspaceId}
             status={status}
+            isVisible={isVisible}
             getCwd={() => terminalCwdTracker.getRendererCwd() ?? knownCwdRef.current}
             onAcceptText={(text) => autocompleteAcceptTextRef.current?.(text)}
             snippets={snippets}

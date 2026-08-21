@@ -54,6 +54,9 @@ module.exports = {
     files: [
         'dist/**/*',
         'electron/**/*',
+        // The Windows Hello helper is shipped once through win.extraResources.
+        // Exclude local per-arch build output from app.asar on every platform.
+        '!electron/bridges/windowsHelloHelper/build/**/*',
         // Runtime smoke fixtures are built test packages, not host resources.
         // Keep them out of production ASARs so no example plugin can be
         // mistaken for an installed or host-trusted package.
@@ -94,6 +97,23 @@ module.exports = {
         '!node_modules/monaco-editor/**/*',
         '!node_modules/react/**/*',
         '!node_modules/react-dom/**/*',
+        '!node_modules/ai/**/*',
+        '!node_modules/@ai-sdk/**/*',
+        '!node_modules/@mdxeditor/**/*',
+        '!node_modules/streamdown/**/*',
+        '!node_modules/@streamdown/**/*',
+        '!node_modules/@tanstack/react-virtual/**/*',
+        '!node_modules/pinyin-pro/**/*',
+        '!node_modules/re2js/**/*',
+        '!node_modules/@eslint-community/regexpp/**/*',
+        '!node_modules/clsx/**/*',
+        '!node_modules/tailwind-merge/**/*',
+        '!node_modules/use-stick-to-bottom/**/*',
+        '!node_modules/lexical/**/*',
+        '!node_modules/@lexical/**/*',
+        '!node_modules/@codemirror/**/*',
+        '!node_modules/shiki/**/*',
+        '!node_modules/@shiki/**/*',
         // Heavy cloud completion specs are intentionally not bundled. The main
         // process filters the same prefixes so dev and packaged builds behave
         // consistently.
@@ -169,6 +189,11 @@ module.exports = {
         'skills/**/*'
     ],
     mac: {
+        // app-builder's PNG-to-ICNS conversion can corrupt the 16px/32px 1x
+        // representations even though the source PNG is valid RGBA. Use the
+        // iconutil-generated bundle instead so Finder and app switchers do not
+        // render those representations as colored noise.
+        icon: 'build/icon.icns',
         target: [
             {
                 target: 'dmg',
@@ -214,20 +239,23 @@ module.exports = {
     },
     win: {
         icon: 'public/icon-win.png',
-        target: [
+        // Do not hard-code arch here. pack:win-x64 / pack:win pass --x64/--arm64,
+        // and electron-builder unions config arch with the CLI set. Hard-coding
+        // ['x64', 'arm64'] made the official x64 CI job also emit win-arm64 and
+        // a universal win.exe whose 32-bit NSIS stub can mis-detect on ARM
+        // Windows, install to Program Files (x86), and leave Netcatty.exe
+        // missing (#2570). Keep official releases on pack:win-x64 until win32
+        // arm64 bundled mosh/et + native rebuilds are ready.
+        target: ['nsis', 'portable', 'zip'],
+        extraResources: [
+            ...moshExtraResources('win32'),
+            ...etExtraResources('win32'),
             {
-                target: 'nsis',
-                arch: ['x64', 'arm64']
-            },
-            {
-                target: 'portable',
-                arch: ['x64', 'arm64']
-            },
-            {
-                target: 'zip'
+                from: 'electron/bridges/windowsHelloHelper/build/${arch}/NetcattyWindowsHello.exe',
+                to: 'windowsHello/NetcattyWindowsHello.exe',
+                filter: ['**/*']
             }
-        ],
-        extraResources: [...moshExtraResources('win32'), ...etExtraResources('win32')]
+        ]
     },
     portable: {
         artifactName: '${productName}-${version}-portable-${os}-${arch}.${ext}',

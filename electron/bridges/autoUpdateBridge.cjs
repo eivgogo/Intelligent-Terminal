@@ -5,9 +5,10 @@
  * install-on-quit. Designed around a "prompt" model: the renderer asks to
  * check, then explicitly triggers download and install.
  *
- * Platforms where auto-update is NOT supported (Linux deb/rpm/snap) get a
- * graceful { available: false, error } response so the renderer can fall back
- * to a manual "open GitHub releases" link.
+ * Linux packages use electron-updater's package-manager path when the
+ * electron-builder package-type marker is present. Unmarked Linux builds
+ * (including snap and development runs) get a graceful fallback so the
+ * renderer can offer a manual "open GitHub releases" link.
  */
 
 let _deps = null;
@@ -21,10 +22,13 @@ function readAutoUpdatePreference() {
   try {
     const { app } = _deps?.electronModule || {};
     if (!app) return false;
-    const path = require('path');
-    const fs = require('fs');
-    const prefPath = path.join(app.getPath('userData'), 'auto-update-pref.json');
-    const data = JSON.parse(fs.readFileSync(prefPath, 'utf8'));
+    const path = require("path");
+    const fs = require("fs");
+    const prefPath = path.join(
+      app.getPath("userData"),
+      "auto-update-pref.json",
+    );
+    const data = JSON.parse(fs.readFileSync(prefPath, "utf8"));
     return data.enabled === true;
   } catch {
     return false; // default to disabled
@@ -38,29 +42,53 @@ function writeAutoUpdatePreference(enabled) {
   try {
     const { app } = _deps?.electronModule || {};
     if (!app) return;
-    const path = require('path');
-    const fs = require('fs');
-    const prefPath = path.join(app.getPath('userData'), 'auto-update-pref.json');
-    fs.writeFileSync(prefPath, JSON.stringify({ enabled }), 'utf8');
+    const path = require("path");
+    const fs = require("fs");
+    const prefPath = path.join(
+      app.getPath("userData"),
+      "auto-update-pref.json",
+    );
+    fs.writeFileSync(prefPath, JSON.stringify({ enabled }), "utf8");
   } catch (err) {
-    console.warn('[AutoUpdate] Failed to write preference:', err?.message || err);
+    console.warn(
+      "[AutoUpdate] Failed to write preference:",
+      err?.message || err,
+    );
+  }
+}
+
+const SUPPORTED_LINUX_PACKAGE_TYPES = new Set(["deb", "rpm", "pacman"]);
+
+/**
+ * Identify the Linux package format written by electron-builder into the
+ * packaged resources directory. AppImage does not have this marker; its
+ * runtime exposes the APPIMAGE environment variable instead.
+ */
+function getLinuxPackageType() {
+  if (process.env.APPIMAGE) return "AppImage";
+  if (typeof process.resourcesPath !== "string") return null;
+
+  try {
+    const fs = require("fs");
+    const path = require("path");
+    const packageType = fs
+      .readFileSync(path.join(process.resourcesPath, "package-type"), "utf8")
+      .trim();
+    return SUPPORTED_LINUX_PACKAGE_TYPES.has(packageType) ? packageType : null;
+  } catch {
+    return null;
   }
 }
 
 /**
  * Returns true when the current packaging format supports electron-updater
- * (macOS zip/dmg, Windows NSIS, Linux AppImage).
+ * (macOS zip/dmg, Windows NSIS, Linux AppImage/deb/rpm/pacman).
  */
 function isAutoUpdateSupported() {
   if (process.platform === "darwin" || process.platform === "win32") {
     return true;
   }
-  // Linux: only AppImage supports in-place update.
-  // The APPIMAGE env variable is set by the AppImage runtime.
-  if (process.platform === "linux" && process.env.APPIMAGE) {
-    return true;
-  }
-  return false;
+  return process.platform === "linux" && getLinuxPackageType() !== null;
 }
 
 /** Lazily resolved autoUpdater — avoids importing electron-updater in
@@ -73,6 +101,9 @@ let _listenersRegistered = false;
 /** Track whether a download is in progress to distinguish download errors from check errors */
 let _isDownloading = false;
 
+/** Track whether quitAndInstall has entered the package installation phase */
+let _isInstalling = false;
+
 /** Track whether a checkForUpdates call is in flight (set before call, cleared on result event) */
 let _isChecking = false;
 
@@ -81,7 +112,13 @@ let _isChecking = false;
  * without waiting for the next IPC event.
  * @type {{ status: 'idle' | 'downloading' | 'ready' | 'error', percent: number, error: string | null, version: string | null, isChecking: boolean }}
  */
-let _lastStatus = { status: 'idle', percent: 0, error: null, version: null, isChecking: false };
+let _lastStatus = {
+  status: "idle",
+  percent: 0,
+  error: null,
+  version: null,
+  isChecking: false,
+};
 function getAutoUpdater() {
   if (_autoUpdater) return _autoUpdater;
   try {
@@ -93,7 +130,10 @@ function getAutoUpdater() {
     _autoUpdater = autoUpdater;
     return autoUpdater;
   } catch (err) {
-    console.error("[AutoUpdate] Failed to load electron-updater:", err?.message || err);
+    console.error(
+      "[AutoUpdate] Failed to load electron-updater:",
+      err?.message || err,
+    );
     return null;
   }
 }
@@ -113,7 +153,13 @@ function setupGlobalListeners() {
     _isChecking = false;
     // Reset stale status so late-opening windows don't hydrate from a
     // previous 'error' or 'ready' snapshot after a "no update" check.
-    _lastStatus = { status: 'idle', percent: 0, error: null, version: null, isChecking: false };
+    _lastStatus = {
+      status: "idle",
+      percent: 0,
+      error: null,
+      version: null,
+      isChecking: false,
+    };
     broadcastToAllWindows("netcatty:update:update-not-available", {});
   });
 
@@ -124,10 +170,17 @@ function setupGlobalListeners() {
     // Use 'available' so late-opening windows can still hydrate the version.
     const willDownload = updater.autoDownload !== false;
     _isDownloading = willDownload;
-    _lastStatus = { status: willDownload ? 'downloading' : 'available', percent: 0, error: null, version: info.version || null, isChecking: false };
+    _lastStatus = {
+      status: willDownload ? "downloading" : "available",
+      percent: 0,
+      error: null,
+      version: info.version || null,
+      isChecking: false,
+    };
     broadcastToAllWindows("netcatty:update:update-available", {
       version: info.version || "",
-      releaseNotes: typeof info.releaseNotes === "string" ? info.releaseNotes : "",
+      releaseNotes:
+        typeof info.releaseNotes === "string" ? info.releaseNotes : "",
       releaseDate: info.releaseDate || null,
     });
   });
@@ -144,7 +197,7 @@ function setupGlobalListeners() {
 
   updater.on("update-downloaded", () => {
     _isDownloading = false;
-    _lastStatus = { ..._lastStatus, status: 'ready', percent: 100 };
+    _lastStatus = { ..._lastStatus, status: "ready", percent: 100 };
     broadcastToAllWindows("netcatty:update:downloaded");
   });
 
@@ -152,14 +205,25 @@ function setupGlobalListeners() {
     _isChecking = false;
     // Only broadcast download-phase errors; check-phase errors (e.g. network failures
     // during checkForUpdates) are not download failures and must not set autoDownloadStatus.
-    if (!_isDownloading) {
+    // Install errors are also broadcast: Linux package managers report a cancelled
+    // elevation prompt or a failed command after update-downloaded has already
+    // cleared _isDownloading.
+    if (!_isDownloading && !_isInstalling) {
       _lastStatus = { ..._lastStatus, isChecking: false };
-      console.warn("[AutoUpdate] Check-phase error (not broadcast to renderer):", err?.message || err);
+      console.warn(
+        "[AutoUpdate] Check-phase error (not broadcast to renderer):",
+        err?.message || err,
+      );
       return;
     }
     _isDownloading = false;
     const errorMsg = err?.message || "Unknown update error";
-    _lastStatus = { ..._lastStatus, status: 'error', error: errorMsg };
+    if (_isInstalling) {
+      _isInstalling = false;
+      cancelQuittingForUpdateWatchdog();
+      setQuittingForUpdate(false);
+    }
+    _lastStatus = { ..._lastStatus, status: "error", error: errorMsg };
     broadcastToAllWindows("netcatty:update:error", {
       error: errorMsg,
     });
@@ -170,7 +234,8 @@ function setupGlobalListeners() {
 
 /**
  * Trigger an automatic update check after a delay.
- * No-op on platforms that don't support auto-update (Linux deb/rpm/snap).
+ * No-op on platforms that don't support auto-update (for example Linux snap
+ * or an unmarked development build).
  * Called from main process after the main window is created.
  *
  * @param {number} delayMs - Milliseconds to wait before checking (default: 5000)
@@ -179,7 +244,9 @@ let _autoCheckTimer = null;
 
 function startAutoCheck(delayMs = 5000) {
   if (!isAutoUpdateSupported()) {
-    console.log("[AutoUpdate] Platform does not support auto-update, skipping auto-check");
+    console.log(
+      "[AutoUpdate] Platform does not support auto-update, skipping auto-check",
+    );
     return;
   }
   // Cancel any existing timer to avoid duplicate concurrent checks
@@ -247,11 +314,12 @@ function setQuittingForUpdate(enabled) {
 function getDirtyEditorWebContentsList() {
   try {
     const windowManager = require("./windowManager.cjs");
-    const windows = typeof windowManager.getDirtyEditorWindows === "function"
-      ? windowManager.getDirtyEditorWindows()
-      : typeof windowManager.getMainWindows === "function"
-        ? windowManager.getMainWindows()
-        : [windowManager.getMainWindow?.()].filter(Boolean);
+    const windows =
+      typeof windowManager.getDirtyEditorWindows === "function"
+        ? windowManager.getDirtyEditorWindows()
+        : typeof windowManager.getMainWindows === "function"
+          ? windowManager.getMainWindows()
+          : [windowManager.getMainWindow?.()].filter(Boolean);
     return windows
       .filter((win) => win && !win.isDestroyed?.())
       .map((win) => win.webContents)
@@ -291,9 +359,14 @@ const INSTALL_DIRTY_CHECK_TIMEOUT_MS = 5000;
 function queryDirtyEditorsSafe(webContents, ipcMain) {
   try {
     const { queryDirtyEditors } = require("./dirtyEditorGuard.cjs");
-    return queryDirtyEditors(webContents, INSTALL_DIRTY_CHECK_TIMEOUT_MS, { ipcMain });
+    return queryDirtyEditors(webContents, INSTALL_DIRTY_CHECK_TIMEOUT_MS, {
+      ipcMain,
+    });
   } catch (err) {
-    console.warn("[AutoUpdate] dirty-editor guard unavailable:", err?.message || err);
+    console.warn(
+      "[AutoUpdate] dirty-editor guard unavailable:",
+      err?.message || err,
+    );
     return Promise.resolve(false);
   }
 }
@@ -318,14 +391,24 @@ function queryDirtyEditorsSafe(webContents, ipcMain) {
 let _quittingForUpdateWatchdog = null;
 const QUITTING_FOR_UPDATE_WATCHDOG_MS = 60000;
 
+function cancelQuittingForUpdateWatchdog() {
+  if (_quittingForUpdateWatchdog) {
+    clearTimeout(_quittingForUpdateWatchdog);
+    _quittingForUpdateWatchdog = null;
+  }
+}
+
 function scheduleQuittingForUpdateWatchdog() {
   if (_quittingForUpdateWatchdog) {
     clearTimeout(_quittingForUpdateWatchdog);
   }
   _quittingForUpdateWatchdog = setTimeout(() => {
     _quittingForUpdateWatchdog = null;
+    _isInstalling = false;
     // Still alive after the grace period — the install did not quit the app.
-    console.warn("[AutoUpdate] App still running after quitAndInstall; clearing quitting-for-update state");
+    console.warn(
+      "[AutoUpdate] App still running after quitAndInstall; clearing quitting-for-update state",
+    );
     setQuittingForUpdate(false);
   }, QUITTING_FOR_UPDATE_WATCHDOG_MS);
   // Don't let the watchdog keep the event loop (and thus the process) alive —
@@ -333,6 +416,18 @@ function scheduleQuittingForUpdateWatchdog() {
   if (typeof _quittingForUpdateWatchdog.unref === "function") {
     _quittingForUpdateWatchdog.unref();
   }
+}
+
+/**
+ * Cancel an install after the main quit guard finds unsaved editor changes.
+ * The main process owns the dirty-editor decision, but the install lifecycle
+ * state lives here and must be released together with the window-manager flag.
+ */
+function cancelPendingInstall() {
+  if (!_isInstalling) return;
+  _isInstalling = false;
+  cancelQuittingForUpdateWatchdog();
+  setQuittingForUpdate(false);
 }
 
 function init(deps) {
@@ -362,7 +457,10 @@ function broadcastToAllWindows(channel, payload) {
       }
     }
   } catch (err) {
-    console.warn("[AutoUpdate] broadcastToAllWindows failed:", err?.message || err);
+    console.warn(
+      "[AutoUpdate] broadcastToAllWindows failed:",
+      err?.message || err,
+    );
   }
 }
 
@@ -402,10 +500,20 @@ function registerHandlers(ipcMain) {
     // can cause electron-updater to error, which corrupts the download state
     // and forces the user to download manually (GitHub issue #522).
     if (_isDownloading) {
-      return { available: true, supported: true, downloading: true, version: _lastStatus.version };
+      return {
+        available: true,
+        supported: true,
+        downloading: true,
+        version: _lastStatus.version,
+      };
     }
-    if (_lastStatus.status === 'ready') {
-      return { available: true, supported: true, ready: true, version: _lastStatus.version };
+    if (_lastStatus.status === "ready") {
+      return {
+        available: true,
+        supported: true,
+        ready: true,
+        version: _lastStatus.version,
+      };
     }
 
     try {
@@ -423,7 +531,11 @@ function registerHandlers(ipcMain) {
       // avoiding false positives for pre-release or nightly builds.
       const { app } = _deps?.electronModule || {};
       const currentVersion = app?.getVersion?.() || "0.0.0";
-      const isNewer = currentVersion.localeCompare(version, undefined, { numeric: true, sensitivity: 'base' }) < 0;
+      const isNewer =
+        currentVersion.localeCompare(version, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        }) < 0;
       if (!isNewer) {
         return { available: false, supported: true };
       }
@@ -458,12 +570,22 @@ function registerHandlers(ipcMain) {
     }
     try {
       _isDownloading = true;
-      _lastStatus = { ..._lastStatus, status: 'downloading', percent: 0, error: null };
+      _lastStatus = {
+        ..._lastStatus,
+        status: "downloading",
+        percent: 0,
+        error: null,
+      };
       await updater.downloadUpdate();
       return { success: true };
     } catch (err) {
       _isDownloading = false;
-      _lastStatus = { ..._lastStatus, status: 'error', error: err?.message || "Download failed", percent: 0 };
+      _lastStatus = {
+        ..._lastStatus,
+        status: "error",
+        error: err?.message || "Download failed",
+        percent: 0,
+      };
       // Don't broadcast here — the global updater "error" listener already handles it
       console.error("[AutoUpdate] Download failed:", err?.message || err);
       return { success: false, error: err?.message || "Download failed" };
@@ -479,6 +601,7 @@ function registerHandlers(ipcMain) {
   ipcMain.handle("netcatty:update:install", async () => {
     const updater = getAutoUpdater();
     if (!updater) return;
+    if (_isInstalling) return;
 
     // Check for unsaved editors BEFORE committing to a quit (#1215 review).
     //
@@ -498,7 +621,9 @@ function registerHandlers(ipcMain) {
     const editorWebContents = getDirtyEditorWebContentsList();
     if (editorWebContents.length > 0) {
       const dirtyResults = await Promise.all(
-        editorWebContents.map((webContents) => queryDirtyEditorsSafe(webContents, ipcMain)),
+        editorWebContents.map((webContents) =>
+          queryDirtyEditorsSafe(webContents, ipcMain),
+        ),
       );
       if (dirtyResults.some(Boolean)) {
         // Broadcast so the notice reaches whichever window the user clicked
@@ -508,6 +633,10 @@ function registerHandlers(ipcMain) {
       }
     }
 
+    // Another request may have completed its dirty-editor check while this
+    // request was waiting. Only one request may commit the app to a quit.
+    if (_isInstalling) return;
+
     // Commit the app to a real quit BEFORE quitAndInstall fires app.quit().
     // Without this the in-place install silently fails (#1215): the main-window
     // close handler hides the window when isQuitting is false, so the process
@@ -515,6 +644,7 @@ function registerHandlers(ipcMain) {
     // PID to die before swapping the bundle — ends up in launchd "pending
     // spawn" limbo and never installs. setQuittingForUpdate(true) sets
     // isQuitting so the window actually closes.
+    _isInstalling = true;
     setQuittingForUpdate(true);
 
     // On macOS, the app stays alive after all windows are closed (dock / global
@@ -535,9 +665,16 @@ function registerHandlers(ipcMain) {
       // the quitting-for-update flags so later closes/quits behave normally
       // instead of permanently bypassing the dirty-editor guard (#1215 review).
       console.error("[AutoUpdate] quitAndInstall failed:", err?.message || err);
+      _isInstalling = false;
+      cancelQuittingForUpdateWatchdog();
       setQuittingForUpdate(false);
       return;
     }
+
+    // Linux package-manager failures emit the updater error synchronously from
+    // quitAndInstall(). The error listener clears _isInstalling in that case,
+    // so do not install a watchdog after the failure has already been handled.
+    if (!_isInstalling) return;
 
     // quitAndInstall can also fail to quit asynchronously (e.g. Squirrel.Mac's
     // follow-up check errors, or a stale/missing downloaded file) — it returns
@@ -578,4 +715,10 @@ function registerHandlers(ipcMain) {
   console.log("[AutoUpdate] Handlers registered");
 }
 
-module.exports = { init, registerHandlers, isAutoUpdateSupported, startAutoCheck };
+module.exports = {
+  init,
+  registerHandlers,
+  isAutoUpdateSupported,
+  startAutoCheck,
+  cancelPendingInstall,
+};

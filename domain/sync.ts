@@ -11,12 +11,29 @@ import type {
   ConvergentSyncEnvelopeV2,
   ConvergentSyncStateV2,
 } from './convergentSync';
+import {
+  BUILTIN_CLOUD_PROVIDERS,
+  isBuiltinCloudProvider,
+  providerConnectionStorageKey,
+  type BuiltinCloudProvider,
+  type CloudProviderId,
+} from './cloudProviderIds';
 
 export type {
   ConvergentFieldConflict,
   ConvergentSyncEnvelopeV2,
   ConvergentSyncStateV2,
 } from './convergentSync';
+
+export {
+  BUILTIN_CLOUD_PROVIDERS,
+  isBuiltinCloudProvider,
+  providerConnectionStorageKey,
+  type BuiltinCloudProvider,
+};
+
+/** Built-in short IDs or namespaced plugin contribution IDs. */
+export type CloudProvider = CloudProviderId;
 
 // ============================================================================
 // Security State Machine
@@ -53,11 +70,6 @@ export type ConflictResolution =
 // ============================================================================
 // Cloud Provider Types
 // ============================================================================
-
-/**
- * Supported cloud storage providers
- */
-export type CloudProvider = 'github' | 'google' | 'onedrive' | 'webdav' | 's3';
 
 export type WebDAVAuthType = 'basic' | 'digest' | 'token';
 
@@ -148,21 +160,74 @@ export interface ProviderAccount {
 /**
  * Cloud provider connection state
  */
+/**
+ * Opaque host-owned sync credential reference (SecretRef / CredentialRef shape).
+ * Never stores plaintext secrets — only the reference the plugin connect path needs.
+ * Secret leases are one-shot and must not be persisted for reconnect.
+ */
+export interface PluginSyncCredentialRef {
+  kind: 'secret' | 'credential';
+  id: string;
+  key?: string;
+}
+
+/** Reasonable upper bounds for durable opaque ref strings persisted at rest. */
+const MAX_PLUGIN_SYNC_CREDENTIAL_ID_CHARS = 512;
+const MAX_PLUGIN_SYNC_CREDENTIAL_KEY_CHARS = 256;
+
+/**
+ * Normalize a value into a durable PluginSyncCredentialRef for reconnect
+ * persistence. Rejects arrays, leases, and oversized / malformed shapes.
+ */
+export function normalizeDurablePluginSyncCredentialRef(
+  value: unknown,
+): PluginSyncCredentialRef | undefined {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const kind = record.kind;
+  const id = record.id;
+  if (kind !== 'secret' && kind !== 'credential') return undefined;
+  if (typeof id !== 'string' || id.length < 1 || id.length > MAX_PLUGIN_SYNC_CREDENTIAL_ID_CHARS) {
+    return undefined;
+  }
+  if (!Object.prototype.hasOwnProperty.call(record, 'key') || record.key === undefined) {
+    return { kind, id };
+  }
+  const key = record.key;
+  if (typeof key !== 'string' || key.length < 1 || key.length > MAX_PLUGIN_SYNC_CREDENTIAL_KEY_CHARS) {
+    return undefined;
+  }
+  return { kind, id, key };
+}
+
 export interface ProviderConnection {
   provider: CloudProvider;
   status: ProviderConnectionStatus;
   account?: ProviderAccount;
   tokens?: OAuthTokens;
   config?: WebDAVConfig | S3Config;
+  /** Plugin sync providers: persisted SyncConnectPayload.credential for reconnect. */
+  credential?: PluginSyncCredentialRef;
   lastSync?: number;        // Unix timestamp
   lastSyncVersion?: number;
   resourceId?: string;      // gistId / fileId / itemId
   error?: string;
 }
 
-const hasProviderConnectionData = (
-  connection: Pick<ProviderConnection, 'tokens' | 'config'>,
-): boolean => Boolean(connection.tokens || connection.config);
+/**
+ * Whether a connection still has usable credentials/config to retry.
+ * Plugin configs may be valid falsy JSON scalars (`false`, `0`, `""`) or even
+ * JSON `null` when a schema uses `type: "null"`. Presence is property
+ * existence for `config`; do not use truthiness (`||` / `Boolean`).
+ */
+export const hasProviderConnectionData = (
+  connection: Pick<ProviderConnection, 'tokens' | 'config' | 'credential'>,
+): boolean =>
+  connection.tokens != null
+  || Object.prototype.hasOwnProperty.call(connection, 'config')
+  || connection.credential != null;
 
 export const isProviderReadyForSync = (
   connection: Pick<ProviderConnection, 'status' | 'tokens' | 'config'>,
@@ -257,6 +322,7 @@ export interface SyncPayload {
     sftpAutoSync?: boolean;
     sftpShowHiddenFiles?: boolean;
     sftpUseCompressedUpload?: boolean;
+    sftpSkipUnchanged?: boolean;
     sftpAutoOpenSidebar?: boolean;
     sftpFollowTerminalCwd?: boolean;
     sftpDefaultViewMode?: 'list' | 'tree';
@@ -271,6 +337,8 @@ export interface SyncPayload {
     showSftpTab?: boolean;
     // Shortcuts: Cmd/Ctrl+[1...9] and Ctrl+Tab skip pinned Vault/SFTP tabs
     shellOnlyTabNumberShortcuts?: boolean;
+    // Shortcuts: show 1...9 badges on tabs matching number switch shortcuts
+    showTabNumberBadges?: boolean;
     // Shortcuts: disable terminal font zoom shortcuts
     disableTerminalFontZoom?: boolean;
     // Terminal/editor tabs: show left host list sidebar
@@ -293,11 +361,18 @@ export interface SyncPayload {
       maxIterations?: number;
       agentModelMap?: Record<string, string>;
       agentProviderMap?: Record<string, string>;
+      agentThinkingMap?: Record<string, string>;
       webSearchConfig?: Record<string, unknown> | null;
       quickMessages?: Array<Record<string, unknown>>;
       showTerminalSelectionAction?: boolean;
     };
   };
+
+  /**
+   * Encrypted-sidecar envelope for plugin user data that must survive missing
+   * plugins (sync:true settings, account/CRDT baselines). Secrets never appear here.
+   */
+  pluginSidecars?: import('./pluginSyncSidecar').PluginSyncSidecarBundle;
 
   // Sync metadata
   syncedAt: number;         // When this payload was created
@@ -618,12 +693,22 @@ export const SYNC_STORAGE_KEYS = {
   DEVICE_ID: 'netcatty_device_id_v1',
   DEVICE_NAME: 'netcatty_device_name_v1',
   SYNC_CONFIG: 'netcatty_sync_config_v2',
+  /** Auto-sync prefs (autoSync / interval / syncStrategy); kept separate from version stamps. */
+  SYNC_PREFERENCES: 'netcatty_sync_preferences_v1',
   PROVIDER_GITHUB: 'netcatty_provider_github_v1',
   PROVIDER_GOOGLE: 'netcatty_provider_google_v1',
   PROVIDER_ONEDRIVE: 'netcatty_provider_onedrive_v1',
   PROVIDER_WEBDAV: 'netcatty_provider_webdav_v1',
   PROVIDER_S3: 'netcatty_provider_s3_v1',
   PROVIDER_SMB: 'netcatty_provider_smb_v1',
+  /** Registry of connected namespaced plugin sync provider IDs. */
+  PLUGIN_CLOUD_PROVIDERS: 'netcatty_plugin_cloud_providers_v1',
+  /** Contribution-available plugin sync provider IDs (live catalog membership). */
+  AVAILABLE_PLUGIN_SYNC_PROVIDERS: 'netcatty_available_plugin_sync_providers_v1',
+  /** Last successful sidecar collect (upload fallback when host is offline). */
+  PLUGIN_SIDECARS_LAST_KNOWN: 'netcatty_plugin_sidecars_last_known_v1',
+  /** Remote sidecar apply queued while the plugin host was unavailable. */
+  PLUGIN_SIDECARS_PENDING_REMOTE: 'netcatty_plugin_sidecars_pending_remote_v1',
   LOCAL_SYNC_META: 'netcatty_local_sync_meta_v1',
   SYNC_BASE_PAYLOAD: 'netcatty_sync_base_payload_v1',
   CONVERGENT_REPLICA: 'netcatty_convergent_sync_replica_v2',
