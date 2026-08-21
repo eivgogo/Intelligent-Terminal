@@ -524,7 +524,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
       <TooltipProvider delayDuration={100}>
         <div
           className={cn(
-            "relative shrink-0 bg-secondary flex flex-col",
+            "relative shrink-0 bg-secondary flex flex-col border-r border-border/60",
             isSidebarResizing
               ? "transition-none"
               : "transition-[width] duration-200",
