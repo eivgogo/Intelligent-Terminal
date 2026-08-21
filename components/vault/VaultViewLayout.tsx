@@ -524,7 +524,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
       <TooltipProvider delayDuration={100}>
         <div
           className={cn(
-            "relative shrink-0 bg-secondary flex flex-col border-r border-border/60",
+            "relative shrink-0 flex flex-col pt-0 pr-1 pb-2 pl-2",
             isSidebarResizing
               ? "transition-none"
               : "transition-[width] duration-200",
@@ -532,8 +532,9 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
           style={{ width: effectiveSidebarWidth }}
           data-section="vault-sidebar"
         >
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border/60 bg-background shadow-sm">
           <div
-            className={cn("space-y-1", sidebarCollapsed ? "px-1.5" : "px-2.5")}
+            className={cn("space-y-1 pt-2", sidebarCollapsed ? "px-1.5" : "px-2.5")}
           >
             <Tooltip>
               <TooltipTrigger asChild>
@@ -772,6 +773,7 @@ export function VaultViewLayout({ ctx }: { ctx: VaultViewLayoutContext }) {
                 </TooltipContent>
               )}
             </Tooltip>
+          </div>
           </div>
           <div
             role="separator"

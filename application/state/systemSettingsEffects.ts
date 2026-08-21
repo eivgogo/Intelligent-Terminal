@@ -1,4 +1,4 @@
-import { useEffect, useRef, type MutableRefObject } from 'react';
+import { useEffect, type MutableRefObject } from 'react';
 import {
   STORAGE_KEY_AUTO_UPDATE_ENABLED,
   STORAGE_KEY_GLOBAL_HOTKEY_ENABLED,
