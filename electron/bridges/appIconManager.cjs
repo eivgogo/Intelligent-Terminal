@@ -3,20 +3,7 @@
 const path = require("node:path");
 const fs = require("node:fs");
 
-const VALID_VARIANTS = new Set([
-  "original",
-  "bright",
-  "dark",
-  "colorful",
-  "high-contrast",
-  "white-navy",
-  "white-sky",
-  "white-rose",
-  "white-emerald",
-  "white-amber",
-  "white-violet",
-  "rainbow",
-]);
+const VALID_VARIANTS = new Set(["original"]);
 
 const DEFAULT_VARIANT = "original";
 
@@ -67,42 +54,11 @@ function resolveOriginalIconPath(appPath) {
   return pickExistingPath(candidates) || candidates[0];
 }
 
-function buildVariantSourceCandidates(appPath, fileName) {
-  const relativeParts = useMacIconSources
-    ? ["icons", "variants", "macos", fileName]
-    : ["icons", "variants", fileName];
-  return buildSourceCandidates(appPath, relativeParts);
-}
-
-function resolveVariantIconPath(variant, appPath) {
-  const normalized = normalizeAppIconVariant(variant);
-  if (normalized === "original") {
-    return resolveOriginalIconPath(appPath);
-  }
-
-  const fileName = `${normalized}.png`;
-  const candidates = buildVariantSourceCandidates(appPath, fileName);
-  const resolved = pickExistingPath(candidates);
-  if (resolved) return resolved;
-  return resolveOriginalIconPath(appPath);
-}
-
-function resolveStrictVariantIconPath(variant, appPath) {
-  const normalized = normalizeAppIconVariant(variant);
-  if (normalized === "original") {
-    return resolveOriginalIconPath(appPath);
-  }
-
-  const fileName = `${normalized}.png`;
-  const candidates = buildVariantSourceCandidates(appPath, fileName);
-  return pickExistingPath(candidates) || null;
-}
-
 function initializeAppIconManager(appPath, options = {}) {
   preferPublicSources = options.preferPublic === true;
   useMacIconSources = options.isMac === true;
   currentVariant = DEFAULT_VARIANT;
-  currentIconPath = resolveVariantIconPath(currentVariant, appPath);
+  currentIconPath = resolveOriginalIconPath(appPath);
   return currentIconPath;
 }
 
@@ -134,6 +90,4 @@ module.exports = {
   normalizeAppIconVariant,
   initializeAppIconManager,
   getAppIconPath,
-  resolveVariantIconPath,
-  resolveStrictVariantIconPath,
 };

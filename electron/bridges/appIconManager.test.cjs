@@ -10,33 +10,7 @@ const appIconManager = require("./appIconManager.cjs");
 
 test("normalizeAppIconVariant falls back to original for invalid values", () => {
   assert.equal(appIconManager.normalizeAppIconVariant("nope"), "original");
-  assert.equal(appIconManager.normalizeAppIconVariant("bright"), "bright");
-});
-
-test("resolveVariantIconPath prefers public sources in dev when both exist", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-icon-dev-"));
-  const publicPath = path.join(tmp, "public", "icons", "variants", "bright.png");
-  const distPath = path.join(tmp, "dist", "icons", "variants", "bright.png");
-  fs.mkdirSync(path.dirname(publicPath), { recursive: true });
-  fs.mkdirSync(path.dirname(distPath), { recursive: true });
-  fs.writeFileSync(publicPath, "public-new");
-  fs.writeFileSync(distPath, "dist-old");
-
-  appIconManager.initializeAppIconManager(tmp, { preferPublic: true });
-  assert.equal(appIconManager.resolveVariantIconPath("bright", tmp), publicPath);
-});
-
-test("resolveVariantIconPath prefers dist sources when packaged", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-icon-packaged-"));
-  const publicPath = path.join(tmp, "public", "icons", "variants", "bright.png");
-  const distPath = path.join(tmp, "dist", "icons", "variants", "bright.png");
-  fs.mkdirSync(path.dirname(publicPath), { recursive: true });
-  fs.mkdirSync(path.dirname(distPath), { recursive: true });
-  fs.writeFileSync(publicPath, "public-new");
-  fs.writeFileSync(distPath, "dist-packaged");
-
-  appIconManager.initializeAppIconManager(tmp, { preferPublic: false });
-  assert.equal(appIconManager.resolveVariantIconPath("bright", tmp), distPath);
+  assert.equal(appIconManager.normalizeAppIconVariant("bright"), "original");
 });
 
 test("original icon uses platform-specific sizing", () => {
@@ -51,26 +25,9 @@ test("original icon uses platform-specific sizing", () => {
   fs.writeFileSync(desktopPath, "desktop");
 
   appIconManager.initializeAppIconManager(tmp, { preferPublic: true, isMac: true });
-  assert.equal(appIconManager.resolveVariantIconPath("original", tmp), macPath);
+  assert.equal(appIconManager.getAppIconPath(tmp), macPath);
 
   appIconManager.initializeAppIconManager(tmp, { preferPublic: true, isMac: false });
-  assert.equal(appIconManager.resolveVariantIconPath("original", tmp), desktopPath);
-});
-
-test("macOS variants use HIG-sized assets without changing other platforms", () => {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "netcatty-icon-variant-platform-"));
-  const variantsDir = path.join(tmp, "public", "icons", "variants");
-  const macVariantsDir = path.join(variantsDir, "macos");
-  fs.mkdirSync(macVariantsDir, { recursive: true });
-  const desktopPath = path.join(variantsDir, "bright.png");
-  const macPath = path.join(macVariantsDir, "bright.png");
-  fs.writeFileSync(desktopPath, "desktop");
-  fs.writeFileSync(macPath, "mac");
-
-  appIconManager.initializeAppIconManager(tmp, { preferPublic: true, isMac: true });
-  assert.equal(appIconManager.resolveVariantIconPath("bright", tmp), macPath);
-
-  appIconManager.initializeAppIconManager(tmp, { preferPublic: true, isMac: false });
-  assert.equal(appIconManager.resolveVariantIconPath("bright", tmp), desktopPath);
+  assert.equal(appIconManager.getAppIconPath(tmp), desktopPath);
 });
 

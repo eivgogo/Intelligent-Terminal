@@ -209,12 +209,9 @@ test("macOS packages a native ICNS and sizes runtime Dock icons separately", () 
       "public/icons/variants/macos",
       `${variant}.png`,
     );
-    const expected = variant === "original"
-      ? { minX: 99, minY: 99, maxX: 924, maxY: 924 }
-      : { minX: 113, minY: 113, maxX: 910, maxY: 910 };
     assert.deepEqual(
       readRgbaPngAlphaBounds(iconFile),
-      expected,
+      { minX: 99, minY: 99, maxX: 924, maxY: 924 },
       `${path.relative(projectRoot, iconFile)} must render on the 824px macOS icon grid`,
     );
   }
@@ -234,12 +231,9 @@ test("non-macOS runtime icons preserve their existing desktop sizing", () => {
       "public/icons/variants",
       `${variant}.png`,
     );
-    const expected = variant === "original"
-      ? { minX: 99, minY: 99, maxX: 924, maxY: 924 }
-      : { minX: 113, minY: 113, maxX: 910, maxY: 910 };
     assert.deepEqual(
       readRgbaPngAlphaBounds(iconFile),
-      expected,
+      { minX: 99, minY: 99, maxX: 924, maxY: 924 },
       `${path.relative(projectRoot, iconFile)} must keep the existing desktop runtime size`,
     );
   }
