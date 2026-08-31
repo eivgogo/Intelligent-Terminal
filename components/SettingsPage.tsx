@@ -395,18 +395,21 @@ const SettingsPageContent: React.FC<{ settings: SettingsState; appLock?: AppLock
                 </div>
                 <div className="flex items-center justify-between px-4 py-2">
                     <h1 className="text-lg font-semibold">{t("settings.title")}</h1>
-                    {!isMac && (
-                        // No tooltip: on Windows the primary-colored tooltip sits in a
-                        // drag titlebar region, can stick open, and blocks the real X.
-                        <button
-                            type="button"
-                            onClick={handleClose}
-                            aria-label={t("common.close")}
-                            className="app-no-drag w-8 h-8 flex items-center justify-center rounded-md hover:bg-destructive/20 hover:text-destructive transition-colors text-muted-foreground"
-                        >
-                            <X size={16} />
-                        </button>
-                    )}
+                    <div className="flex items-center gap-3">
+                        <span className="text-sm text-muted-foreground">Intelligent Terminal</span>
+                        {!isMac && (
+                            // No tooltip: on Windows the primary-colored tooltip sits in a
+                            // drag titlebar region, can stick open, and blocks the real X.
+                            <button
+                                type="button"
+                                onClick={handleClose}
+                                aria-label={t("common.close")}
+                                className="app-no-drag w-8 h-8 flex items-center justify-center rounded-md hover:bg-destructive/20 hover:text-destructive transition-colors text-muted-foreground"
+                            >
+                                <X size={16} />
+                            </button>
+                        )}
+                    </div>
                 </div>
             </div>
 
