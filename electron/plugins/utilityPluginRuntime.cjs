@@ -131,7 +131,7 @@ class UtilityPluginRuntime {
         TMP: process.env.TMP ?? "",
       },
       stdio: ["ignore", "pipe", "pipe"],
-      serviceName: `Netcatty Plugin: ${this.plugin.id}`,
+      serviceName: `Intelligent Terminal Plugin: ${this.plugin.id}`,
       allowLoadingUnsignedLibraries: false,
       disclaim: process.platform === "darwin",
     });

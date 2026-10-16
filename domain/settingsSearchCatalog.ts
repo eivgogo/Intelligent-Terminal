@@ -4,7 +4,6 @@
  */
 
 export const SETTINGS_TAB_IDS = [
-  "application",
   "appearance",
   "terminal",
   "shortcuts",
@@ -49,41 +48,6 @@ export type SettingsSearchEntry = {
 };
 
 export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
-  // Application
-  {
-    id: "application-check-updates",
-    tab: "application",
-    labelKey: "settings.application.checkUpdates",
-    keywords: ["update", "version", "更新"],
-  },
-  {
-    id: "application-report-problem",
-    tab: "application",
-    labelKey: "settings.application.reportProblem",
-    descriptionKey: "settings.application.reportProblem.subtitle",
-    keywords: ["bug", "issue", "反馈"],
-  },
-  {
-    id: "application-community",
-    tab: "application",
-    labelKey: "settings.application.community",
-    descriptionKey: "settings.application.community.subtitle",
-  },
-  {
-    id: "application-github",
-    tab: "application",
-    labelKey: "settings.application.github",
-    descriptionKey: "settings.application.github.subtitle",
-    keywords: ["github", "repo"],
-  },
-  {
-    id: "application-whats-new",
-    tab: "application",
-    labelKey: "settings.application.whatsNew",
-    descriptionKey: "settings.application.whatsNew.subtitle",
-    keywords: ["changelog", "release"],
-  },
-
   // Appearance
   {
     id: "appearance-language",

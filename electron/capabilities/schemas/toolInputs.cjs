@@ -362,7 +362,7 @@ const MODEL_DESCRIPTION_HINTS = Object.freeze({
   "vault.host.notes.set":
     "Host metadata notes on a saved host — not Vault → Notes sidebar entries. Prefer vault_notes_create/update when the user wants vault notes they can open in the Notes sidebar.",
   "vault.host.open":
-    "Opens a terminal tab for a saved vault host (same as clicking the host in Netcatty). Connection may still be establishing when the tool returns — use get_environment or wait briefly before terminal_execute if needed. Call session_close with the returned sessionId when the task is finished. Auth prompts (passphrase / keyboard-interactive) still require the user in the Netcatty UI.",
+    "Opens a terminal tab for a saved vault host (same as clicking the host in Intelligent Terminal). Connection may still be establishing when the tool returns — use get_environment or wait briefly before terminal_execute if needed. Call session_close with the returned sessionId when the task is finished. Auth prompts (passphrase / keyboard-interactive) still require the user in the Intelligent Terminal UI.",
   "vault.host.import":
     "Only for text in known export formats (PuTTY reg, MobaXterm ini, CSV template, SecureCRT, ssh_config). If attached host text is unknown or auto-detection fails, use read_attachment content, extract fields yourself, and call vault_hosts_create.",
   "vault.hosts.create":
@@ -384,7 +384,7 @@ const MODEL_DESCRIPTION_HINTS = Object.freeze({
   "vault.scripts.create":
     "Create nct automation scripts. Call scripts_reference first to learn the nct API, triggers, and source wrapping rules.",
   "vault.scripts.reference":
-    "Returns full Netcatty automation script syntax reference (nct API, triggers, host targeting). Read before authoring scripts.",
+    "Returns full Intelligent Terminal automation script syntax reference (nct API, triggers, host targeting). Read before authoring scripts.",
   "vault.host.connectScripts.set":
     "Sets per-host onConnect script queue order. Global and matching dynamic-group scripts run first automatically.",
 });

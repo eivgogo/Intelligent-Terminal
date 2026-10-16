@@ -58,7 +58,7 @@ function htmlForRuntime(token, moduleResources) {
   ]));
   const runtime = `${PLUGIN_PROTOCOL_SCHEME}://${token}/__host/runtime/browserRuntime.mjs`;
   return `<!doctype html>
-<html><head><meta charset="utf-8"><title>Netcatty plugin runtime</title>
+<html><head><meta charset="utf-8"><title>Intelligent Terminal plugin runtime</title>
 <script type="importmap" nonce="${token}">${JSON.stringify({ imports })}</script></head><body><script type="module" src="${runtime}"></script></body></html>`;
 }
 

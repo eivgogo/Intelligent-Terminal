@@ -1,5 +1,5 @@
 export class BridgeUnavailableError extends Error {
-  constructor(message = "Netcatty bridge unavailable") {
+  constructor(message = "Intelligent Terminal bridge unavailable") {
     super(message);
     this.name = "BridgeUnavailableError";
   }

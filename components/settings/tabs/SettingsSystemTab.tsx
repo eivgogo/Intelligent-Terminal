@@ -269,14 +269,16 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
   } | null>(null);
 
   const [appVersion, setAppVersion] = useState("");
+  const [appName, setAppName] = useState("");
 
-  // Load app version on mount
+  // Load app version (and name) on mount
   useEffect(() => {
     const promise = netcattyBridge.get()?.getAppInfo?.();
     if (promise) {
       promise
         .then((info) => {
           setAppVersion(info?.version ?? "");
+          setAppName(info?.name ?? "");
         })
         .catch(() => {});
     }
@@ -551,8 +553,13 @@ const SettingsSystemTab: React.FC<SettingsSystemTabProps> = ({
           <span className="text-sm text-muted-foreground">
             {t("settings.update.currentVersion")}
           </span>
-          <span className="text-sm font-mono">
-            {updateState.currentVersion || appVersion || "..."}
+          <span className="flex flex-col items-end">
+            <span className="text-sm font-semibold text-foreground">
+              {appName || "Intelligent Terminal"}
+            </span>
+            <span className="text-sm font-mono">
+              {updateState.currentVersion || appVersion || "..."}
+            </span>
           </span>
         </div>
 

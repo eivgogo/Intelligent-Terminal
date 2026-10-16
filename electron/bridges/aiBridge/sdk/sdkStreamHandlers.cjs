@@ -20,7 +20,7 @@ const VALID_BACKENDS = new Set(listBackends());
 // Pre-flight model catalog cache. SDK listModels often spawns a CLI/server
 // (~1-2s+), so cache per backend+binPath and coalesce in-flight loads.
 // Always degrade to [] on error/timeout (the renderer keeps its presets).
-// OpenCode is included: catalogs can drift outside Netcatty, but a short TTL
+// OpenCode is included: catalogs can drift outside Intelligent Terminal, but a short TTL
 // is far cheaper than spawning a new opencode process on every panel render
 // (issue #2184).
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -194,7 +194,7 @@ function expireSiblingCursorCliModeSessions(sdkSessionIds, {
 
 /**
  * Grok ACP vs streaming-json sessions must not resume across each other.
- * When the active runtime flips without restarting Netcatty, drop the inactive
+ * When the active runtime flips without restarting Intelligent Terminal, drop the inactive
  * runtime's in-memory session so a switch-back cannot revive a pre-switch
  * thread and skip renderer history for intervening turns (same idea as Cursor
  * CLI ask/agent isolation).
@@ -452,11 +452,11 @@ function buildSdkTurnPrompt({
     }
     if (hints.length > 0) {
       const attachmentAccessHint = toolIntegrationMode === "skills"
-        ? "[If direct local filesystem tools are unavailable, use Netcatty's attachment list/read CLI commands described in the host context.]"
-        : "[If local filesystem tools are unavailable, use Netcatty's list_attachments and read_attachment MCP tools to inspect these user-supplied files.]";
+        ? "[If direct local filesystem tools are unavailable, use Intelligent Terminal's attachment list/read CLI commands described in the host context.]"
+        : "[If local filesystem tools are unavailable, use Intelligent Terminal's list_attachments and read_attachment MCP tools to inspect these user-supplied files.]";
       sections.push(
         [
-          "[Attached files: these paths are local to the machine running Netcatty, not remote hosts. Inspect them locally if needed.]",
+          "[Attached files: these paths are local to the machine running Intelligent Terminal, not remote hosts. Inspect them locally if needed.]",
           attachmentAccessHint,
           ...hints,
         ].join("\n"),

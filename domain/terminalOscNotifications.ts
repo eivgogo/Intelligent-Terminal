@@ -6,7 +6,7 @@ export type OscNotification = {
   protocol: OscNotificationProtocol;
 };
 
-export const DEFAULT_OSC_NOTIFICATION_TITLE = 'Netcatty';
+export const DEFAULT_OSC_NOTIFICATION_TITLE = 'Intelligent Terminal';
 export const OSC_NOTIFICATION_TITLE_MAX = 120;
 export const OSC_NOTIFICATION_BODY_MAX = 500;
 

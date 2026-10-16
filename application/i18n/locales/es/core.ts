@@ -84,7 +84,6 @@ export const esCoreMessages: Messages = {
 
   // Settings shell
   'settings.title': 'Configuración',
-  'settings.tab.application': 'Aplicación',
   'settings.tab.appearance': 'Apariencia',
   'settings.tab.terminal': 'Terminal',
   'settings.tab.shortcuts': 'Atajos',
@@ -162,7 +161,7 @@ export const esCoreMessages: Messages = {
   'settings.update.downloadError': 'La descarga falló.',
   'settings.update.manualDownload': 'Descargar desde GitHub',
   'settings.update.manualDownloadHint': 'La actualización automática no está disponible en esta plataforma. Descarga la última versión desde GitHub.',
-  'settings.update.hint': 'Netcatty busca actualizaciones en GitHub Releases.',
+  'settings.update.hint': 'Intelligent Terminal busca actualizaciones en GitHub Releases.',
   'settings.update.lastCheckedJustNow': 'ahora mismo',
   'settings.update.lastCheckedMinutesAgo': 'hace {n} min',
   'settings.update.lastCheckedHoursAgo': 'hace {n} h',
@@ -173,7 +172,7 @@ export const esCoreMessages: Messages = {
   // Settings > Session Restore
   'settings.sessionRestore.title': 'Restauración de sesión',
   'settings.sessionRestore.startupLanding': 'Al iniciar',
-  'settings.sessionRestore.startupLandingDesc': 'Elige si abrir la página de inicio de hosts o una terminal local cuando Netcatty se inicia sin sesiones restauradas.',
+  'settings.sessionRestore.startupLandingDesc': 'Elige si abrir la página de inicio de hosts o una terminal local cuando Intelligent Terminal se inicia sin sesiones restauradas.',
   'settings.sessionRestore.startupLanding.vault': 'Inicio (hosts)',
   'settings.sessionRestore.startupLanding.localTerminal': 'Terminal local',
   'settings.sessionRestore.restorePreviousSession': 'Restaurar pestañas y espacios de trabajo anteriores',
@@ -245,7 +244,7 @@ export const esCoreMessages: Messages = {
   'tray.recentHosts': 'Hosts recientes',
   'tray.empty.title': 'Nada por aquí todavía',
   'tray.empty.subtitle': 'Ve a conectarte a un servidor, te extrañan 🚀',
-  'tray.quit': 'Salir de Netcatty',
+  'tray.quit': 'Salir de Intelligent Terminal',
   'tray.closeSession': 'Cerrar sesión',
 
   // Vault Sidebar
@@ -253,16 +252,7 @@ export const esCoreMessages: Messages = {
   'vault.sidebar.expand': 'Expandir barra lateral',
   'vault.sidebar.resize': 'Cambiar tamaño de la barra lateral',
 
-  // Settings > Application
-  'settings.application.checkUpdates': 'Buscar actualizaciones',
-  'settings.application.reportProblem': 'Reportar un problema',
-  'settings.application.reportProblem.subtitle': 'Generar un issue de GitHub ya rellenado',
-  'settings.application.community': 'Comunidad',
-  'settings.application.community.subtitle': 'En GitHub Discussions',
-  'settings.application.github': 'GitHub',
-  'settings.application.github.subtitle': 'Código fuente',
-  'settings.application.whatsNew': 'Novedades',
-  'settings.application.whatsNew.subtitle': 'Mostrar notas de la versión',
+  // External link errors
   'settings.application.openExternal.failedTitle': 'No se puede abrir el enlace',
   'settings.application.openExternal.failedBody': 'El enlace no se pudo abrir ni en el navegador del sistema ni en la ventana del navegador integrado.',
   'settings.vault.title': 'Vault',
@@ -277,7 +267,7 @@ export const esCoreMessages: Messages = {
   'settings.vault.showHostTreeSidebar': 'Mostrar barra lateral de lista de hosts',
   'settings.vault.showHostTreeSidebarDesc': 'Muestra la barra lateral de lista de hosts y su alternador en la barra superior en las pestañas de terminal y editor.',
   'settings.vault.autoImportSystemKnownHosts': 'Importar automáticamente known_hosts del sistema',
-  'settings.vault.autoImportSystemKnownHostsDesc': 'Cuando se carga el Vault, importa en silencio las entradas del archivo known_hosts de OpenSSH. Desactívalo para mantener los hosts conocidos de Netcatty separados; Escanear sistema sigue importando a pedido.',
+  'settings.vault.autoImportSystemKnownHostsDesc': 'Cuando se carga el Vault, importa en silencio las entradas del archivo known_hosts de OpenSSH. Desactívalo para mantener los hosts conocidos de Intelligent Terminal separados; Escanear sistema sigue importando a pedido.',
 
   // Update notifications
   'update.available.title': 'Actualización disponible',
@@ -486,7 +476,7 @@ Resalta el panel dividido enfocado:
   'settings.terminal.font.cjk.useCustom': 'Usar fuente',
   'settings.terminal.font.cjk.refresh': 'Actualizar fuentes instaladas',
   'settings.terminal.font.cjk.alignmentWarning': 'Esta fuente no está verificada como monoespaciada. Revisa la vista previa para comprobar la alineación de columnas.',
-  'settings.terminal.font.cjk.unavailableWarning': 'Esta fuente no está instalada en este dispositivo. Netcatty mantendrá el ajuste y usará una alternativa segura.',
+  'settings.terminal.font.cjk.unavailableWarning': 'Esta fuente no está instalada en este dispositivo. Intelligent Terminal mantendrá el ajuste y usará una alternativa segura.',
   'settings.terminal.font.size': 'Tamaño de fuente',
   'settings.terminal.font.size.desc': 'Tamaño del texto de la terminal',
   'settings.terminal.font.weight': 'Peso de fuente',
@@ -1070,7 +1060,7 @@ Resalta el panel dividido enfocado:
   'settings.plugins.scopeTarget': 'Destino de {scope}',
   'settings.plugins.noScopeTargets': 'No hay destinos disponibles',
   'settings.plugins.thisDevice': 'Este dispositivo',
-  'plugins.authentication.description': 'Completa la solicitud de autenticación en este diálogo de Netcatty.',
+  'plugins.authentication.description': 'Completa la solicitud de autenticación en este diálogo de Intelligent Terminal.',
   'plugins.authentication.value': 'Valor',
   'plugins.authentication.password': 'Contraseña',
   'plugins.authentication.code': 'Código de un solo uso',

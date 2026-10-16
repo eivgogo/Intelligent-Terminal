@@ -540,7 +540,7 @@ export function useTerminalEffects(ctx: TerminalEffectsContext) {
               mode: terminalSettingsRef.current?.oscNotifications,
               sessionFocused: isFocusedRef.current,
               sessionId,
-              fallbackTitle: host.label || host.hostname || "Netcatty",
+              fallbackTitle: host.label || host.hostname || "Intelligent Terminal",
               onSessionActivity: () => onTerminalBell?.(sessionId),
             });
           },

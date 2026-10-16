@@ -29,7 +29,7 @@ const AUDITED_PERMISSION_USES = new Set([
 const PROMPT_TIMEOUT_MS = 30_000;
 const PERMISSION_GRANT_SCOPES = new Set(["once", "session", "application", "always"]);
 const HOST_PERMISSION_REASONS = Object.freeze({
-  "terminal.intercept.input": "This plugin can inspect and rewrite Terminal input. Netcatty bypasses host-recognized credential input, but arbitrary no-echo input may not be detectable.",
+  "terminal.intercept.input": "This plugin can inspect and rewrite Terminal input. Intelligent Terminal bypasses host-recognized credential input, but arbitrary no-echo input may not be detectable.",
 });
 
 function normalizePermissionOperationId(value) {

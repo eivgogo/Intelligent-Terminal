@@ -35,7 +35,7 @@ export async function initPlugin(
     id: options.id,
     name: displayName,
     displayName,
-    description: "A Netcatty plugin",
+    description: "An Intelligent Terminal plugin",
     version: "0.1.0",
     publisher: options.id.split(".")[0] || "local",
     engines: {

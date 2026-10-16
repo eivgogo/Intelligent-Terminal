@@ -128,7 +128,7 @@ function createAppLockSystemAuthBridge({
       return { ok: false, error: "unavailable" };
     }
     try {
-      await systemPreferences.promptTouchID("Unlock Netcatty");
+      await systemPreferences.promptTouchID("Unlock Intelligent Terminal");
       return { ok: true };
     } catch (err) {
       // Electron exposes only a localized rejection message here. Since the
@@ -154,7 +154,7 @@ function createAppLockSystemAuthBridge({
     const result = await runHelper(
       execFile,
       helperPath,
-      ["verify", "--hwnd", hwnd, "--message", "Unlock Netcatty"],
+      ["verify", "--hwnd", hwnd, "--message", "Unlock Intelligent Terminal"],
       SYSTEM_AUTH_VERIFY_TIMEOUT_MS,
     );
     return normalizeSystemAuthUnlockResult(result);

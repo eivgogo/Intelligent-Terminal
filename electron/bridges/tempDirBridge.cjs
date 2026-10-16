@@ -218,17 +218,17 @@ function getTempDir() {
 
 function assertSafeTempDir(tempDir, expectedIdentity) {
   const stat = fs.lstatSync(tempDir);
-  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Netcatty temp path is not a safe directory.");
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Intelligent Terminal temp path is not a safe directory.");
   if (typeof process.getuid === "function" && stat.uid !== process.getuid()) {
-    throw new Error("Netcatty temp directory is not owned by the current user.");
+    throw new Error("Intelligent Terminal temp directory is not owned by the current user.");
   }
   if (expectedIdentity && (stat.dev !== expectedIdentity.dev || stat.ino !== expectedIdentity.ino)) {
-    throw new Error("Netcatty temp directory identity changed during this process.");
+    throw new Error("Intelligent Terminal temp directory identity changed during this process.");
   }
   fs.chmodSync(tempDir, 0o700);
   const expectedRealPath = path.join(fs.realpathSync(path.dirname(tempDir)), path.basename(tempDir));
   if (fs.realpathSync(tempDir) !== expectedRealPath) {
-    throw new Error("Netcatty temp directory must not traverse symbolic links.");
+    throw new Error("Intelligent Terminal temp directory must not traverse symbolic links.");
   }
   return stat;
 }

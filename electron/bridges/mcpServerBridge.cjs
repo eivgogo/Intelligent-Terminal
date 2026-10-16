@@ -1250,7 +1250,7 @@ async function handleMessage(socket, line) {
           id,
           error: {
             code: -32001,
-            message: "External MCP is disabled. Re-enable it in Netcatty Settings → AI.",
+            message: "External MCP is disabled. Re-enable it in Intelligent Terminal Settings → AI.",
           },
         }) + "\n";
         if (!socket.destroyed) {
@@ -1300,7 +1300,7 @@ async function handleMessage(socket, line) {
       && !externalMcpActivityHook?.isEnabled?.()
     ) {
       throw new Error(
-        "External MCP is disabled. Re-enable it in Netcatty Settings → AI.",
+        "External MCP is disabled. Re-enable it in Intelligent Terminal Settings → AI.",
       );
     }
     notifyExternalMcpActivity(method, callParams);
@@ -1593,7 +1593,7 @@ async function handleWorkerTerminalExec(params = {}) {
     return {
       ok: false,
       code: "COMMAND_ALREADY_RUNNING",
-      error: `Another Netcatty command is already running for chat session "${chatSessionId}". Wait for it to finish before starting a new exec.`,
+      error: `Another Intelligent Terminal command is already running for chat session "${chatSessionId}". Wait for it to finish before starting a new exec.`,
       activeCommand: executionLock.active.command,
       activeSessionId: executionLock.active.sessionId,
     };
@@ -2056,9 +2056,9 @@ async function handleGetContext(params) {
   return {
     environment: "netcatty-terminal",
     description: appendVaultAgentGuidance(
-      "You are operating inside Netcatty, a multi-session terminal manager. " +
+      "You are operating inside Intelligent Terminal, a multi-session terminal manager. " +
       "The available sessions may be remote hosts, local terminals, Mosh-backed shells, or serial port connections (network devices, embedded systems). " +
-      "Use the provided tools to execute commands through the sessions exposed by Netcatty. " +
+      "Use the provided tools to execute commands through the sessions exposed by Intelligent Terminal. " +
       buildTerminalToolGuidance(toolHints) +
       "Serial sessions (protocol: serial, shellType: raw) do not run a standard shell — commands are sent as-is. " +
       "Network device sessions (deviceType: network) use vendor CLIs (Huawei VRP, Cisco IOS, etc.) — commands are sent as-is without shell wrapping, and exit codes are unavailable. " +

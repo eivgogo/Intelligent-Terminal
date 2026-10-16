@@ -17,7 +17,7 @@
  * - Skills mode: only builtin bash is exposed (CLI instructions are injected via
  *   the host prompt; the skill builtin is omitted because its read/custom-tool
  *   permission kinds are not shell-safe to auto-approve). Shell permission
- *   requests are approved only for Netcatty CLI invocations; discovery env is
+ *   requests are approved only for Intelligent Terminal CLI invocations; discovery env is
  *   passed to the Copilot runtime so `netcatty-tool-cli` can reach the host.
  *
  * 🔬 SMOKE-CALIBRATE [copilot-stream]: sendAndWait returns only the final
@@ -75,7 +75,7 @@ function buildCopilotSessionOptions({ model, injectedMcpServers, toolIntegration
   return options;
 }
 
-// Shell chaining/redirection in the local Netcatty CLI prefix (not after exec `--`).
+// Shell chaining/redirection in the local Intelligent Terminal CLI prefix (not after exec `--`).
 const LOCAL_SHELL_METACHAR_PATTERN = /(?:[;&|`]|&&|\|\||\$\(|\$\{|<<?|>{1,2}|\r?\n)/;
 const LOCAL_SHELL_WRAPPER_PATTERN = /^(?:\/[^\s]+\/)?(?:ba|z|fi)?sh(?:\.exe)?\s+-c\b/i;
 const NETCATTY_CLI_TOKEN = String.raw`netcatty-tool-cli(?:\.(?:cjs|cmd))?`;
@@ -214,7 +214,7 @@ function approveNetcattyMcpOnly(request) {
   }
   return {
     kind: "reject",
-    feedback: "Only Netcatty MCP tools are allowed from this integration.",
+    feedback: "Only Intelligent Terminal MCP tools are allowed from this integration.",
   };
 }
 
@@ -227,12 +227,12 @@ function approveNetcattyCliShellOnly(request) {
     return {
       kind: "reject",
       feedback:
-        "Only Netcatty CLI shell commands are allowed. Invoke the netcatty-tool-cli launcher or script prefix provided in the host context, and include --chat-session on every call.",
+        "Only Intelligent Terminal CLI shell commands are allowed. Invoke the netcatty-tool-cli launcher or script prefix provided in the host context, and include --chat-session on every call.",
     };
   }
   return {
     kind: "reject",
-    feedback: "Only Netcatty CLI shell commands are allowed from this integration.",
+    feedback: "Only Intelligent Terminal CLI shell commands are allowed from this integration.",
   };
 }
 
@@ -384,7 +384,7 @@ async function runCopilotTurn({
     const sessionConfig = {
       ...sessionOptions,
       streaming: true,
-      // MCP mode: only netcatty MCP. Skills mode: only Netcatty CLI shell commands.
+      // MCP mode: only netcatty MCP. Skills mode: only Intelligent Terminal CLI shell commands.
       onPermissionRequest: buildCopilotPermissionHandler(toolIntegrationMode),
     };
     // Resume the prior conversation so context carries ACROSS turns (incl. after

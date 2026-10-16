@@ -182,7 +182,7 @@ class CodexAppServerConnection {
       await this.request("initialize", {
         clientInfo: {
           name: "netcatty",
-          title: "Netcatty",
+          title: "Intelligent Terminal",
           version: this.appVersion,
         },
         capabilities: {

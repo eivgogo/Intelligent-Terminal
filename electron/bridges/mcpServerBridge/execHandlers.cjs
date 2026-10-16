@@ -101,7 +101,7 @@ function createExecHandlerApi(ctx) {
         return {
           ok: false,
           code: "COMMAND_ALREADY_RUNNING",
-          error: `Another Netcatty command is already running for chat session "${chatSessionId}". Wait for it to finish before starting a new exec.`,
+          error: `Another Intelligent Terminal command is already running for chat session "${chatSessionId}". Wait for it to finish before starting a new exec.`,
           activeCommand: executionLock.active.command,
           activeSessionId: executionLock.active.sessionId,
         };

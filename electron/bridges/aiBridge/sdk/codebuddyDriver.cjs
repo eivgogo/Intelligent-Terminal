@@ -108,7 +108,7 @@ function toSdkMcpServers(injectedMcpServers) {
 }
 
 /**
- * Create an in-process SDK MCP server with Netcatty tools.
+ * Create an in-process SDK MCP server with Intelligent Terminal tools.
  * Uses createSdkMcpServer() + tool() from @tencent-ai/agent-sdk to avoid
  * spawning a subprocess for lightweight built-in tools.
  * @param {Array<{name: string, description: string, inputSchema: object, handler: Function}>} toolDefs
@@ -129,18 +129,18 @@ async function createCodebuddySdkMcpServer(toolDefs) {
 // ---------------------------------------------------------------------------
 
 /**
- * Build an SDK canUseTool permission handler based on Netcatty's permission mode.
+ * Build an SDK canUseTool permission handler based on Intelligent Terminal's permission mode.
  *
  * When the CodeBuddy CLI encounters a security restriction that requires a
  * permission decision (instead of throwing an error), the SDK routes the
  * request through this handler:
  * - auto: automatically confirm execution (no user interruption)
- * - confirm: forward to the Netcatty renderer approval UI and wait for the
+ * - confirm: forward to the Intelligent Terminal renderer approval UI and wait for the
  *   user's decision (approve once / always allow / reject)
  * - observer: deny all restricted tool executions
  *
  * @param {object} args
- * @param {string} args.permissionMode  Netcatty permission mode ('auto'|'confirm'|'observer')
+ * @param {string} args.permissionMode  Intelligent Terminal permission mode ('auto'|'confirm'|'observer')
  * @param {string} [args.chatSessionId]  chat session scope for the approval card
  * @param {Function} [args.requestApproval]  (toolName, args, chatSessionId) => Promise<boolean>
  * @returns {Function} SDK CanUseTool handler: (toolName, input, options) => Promise<PermissionResult>
@@ -158,7 +158,7 @@ function buildCodebuddyCanUseTool({ permissionMode, chatSessionId, requestApprov
         message: `Observer mode: tool "${toolName}" execution denied.`,
       };
     }
-    // Confirm mode (default): forward to the Netcatty approval UI.
+    // Confirm mode (default): forward to the Intelligent Terminal approval UI.
     if (typeof requestApproval !== "function") {
       // No approval channel available — deny to preserve confirm-mode safety guarantee.
       return {
@@ -236,13 +236,13 @@ function buildCodebuddyQueryOptions({
     mcpServers: toSdkMcpServers(injectedMcpServers),
     tools: builtinTools,
     // `tools` is the built-in tool whitelist. In mcp mode it is [], so CodeBuddy
-    // built-ins stay disabled while injected Netcatty MCP tools remain visible.
+    // built-ins stay disabled while injected Intelligent Terminal MCP tools remain visible.
     // Do not mirror that empty list into allowedTools: the SDK treats
     // allowedTools as an auto-approval list, and allowedTools: [] prevents MCP
     // tool calls from running under bypassPermissions.
     disallowedTools: [...UI_DISALLOWED_TOOLS],
     // Keep the SDK isolated from user/project settings so local hooks, plugins,
-    // or extra MCP servers cannot expand Netcatty's controlled tool boundary.
+    // or extra MCP servers cannot expand Intelligent Terminal's controlled tool boundary.
     settingSources: [],
     env,
   };
@@ -309,7 +309,7 @@ function buildCodebuddyQueryOptions({
   // initialization and routes elicitation_create control requests here.
   if (elicitation && typeof elicitation === "object") options.elicitation = elicitation;
   // Permission handler: when the CLI hits a security restriction, route the
-  // decision through Netcatty (auto-confirm / user approval / deny) instead
+  // decision through Intelligent Terminal (auto-confirm / user approval / deny) instead
   // of throwing an error.
   if (typeof canUseTool === "function") options.canUseTool = canUseTool;
   return options;
@@ -798,7 +798,7 @@ function buildCodebuddyHooks(
             continue: true,
             decision: "block",
             reason:
-              "Only Netcatty CLI commands are allowed in Skills mode. " +
+              "Only Intelligent Terminal CLI commands are allowed in Skills mode. " +
               "Use the netcatty-tool-cli command prefix provided by the host.",
           };
         }

@@ -130,7 +130,7 @@ export const exchangeCodeForTokens = async (
   const exchangeViaMain = bridge?.googleExchangeCodeForTokens;
   if (!exchangeViaMain) {
     throw new Error(
-      'Google OAuth bridge unavailable (token exchange is blocked by CORS in renderer). Please restart Netcatty.'
+      'Google OAuth bridge unavailable (token exchange is blocked by CORS in renderer). Please restart Intelligent Terminal.'
     );
   }
 
@@ -151,7 +151,7 @@ export const refreshAccessToken = async (refreshToken: string): Promise<OAuthTok
   const refreshViaMain = bridge?.googleRefreshAccessToken;
   if (!refreshViaMain) {
     throw new Error(
-      'Google OAuth bridge unavailable (token refresh is blocked by CORS in renderer). Please restart Netcatty.'
+      'Google OAuth bridge unavailable (token refresh is blocked by CORS in renderer). Please restart Intelligent Terminal.'
     );
   }
 

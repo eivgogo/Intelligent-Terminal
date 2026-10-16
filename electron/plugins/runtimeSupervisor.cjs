@@ -402,7 +402,7 @@ class RuntimeSupervisor {
   #restoreContainmentBlock(pluginId) {
     const error = new PluginRpcError(
       RPC_ERRORS.unavailable,
-      `Plugin runtime containment failed; restart Netcatty before starting it again: ${pluginId}`,
+      `Plugin runtime containment failed; restart Intelligent Terminal before starting it again: ${pluginId}`,
     );
     const active = this.database.getActivePlugin(pluginId);
     if (active?.activeVersion) {

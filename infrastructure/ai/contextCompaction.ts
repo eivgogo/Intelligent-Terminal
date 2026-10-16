@@ -15,7 +15,7 @@ const REDACTED_PAYLOAD_PREVIEW_CHARS = 80;
 export const DEFAULT_CONTEXT_WINDOW_TOKENS = 128_000;
 export const DEFAULT_PROTECT_RECENT_MESSAGES = 10;
 
-export const CONTEXT_COMPACTION_SYSTEM_PROMPT = `You are summarizing a long Netcatty agent conversation so it can continue without exceeding the model context window.
+export const CONTEXT_COMPACTION_SYSTEM_PROMPT = `You are summarizing a long Intelligent Terminal agent conversation so it can continue without exceeding the model context window.
 
 Create a concise but complete summary that preserves:
 - the user's current goal and requirements

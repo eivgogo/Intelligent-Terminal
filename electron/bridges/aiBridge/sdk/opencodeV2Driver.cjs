@@ -3,11 +3,11 @@
 /**
  * OpenCode 2.x driver.
  *
- * OpenCode 2 replaced the embeddable SDK surface Netcatty used for 1.x with a
+ * OpenCode 2 replaced the embeddable SDK surface Intelligent Terminal used for 1.x with a
  * server API: `opencode serve` exposes an HTTP + SSE surface described by its
  * own `/openapi.json`. Talking to it with `fetch` keeps the dependency
  * footprint flat (the 2.x SDK pulls in `effect@4`) and leaves the turn
- * lifecycle owned by Netcatty, like every other driver here.
+ * lifecycle owned by Intelligent Terminal, like every other driver here.
  *
  * One server process is spawned per turn and torn down afterwards. Boot is
  * ~100ms on a warm machine and the CLI persists sessions, so a turn resumes a
@@ -36,7 +36,7 @@ const {
 } = require("./netcattySkillsOpenCodePermissions.cjs");
 const { OPENCODE_IMAGE_MEDIA_TYPES, parseOpenCodeModel } = require("./opencodeDriver.cjs");
 
-/** Agent carrying the Netcatty system text. `build` is OpenCode's default primary agent. */
+/** Agent carrying the Intelligent Terminal system text. `build` is OpenCode's default primary agent. */
 const OPENCODE_V2_AGENT = "build";
 const OPENCODE_V2_SERVER_START_TIMEOUT_MS = 20000;
 const OPENCODE_V2_REQUEST_TIMEOUT_MS = 60000;
@@ -86,7 +86,7 @@ function toOpenCodeV2McpServers(injectedMcpServers) {
  * Build the inline OpenCode 2 config document.
  *
  * Mirrors `buildOpenCodeConfig` from the 1.x driver: local tools stay denied
- * (Netcatty has no approval bridge for OpenCode), the Netcatty MCP server is
+ * (Intelligent Terminal has no approval bridge for OpenCode), the Intelligent Terminal MCP server is
  * injected, and skills mode opens exactly the CLI paths it needs. OpenCode 2
  * allows local writes by default, so these rules are load-bearing.
  */
@@ -102,7 +102,7 @@ function buildOpenCodeV2Config({
     edit: "deny",
     bash: allowBash ? "allow" : "deny",
     webfetch: "deny",
-    // Netcatty does not bridge OpenCode's question reply API to the UI.
+    // Intelligent Terminal does not bridge OpenCode's question reply API to the UI.
     // Leaving it enabled creates a tool call that can never be completed.
     question: "deny",
     // Keep external access locked down, but let OpenCode's native skills
@@ -123,7 +123,7 @@ function buildOpenCodeV2Config({
   if (systemPrompt) {
     // 2.x dropped the per-prompt `system` field the 1.x SDK accepted. Agent
     // system text is added to the built-in agent prompt, so OpenCode's own tool
-    // guidance survives while Netcatty's context is included.
+    // guidance survives while Intelligent Terminal's context is included.
     config.agents = { [OPENCODE_V2_AGENT]: { system: String(systemPrompt) } };
   }
   return config;
@@ -787,7 +787,7 @@ async function resolveOpenCodeV2Session(client, resumeSessionId, { cwd, model, s
     }
   }
   const body = {
-    title: "Netcatty OpenCode",
+    title: "Intelligent Terminal OpenCode",
     agent: OPENCODE_V2_AGENT,
     ...(cwd ? { location: { directory: cwd } } : {}),
   };
@@ -802,7 +802,7 @@ async function resolveOpenCodeV2Session(client, resumeSessionId, { cwd, model, s
 /**
  * Answer a permission request the inline config did not pre-decide.
  *
- * Netcatty has no approval UI for OpenCode, and an unanswered request blocks
+ * Intelligent Terminal has no approval UI for OpenCode, and an unanswered request blocks
  * the turn forever. Declining keeps the documented observer-like posture
  * (local writes stay blocked) instead of hanging.
  */
@@ -820,13 +820,13 @@ async function declineOpenCodeV2Permission(client, event, emitter) {
       {
         body: {
           decision: "reject",
-          message: "Netcatty did not approve this OpenCode permission request.",
+          message: "Intelligent Terminal did not approve this OpenCode permission request.",
         },
       },
     );
     emitter.warning?.(
       "",
-      `OpenCode asked to use ${action}${resources ? ` (${resources})` : ""}; Netcatty declined it.`,
+      `OpenCode asked to use ${action}${resources ? ` (${resources})` : ""}; Intelligent Terminal declined it.`,
     );
   } catch {
     // Best effort: the turn stream still reports the resulting tool failure.
@@ -992,7 +992,7 @@ function getOpenCodeV2DefaultModelId(response) {
 }
 
 // Shared catalog servers: coalesce concurrent catalog loads for the same
-// binary, then tear down after a short idle so an idle Netcatty does not keep
+// binary, then tear down after a short idle so an idle Intelligent Terminal does not keep
 // `opencode serve` processes around.
 const openCodeV2CatalogServers = new Map();
 

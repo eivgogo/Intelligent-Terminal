@@ -942,7 +942,7 @@ function createMoshSessionApi(ctx) {
         fileExists: (p) => isExecutableFile(p) || fs.existsSync(p),
       });
       if (!sshExe) {
-        throw new Error("OpenSSH client not found. Netcatty needs ssh to start the remote mosh-server handshake.");
+        throw new Error("OpenSSH client not found. Intelligent Terminal needs ssh to start the remote mosh-server handshake.");
       }
     
       const preparedOptions = await prepareMoshSshAgentOptions(options);

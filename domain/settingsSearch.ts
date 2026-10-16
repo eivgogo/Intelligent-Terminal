@@ -16,7 +16,6 @@ export type SettingsSearchHit = {
 };
 
 const TAB_LABEL_KEYS: Record<SettingsTabId, string> = {
-  application: "settings.tab.application",
   appearance: "settings.tab.appearance",
   terminal: "settings.tab.terminal",
   shortcuts: "settings.tab.shortcuts",

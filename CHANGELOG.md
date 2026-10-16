@@ -8,6 +8,8 @@
 - **移除 AI 设置中的「提供商」子标签页**：删除仅服务于内置 agent 的供应商配置 UI（ProviderCard、ProviderConfigForm、AddProviderDropdown、ProviderIconBadge、ModelSelector 等）、`useAIState`/`useAISettingsState` 中的供应商状态与 CRUD、云端同步载荷中的 providers/activeProviderId/activeModelId/agentProviderMap 字段、主进程 `netcatty:ai:sync-providers` IPC 处理器与 preload/类型声明、相关 localStorage key 及设置搜索目录条目。AI 设置默认子标签改为「Agents」；用户本机外部 CLI/SDK Agent 的配置（模型/推理档位）保留在 `agentModelMap`/`agentThinkingMap`
 - 修复选择 OpenCode 时模型选择器先显示硬编码的占位模型（OpenAI GPT-5.1 / Claude Sonnet 4.6 / DeepSeek Chat 等）再被真实模型替换的问题：移除 `OPENCODE_MODEL_PRESETS` 静态兜底列表（OpenCode 的模型完全由用户在本机 `opencode` 配置，应只来自实时 provider 目录）；实时目录返回前模型芯片显示「正在加载模型...」并带 spinner
 - 统一其他本地 CLI Agent（Claude Code、Cursor、CodeBuddy、Grok、GitHub Copilot CLI）的模型选择体验：首次拉取实时模型目录期间不再先闪出精选静态列表再被替换，而是直接显示「正在加载模型...」；拉取结束后精选列表仍作为兜底保留（如 Codex SDK 无模型枚举接口，仍即时展示内置列表）
+- 设置界面「版本号」上方显示应用名称（来自 `getAppInfo`，开发版为 "Intelligent Terminal"），不再只显示版本号
+- **将用户可见的应用名称由 Netcatty 统一改为 Intelligent Terminal**：涵盖全部 5 种语言的界面文案、终端主题名（`Intelligent Terminal Dark/Light`）、系统通知与 OSC 通知默认标题、应用锁窗口标题、锁屏/授权窗口标题、CLI/ MCP 工具提示与错误信息、插件运行时文案、AI 系统提示词上下文（`[Intelligent Terminal session context]` 等）、macOS 权限用途描述；开发模式下 `app.setName` 亦改为 "Intelligent Terminal"。内部标识（userData 目录名、Windows 注册表 verb、发布仓库 `binaricat/Netcatty`、OSC7 rc 标记、`Netcatty*` 类型名）保持不变以确保兼容性
 - **彻底移除系统托盘图标与托盘面板**：移除顶部托盘图标、托盘菜单、托盘面板窗口（`#/tray`）、托盘会话跳转/端口转发开关、"关闭到托盘"（close-to-tray）设置；保留全局快捷键（Quake 模式）与 macOS Dock 菜单（"新连接"入口）。外部 MCP/CLI 的 `openMainWindow` 与 Dock 连接链路不受影响
 - **自动更新默认关闭（opt-in）**：新安装/未显式设置的用户默认不启用自动更新，启动时不再自动检查与下载，需在 Settings > System 手动开启；已有用户显式开启/关闭的偏好不受影响
 - Linux deb/rpm/pacman 安装包启用应用内自动更新；未标记的开发包和 Snap 继续提供手动下载入口

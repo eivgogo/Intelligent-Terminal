@@ -30,7 +30,7 @@ function createVaultAgentBridge({ getMainWindowFn, validateSender }) {
     if (!mainWin || mainWin.isDestroyed()) {
       return {
         ok: false,
-        error: "No active Netcatty window is available for vault access.",
+        error: "No active Intelligent Terminal window is available for vault access.",
       };
     }
 

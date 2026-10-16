@@ -5,7 +5,7 @@ import process from "node:process";
 import { checkPluginCompatibility } from "./compatibility.js";
 import { buildPlugin, initPlugin, packPlugin, validateTarget } from "./commands.js";
 
-const USAGE = `Netcatty plugin CLI (API 0.1.0-internal)
+const USAGE = `Intelligent Terminal plugin CLI (API 0.1.0-internal)
 
 Usage:
   netcatty-plugin init <directory> --id <reverse.dns.id> [--name <display name>]

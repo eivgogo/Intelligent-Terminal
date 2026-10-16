@@ -185,7 +185,7 @@ function connectTcp() {
 function rpcCall(method, params) {
   return new Promise((resolve, reject) => {
     if (!tcpSocket || tcpSocket.destroyed) {
-      return reject(new Error("Not connected to Netcatty"));
+      return reject(new Error("Not connected to Intelligent Terminal"));
     }
     const id = nextRpcId++;
     pendingRequests.set(id, { resolve, reject });
@@ -214,7 +214,7 @@ const scopeParams = CHAT_SESSION_ID
 server.resource(
   "environment",
   "netcatty://context",
-  { description: "Current Netcatty workspace context: connected hosts, session IDs, and environment description." },
+  { description: "Current Intelligent Terminal workspace context: connected hosts, session IDs, and environment description." },
   async () => {
     const ctx = await rpcCall("netcatty/getContext", scopeParams);
     return {

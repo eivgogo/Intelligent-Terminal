@@ -359,11 +359,11 @@ function createAppLockController({
     try {
       if (typeof win.getTitle === "function") {
         const currentTitle = win.getTitle();
-        if (currentTitle && currentTitle !== "Netcatty") {
+        if (currentTitle && currentTitle !== "Intelligent Terminal") {
           lockedWindowTitles.set(win, currentTitle);
         }
       }
-      win.setTitle?.("Netcatty");
+      win.setTitle?.("Intelligent Terminal");
       if (win.webContents?.isDevToolsOpened?.()) {
         win.webContents.closeDevTools?.();
       }
@@ -423,11 +423,11 @@ function createAppLockController({
   function setWindowTitle(win, title) {
     if (!win || win.isDestroyed?.()) return false;
     const nextTitle =
-      typeof title === "string" && title.trim() ? title.trim() : "Netcatty";
+      typeof title === "string" && title.trim() ? title.trim() : "Intelligent Terminal";
     try {
       if (getRuntimeState()?.locked === true) {
         lockedWindowTitles.set(win, nextTitle);
-        win.setTitle?.("Netcatty");
+        win.setTitle?.("Intelligent Terminal");
         return false;
       }
       win.setTitle?.(nextTitle);
@@ -445,8 +445,8 @@ function createAppLockController({
 
     for (const [win, title] of lockedWindowTitles) {
       try {
-        if (!win.isDestroyed?.() && win.getTitle?.() === "Netcatty") {
-          win.setTitle?.(title || "Netcatty");
+        if (!win.isDestroyed?.() && win.getTitle?.() === "Intelligent Terminal") {
+          win.setTitle?.(title || "Intelligent Terminal");
         }
       } catch {
         // ignore disposed windows during unlock

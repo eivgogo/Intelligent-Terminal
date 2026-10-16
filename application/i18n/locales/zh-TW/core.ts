@@ -67,7 +67,6 @@ export const zhTWCoreMessages: Messages = {
 
   // Settings shell
   'settings.title': '設定',
-  'settings.tab.application': '應用程式',
   'settings.tab.appearance': '外觀',
   'settings.tab.terminal': '終端',
   'settings.tab.shortcuts': '快捷鍵',
@@ -159,7 +158,7 @@ export const zhTWCoreMessages: Messages = {
   'settings.update.downloadError': '下載失敗。',
   'settings.update.manualDownload': '前往 GitHub 下載',
   'settings.update.manualDownloadHint': '目前平台不支援自動更新，請前往 GitHub 下載最新版本。',
-  'settings.update.hint': 'Netcatty 從 GitHub Releases 檢查更新。',
+  'settings.update.hint': 'Intelligent Terminal 從 GitHub Releases 檢查更新。',
   'settings.update.lastCheckedJustNow': '剛剛',
   'settings.update.lastCheckedMinutesAgo': '{n} 分鐘前',
   'settings.update.lastCheckedHoursAgo': '{n} 小時前',
@@ -233,16 +232,7 @@ export const zhTWCoreMessages: Messages = {
   'vault.sidebar.expand': '展開側邊欄',
   'vault.sidebar.resize': '調整側邊欄寬度',
 
-  // Settings > Application
-  'settings.application.checkUpdates': '檢查更新',
-  'settings.application.reportProblem': '反饋問題',
-  'settings.application.reportProblem.subtitle': '生成預填的 GitHub issue',
-  'settings.application.community': '社群',
-  'settings.application.community.subtitle': 'GitHub Discussions',
-  'settings.application.github': 'GitHub',
-  'settings.application.github.subtitle': '原始碼',
-  'settings.application.whatsNew': '更新內容',
-  'settings.application.whatsNew.subtitle': '檢視釋出說明',
+  // External link errors
   'settings.application.openExternal.failedTitle': '無法開啟連結',
   'settings.application.openExternal.failedBody': '系統瀏覽器和內建瀏覽器視窗都無法開啟該連結。',
   'settings.vault.title': '主機庫',
@@ -257,7 +247,7 @@ export const zhTWCoreMessages: Messages = {
   'settings.vault.showHostTreeSidebar': '顯示主機列表側欄',
   'settings.vault.showHostTreeSidebarDesc': '在終端和編輯器標籤頁顯示主機列表側欄及頂部開關。',
   'settings.vault.autoImportSystemKnownHosts': '自動匯入系統 known_hosts',
-  'settings.vault.autoImportSystemKnownHostsDesc': '開啟主機庫時靜默匯入 OpenSSH known_hosts 中的記錄。關閉後，Netcatty 已知主機與系統信任庫保持獨立；仍可透過「掃描系統」手動匯入。',
+  'settings.vault.autoImportSystemKnownHostsDesc': '開啟主機庫時靜默匯入 OpenSSH known_hosts 中的記錄。關閉後，Intelligent Terminal 已知主機與系統信任庫保持獨立；仍可透過「掃描系統」手動匯入。',
 
   // Update notifications
   'update.available.title': '發現新版本',
@@ -673,7 +663,7 @@ export const zhTWCoreMessages: Messages = {
   'vault.import.progress.persistFailed': '匯入的主機無法儲存。請清理本機儲存空間後重試。',
   'vault.import.progress.rollbackFailed': '匯入內容無法安全回復，可能仍有部分主機留在倉庫中。請檢查後再重試。',
   'vault.import.progress.summary': '已匯入 {count} 台主機；跳過 {skipped} 條；重複 {duplicates} 條。',
-  'vault.import.progress.keepOpen': '匯入正在背景執行，請保持 Netcatty 開啟。',
+  'vault.import.progress.keepOpen': '匯入正在背景執行，請保持 Intelligent Terminal 開啟。',
   'vault.import.progress.fileSummary': '{name} · {count} 個檔案',
   'vault.import.progress.fileCount': '已處理 {completed}/{total} 個檔案',
   'vault.import.mobaxterm.chooseEncoding': '選擇如何讀取 MobaXterm 檔案。',
@@ -736,7 +726,7 @@ export const zhTWCoreMessages: Messages = {
   'pf.type.menu.dynamic': '動態轉發',
   'pf.type.local.desc': '本機轉發讓你像存取本機一樣存取遠端服務埠。',
   'pf.type.remote.desc': '遠端轉發在遠端開啟埠，並將連線轉發到本機（目前）主機。',
-  'pf.type.dynamic.desc': '動態轉發將 Netcatty 作為 SOCKS 代理使用。',
+  'pf.type.dynamic.desc': '動態轉發將 Intelligent Terminal 作為 SOCKS 代理使用。',
   'pf.wizard.type.title': '選擇埠轉發型別：',
   'pf.wizard.localConfig.title': '設定本機埠與繫結地址：',
   'pf.wizard.localConfig.desc': '該埠會在本機（目前裝置）開啟，並接收流量。',
@@ -962,7 +952,7 @@ export const zhTWCoreMessages: Messages = {
 
   'settings.tab.plugins': '外掛程式',
   'settings.plugins.title': '外掛程式設定',
-  'settings.plugins.description': '由開發外掛程式提供、經 Netcatty 原生元件驗證的設定。',
+  'settings.plugins.description': '由開發外掛程式提供、經 Intelligent Terminal 原生元件驗證的設定。',
   'settings.plugins.loading': '正在載入外掛程式設定…',
   'settings.plugins.empty': '目前沒有已啟用外掛程式提供設定。',
   'settings.plugins.scopeContext': '請在對應的 {scope} 情境中開啟此設定。',
@@ -981,7 +971,7 @@ export const zhTWCoreMessages: Messages = {
   'settings.plugins.scopeTarget': '{scope} 目標',
   'settings.plugins.noScopeTargets': '沒有可用的目標',
   'settings.plugins.thisDevice': '此裝置',
-  'plugins.authentication.description': '請在此 Netcatty 對話框中完成驗證要求。',
+  'plugins.authentication.description': '請在此 Intelligent Terminal 對話框中完成驗證要求。',
   'plugins.authentication.value': '值',
   'plugins.authentication.password': '密碼',
   'plugins.authentication.code': '一次性驗證碼',

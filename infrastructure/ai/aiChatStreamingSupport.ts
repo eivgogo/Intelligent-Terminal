@@ -257,7 +257,7 @@ interface UserSkillsContextResult {
 
 function buildExplicitUserSkillsFallback(selectedUserSkillSlugs?: string[]): string {
   if (!selectedUserSkillSlugs?.length) return '';
-  return `The user explicitly selected these Netcatty user skills for this request: ${selectedUserSkillSlugs.map((slug) => `/${slug}`).join(', ')}. Honor those selections even if their expanded skill content is unavailable.`;
+  return `The user explicitly selected these Intelligent Terminal user skills for this request: ${selectedUserSkillSlugs.map((slug) => `/${slug}`).join(', ')}. Honor those selections even if their expanded skill content is unavailable.`;
 }
 
 export async function resolveUserSkillsContext(

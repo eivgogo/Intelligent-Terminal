@@ -274,7 +274,7 @@ function createExternalWindowApi(ctx) {
             icon: currentIcon,
             autoHideMenuBar: true,
             menuBarVisible: false,
-            title: "Netcatty Authorization",
+            title: "Intelligent Terminal Authorization",
             webPreferences: {
               contextIsolation: true,
               nodeIntegration: false,

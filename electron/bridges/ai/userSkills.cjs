@@ -13,7 +13,7 @@ const MAX_MATCHED_SKILLS = 2;
 const MAX_MATCHED_SKILL_CHARS = 6000;
 const MAX_TOTAL_INJECTED_SKILL_CHARS = 12000;
 const USER_SKILLS_README_CONTENT = [
-  "Netcatty user skills",
+  "Intelligent Terminal user skills",
   "",
   "Add one folder per skill inside this directory.",
   "Each skill folder must contain a SKILL.md file.",
@@ -414,20 +414,20 @@ async function buildUserSkillsContext(electronApp, prompt, selectedSkillSlugs = 
   const finalSkills = [...explicitSkills, ...matchedSkills];
 
   const parts = [
-    "User-managed skills are installed in Netcatty.",
+    "User-managed skills are installed in Intelligent Terminal.",
     `Available user skills: ${indexLine}${remainingCount > 0 ? `; and ${remainingCount} more.` : "."}`,
     "Use a user-managed skill only when it clearly matches the current request.",
   ];
 
   if (additionalExplicitCount > 0) {
     parts.push(
-      `The user selected ${additionalExplicitCount} additional Netcatty user skills that were omitted to stay within the prompt budget.`,
+      `The user selected ${additionalExplicitCount} additional Intelligent Terminal user skills that were omitted to stay within the prompt budget.`,
     );
   }
 
   if (unavailableExplicitSlugs.length > 0) {
     parts.push(
-      `The user explicitly selected these Netcatty user skills for this request, but their content is currently unavailable: ${summarizeSkillSlugs(unavailableExplicitSlugs)}.`,
+      `The user explicitly selected these Intelligent Terminal user skills for this request, but their content is currently unavailable: ${summarizeSkillSlugs(unavailableExplicitSlugs)}.`,
     );
   }
 

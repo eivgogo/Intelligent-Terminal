@@ -370,8 +370,8 @@ function buildCompactContext(
   if (!durableUserLines.length && !durableAssistantLines.length && !summaryLines.length) return [];
 
   const contentLines = [
-    "[Compact prior Netcatty UI context]",
-    "The external SDK agent may already have its own persisted session context. Use this compact Netcatty UI context only as fallback/background, and prefer the current user request when there is any conflict.",
+    "[Compact prior Intelligent Terminal UI context]",
+    "The external SDK agent may already have its own persisted session context. Use this compact Intelligent Terminal UI context only as fallback/background, and prefer the current user request when there is any conflict.",
   ];
   if (durableUserLines.length) {
     contentLines.push("Earlier user requests that may still apply:");

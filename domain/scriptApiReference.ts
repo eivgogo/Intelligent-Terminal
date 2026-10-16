@@ -2,7 +2,7 @@ import { DEFAULT_SCRIPT_TEMPLATE } from './snippetScript.ts';
 
 const WRAPPER_RULES = `## Script source wrapping
 
-Netcatty executes scripts as async JavaScript in a Node vm sandbox:
+Intelligent Terminal executes scripts as async JavaScript in a Node vm sandbox:
 
 - If the source is already an async IIFE or async arrow, it runs as-is.
 - If the source contains \`async function main()\`, it is wrapped and \`await main()\` is called.
@@ -73,7 +73,7 @@ Fields may use \`visibleWhen: { field, equals|notEquals|truthy|falsy }\` for con
 /** Markdown reference for AI agents — single source for scripts_reference tool and prompts. */
 export function getScriptApiReference(): string {
   return [
-    '# Netcatty automation script reference',
+    '# Intelligent Terminal automation script reference',
     '',
     'Automation scripts are Vault snippets with `kind: "script"`. They run in the active terminal session via the nct JavaScript API.',
     '',

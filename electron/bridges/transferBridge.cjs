@@ -3622,7 +3622,7 @@ async function assertUploadDigestCapacity(digestPath, fileSize) {
   const availableBytes = BigInt(stats.bavail) * BigInt(stats.bsize);
   if (availableBytes < requiredBytes) {
     const error = new Error(
-      `Not enough Netcatty temporary storage for upload verification: requires ${requiredBytes} bytes, ${availableBytes} bytes available`,
+      `Not enough Intelligent Terminal temporary storage for upload verification: requires ${requiredBytes} bytes, ${availableBytes} bytes available`,
     );
     error.noTransferFallback = true;
     throw error;

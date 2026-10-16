@@ -4,9 +4,9 @@
  * Grok Build CLI turn runner — headless streaming-json path.
  *
  * Spawns the system `grok` binary with `-p` / `--output-format streaming-json`
- * and maps ACP-derived NDJSON events into the canonical Netcatty emitter shapes.
+ * and maps ACP-derived NDJSON events into the canonical Intelligent Terminal emitter shapes.
  *
- * Netcatty MCP is injected by merging a project-scoped
+ * Intelligent Terminal MCP is injected by merging a project-scoped
  * `.grok/config.toml` `[mcp_servers.<name>]` section (restored after the turn),
  * matching the Cursor CLI workspace MCP merge pattern.
  */
@@ -274,7 +274,7 @@ function resolveGrokPermissionFlags(permissionMode) {
 
 /**
  * Local Grok built-ins that must not run side effects on the desktop machine
- * when Tool Access is MCP. Remote session work goes through injected Netcatty
+ * when Tool Access is MCP. Remote session work goes through injected Intelligent Terminal
  * MCP (meta-tools remain available under --disallowed-tools per Grok docs).
  * Both historical (`run_terminal_cmd`) and current (`run_terminal_command`)
  * shell IDs are listed so older/newer CLIs stay covered.
@@ -290,7 +290,7 @@ const GROK_MCP_MODE_DISALLOWED_LOCAL_TOOLS = [
 /**
  * Build --disallowed-tools flags for the active tool-integration mode.
  * - mcp (default): strip local shell/edit/write so Claude-style MCP path is used.
- * - skills: no lockdown here; Netcatty CLI skill needs local shell.
+ * - skills: no lockdown here; Intelligent Terminal CLI skill needs local shell.
  */
 function resolveGrokToolIntegrationFlags(toolIntegrationMode) {
   const mode = String(toolIntegrationMode || "mcp").toLowerCase();
@@ -751,7 +751,7 @@ async function runGrokTurn({
       mcpHandle = doMerge(effectiveCwd, injectedMcpServers);
     } catch (err) {
       emitter.emitError(
-        "Failed to prepare Netcatty MCP for Grok Build "
+        "Failed to prepare Intelligent Terminal MCP for Grok Build "
         + `(cannot write project .grok/config.toml: ${err?.message || err}). `
         + "Terminal tools will be unavailable.",
       );

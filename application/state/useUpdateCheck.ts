@@ -317,7 +317,7 @@ export function useUpdateCheck(options?: { autoUpdateEnabled?: boolean; enabled?
           latestRelease: {
             version: '1.0.0',
             tagName: 'v1.0.0',
-            name: 'Netcatty v1.0.0',
+            name: 'Intelligent Terminal v1.0.0',
             body: 'Demo release for testing update notification',
             htmlUrl: 'https://github.com/binaricat/Netcatty/releases',
             publishedAt: new Date().toISOString(),

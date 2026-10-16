@@ -2,7 +2,7 @@
  * Settings Page - Standalone settings window content
  * This component is rendered in a separate Electron window
  */
-import { AppWindow, Cloud, FileType, HardDrive, Keyboard, Palette, Puzzle, Sparkles, TerminalSquare, X } from "lucide-react";
+import { Cloud, FileType, HardDrive, Keyboard, Palette, Puzzle, Sparkles, TerminalSquare, X } from "lucide-react";
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useAISettingsState } from "../application/state/useAISettingsState";
 import { useAvailableFonts } from "../application/state/fontStore";
@@ -26,7 +26,6 @@ import { setupMcpApprovalBridge } from "../infrastructure/ai/shared/approvalGate
 import { usePluginContributions } from "../application/state/usePluginContributions";
 import { PluginContributionHost } from "./plugins/PluginContributionHost";
 
-const LazySettingsApplicationTab = lazy(() => import("./SettingsApplicationTab"));
 const LazySettingsAppearanceTab = lazy(() => import("./settings/tabs/SettingsAppearanceTab"));
 const LazySettingsFileAssociationsTab = lazy(() => import("./settings/tabs/SettingsFileAssociationsTab"));
 const LazySettingsShortcutsTab = lazy(() => import("./settings/tabs/SettingsShortcutsTab"));
@@ -295,14 +294,14 @@ const SettingsPageContent: React.FC<{ settings: SettingsState; appLock?: AppLock
     const { t } = useI18n();
     const { request, clearFocus, openSearch } = useSettingsFocus();
     const { notifyRendererReady, closeSettingsWindow, onWindowCommandCloseRequested } = useWindowControls();
-    const { updateState, checkNow, installUpdate, openReleasePage, startDownload, isUpdateDemoMode } = useUpdateCheck({
+    const { updateState, checkNow, installUpdate, openReleasePage, startDownload } = useUpdateCheck({
         autoUpdateEnabled: settings.autoUpdateEnabled,
         // Install blocked by unsaved editors in the main window — surface a toast
         // here so a click from the Settings window isn't a silent no-op (#1215).
         onNeedsSave: () => toast.warning(t('update.needsSave.message'), t('update.needsSave.title')),
     });
-    const [activeTab, setActiveTab] = useState("application");
-    const [mountedTabs, setMountedTabs] = useState(() => new Set(["application"]));
+    const [activeTab, setActiveTab] = useState("appearance");
+    const [mountedTabs, setMountedTabs] = useState(() => new Set(["appearance"]));
     const { available: pluginRuntimeAvailable } = usePluginContributions();
 
     useEffect(() => {
@@ -414,13 +413,6 @@ const SettingsPageContent: React.FC<{ settings: SettingsState; appLock?: AppLock
                 <div className="w-56 border-r border-border flex flex-col shrink-0 px-3 py-3">
                     <SettingsSearchControl includePlugins={pluginRuntimeAvailable} />
                     <TabsList className="flex flex-col h-auto bg-transparent gap-1 p-0 justify-start">
-                        <TabsTrigger
-                            value="application"
-                            className={settingsTabTriggerClassName}
-                        >
-                            <AppWindow size={14} className={settingsTabIconClassName} />
-                            <span className={settingsTabLabelClassName}>{t("settings.tab.application")}</span>
-                        </TabsTrigger>
                         {pluginRuntimeAvailable && (
                             <TabsTrigger value="plugins" className={settingsTabTriggerClassName}>
                                 <Puzzle size={14} className={settingsTabIconClassName} />
@@ -480,19 +472,6 @@ const SettingsPageContent: React.FC<{ settings: SettingsState; appLock?: AppLock
                 </div>
 
                 <div className="flex-1 h-full flex flex-col min-h-0 bg-muted/10">
-                    {mountedTabs.has("application") && (
-                        <SettingsLazyTab value="application">
-                            <LazySettingsApplicationTab
-                                updateState={updateState}
-                                checkNow={checkNow}
-                                openReleasePage={openReleasePage}
-                                installUpdate={installUpdate}
-                                startDownload={startDownload}
-                                isUpdateDemoMode={isUpdateDemoMode}
-                            />
-                        </SettingsLazyTab>
-                    )}
-
                     {mountedTabs.has("appearance") && (
                         <SettingsLazyTab value="appearance">
                             <LazySettingsAppearanceTab

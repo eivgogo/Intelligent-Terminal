@@ -858,7 +858,7 @@ async function getNativeOpenSshAgentSocket(identityAgent, injected = {}) {
   const platform = injected.platform || process.platform;
   if (platform === "win32" && socketPath && !isWindowsNamedPipe(socketPath)) {
     const error = new Error(
-      "This SSH agent is available only to Netcatty's built-in SSH client. Mosh and EternalTerminal require a Windows named-pipe agent.",
+      "This SSH agent is available only to Intelligent Terminal's built-in SSH client. Mosh and EternalTerminal require a Windows named-pipe agent.",
     );
     error.code = "ERR_SSH_AGENT_NATIVE_UNSUPPORTED";
     throw error;
@@ -871,7 +871,7 @@ async function getNativeOpenSshForwardingAgentSocket(identityAgent, injected = {
   const platform = injected.platform || process.platform;
   if (platform === "win32" && socketPath && !isWindowsNamedPipe(socketPath)) {
     const error = new Error(
-      "This SSH agent is available only to Netcatty's built-in SSH client. Mosh and EternalTerminal require a Windows named-pipe agent.",
+      "This SSH agent is available only to Intelligent Terminal's built-in SSH client. Mosh and EternalTerminal require a Windows named-pipe agent.",
     );
     error.code = "ERR_SSH_AGENT_NATIVE_UNSUPPORTED";
     throw error;

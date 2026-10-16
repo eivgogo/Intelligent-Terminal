@@ -210,9 +210,9 @@ module.exports = {
         entitlements: 'electron/entitlements.mac.plist',
         entitlementsInherit: 'electron/entitlements.mac.plist',
         extendInfo: {
-            NSCameraUsageDescription: 'Netcatty may use the camera for video calls',
-            NSMicrophoneUsageDescription: 'Netcatty may use the microphone for audio',
-            NSLocalNetworkUsageDescription: 'Netcatty needs local network access for SSH connections',
+            NSCameraUsageDescription: 'Intelligent Terminal may use the camera for video calls',
+            NSMicrophoneUsageDescription: 'Intelligent Terminal may use the microphone for audio',
+            NSLocalNetworkUsageDescription: 'Intelligent Terminal needs local network access for SSH connections',
             CFBundleDocumentTypes: [
                 {
                     CFBundleTypeName: 'Folder',

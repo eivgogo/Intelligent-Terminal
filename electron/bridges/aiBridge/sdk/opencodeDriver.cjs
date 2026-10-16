@@ -65,7 +65,7 @@ function buildOpenCodeConfig({ model, injectedMcpServers, toolIntegrationMode, s
     edit: "deny",
     bash: allowBash ? "allow" : "deny",
     webfetch: "deny",
-    // Netcatty does not yet bridge OpenCode's question reply API to the UI.
+    // Intelligent Terminal does not yet bridge OpenCode's question reply API to the UI.
     // Leaving it enabled creates a tool call that can never be completed.
     question: "deny",
     // Keep external access locked down, but let OpenCode's native skills
@@ -586,7 +586,7 @@ async function runOpenCodeTurn({
 
     if (!sessionId) {
       const created = await client.session.create({
-        body: { title: "Netcatty OpenCode" },
+        body: { title: "Intelligent Terminal OpenCode" },
         query: directoryQuery,
       });
       sessionId = created?.data?.id || created?.id || null;
@@ -785,7 +785,7 @@ function buildOpenCodeListServerKey(binPath, env) {
 }
 
 // Shared list-models servers: coalesce concurrent catalog loads for the same
-// binary, then tear down after a short idle so idle Netcatty does not keep
+// binary, then tear down after a short idle so idle Intelligent Terminal does not keep
 // opencode processes around (issue #2184).
 const OPENCODE_LIST_SERVER_IDLE_MS = 1500;
 const openCodeListServers = new Map();

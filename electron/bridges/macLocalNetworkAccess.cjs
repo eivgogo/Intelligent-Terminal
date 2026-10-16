@@ -32,7 +32,7 @@ const DEFAULT_PROBE_HOLD_MS = 500;
 /** IANA discard service - Apple's TN3179 sample uses this port for the trigger. */
 const DISCARD_PORT = 9;
 const LOCAL_NETWORK_HINT =
-  "macOS may be blocking Local Network access. Open System Settings -> Privacy & Security -> Local Network, enable Netcatty, then reconnect.";
+  "macOS may be blocking Local Network access. Open System Settings -> Privacy & Security -> Local Network, enable Intelligent Terminal, then reconnect.";
 
 const defaultLookup = dns.promises.lookup.bind(dns.promises);
 

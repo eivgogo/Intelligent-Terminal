@@ -185,7 +185,7 @@ export class S3Adapter {
   private getClient(): S3Client {
     if (!this.config || !this.client) {
       if (this.config?.allowInsecure) {
-        throw new Error('S3 insecure connections require the Netcatty desktop sync bridge');
+        throw new Error('S3 insecure connections require the Intelligent Terminal desktop sync bridge');
       }
       throw new Error('Missing S3 config');
     }

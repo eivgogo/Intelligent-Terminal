@@ -45,7 +45,7 @@ export function checkPluginCompatibility(
 ): PluginCompatibilityResult {
   const apiVersion = target.apiVersion ?? DEFAULT_PLUGIN_API_VERSION;
   const errors: string[] = [];
-  checkEngineVersion("Netcatty", target.netcattyVersion, manifest.engines.netcatty, errors);
+  checkEngineVersion("Intelligent Terminal", target.netcattyVersion, manifest.engines.netcatty, errors);
   checkEngineVersion("plugin API", apiVersion, manifest.engines.api, errors);
 
   const supportedFeatures = new Set(target.features ?? []);

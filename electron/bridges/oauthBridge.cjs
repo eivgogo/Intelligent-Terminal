@@ -173,13 +173,13 @@ const renderOAuthPage = ({ title, message, detail, status, autoClose }) => {
         <rect x="34" y="44" width="6" height="5" rx="1" fill="white" stroke="#1E4FD1"/>
       </svg>
       <div>
-        <div class="brand">Netcatty</div>
+        <div class="brand">Intelligent Terminal</div>
       </div>
     </div>
     <h1 class="title-row"><span>${safeTitle}</span>${titleIcon}</h1>
     <p class="subtitle">${safeMessage}</p>
     ${detailBlock}
-    <div class="footer">You can close this window and return to <span class="accent">Netcatty</span>.</div>
+    <div class="footer">You can close this window and return to <span class="accent">Intelligent Terminal</span>.</div>
   </div>
   ${closeScript}
 </body>
@@ -210,7 +210,7 @@ function handleOAuthRequest(session, req, res) {
     res.end(
       renderOAuthPage({
         title: "Authorization Not Ready",
-        message: "This sign-in request is not active yet. Return to Netcatty and try again.",
+        message: "This sign-in request is not active yet. Return to Intelligent Terminal and try again.",
         status: "warning",
       })
     );

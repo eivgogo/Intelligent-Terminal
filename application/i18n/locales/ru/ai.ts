@@ -119,8 +119,8 @@ export const ruAiMessages: Messages = {
   'ai.cursor.apiKey': 'API-ключ',
   'ai.cursor.apiKeyPlaceholder': 'Введите API-ключ Cursor',
   'ai.cursor.apiKeyPlaceholder.env': 'Используется CURSOR_API_KEY; введите ключ для замены',
-  'ai.cursor.apiKeyEnvHint': 'Cursor может использовать CURSOR_API_KEY из shell. Сохраняйте ключ здесь только если хотите переопределить его в Netcatty.',
-  'ai.cursor.apiKeyOverrideHint': 'Netcatty сначала использует сохранённый здесь ключ, затем CURSOR_API_KEY.',
+  'ai.cursor.apiKeyEnvHint': 'Cursor может использовать CURSOR_API_KEY из shell. Сохраняйте ключ здесь только если хотите переопределить его в Intelligent Terminal.',
+  'ai.cursor.apiKeyOverrideHint': 'Intelligent Terminal сначала использует сохранённый здесь ключ, затем CURSOR_API_KEY.',
   'ai.cursor.saveApiKey': 'Сохранить',
   'ai.cursor.saved': 'Сохранено',
   'ai.cursor.showApiKey': 'Показать API-ключ',
@@ -182,7 +182,7 @@ export const ruAiMessages: Messages = {
   'ai.grok.runtime.acp.title': 'Использовать Grok ACP (agent stdio)',
   'ai.grok.runtime.acp.default': 'По умолчанию',
   'ai.grok.runtime.acp.description':
-    'Подключение к Grok через Agent Client Protocol (grok agent stdio). Netcatty MCP внедряется в session/new. Выключите, чтобы использовать исходный headless streaming-json CLI.',
+    'Подключение к Grok через Agent Client Protocol (grok agent stdio). Intelligent Terminal MCP внедряется в session/new. Выключите, чтобы использовать исходный headless streaming-json CLI.',
   'ai.grok.runtime.streamingJson.hint':
     'Режим headless streaming-json (grok -p --output-format streaming-json). MCP внедряется через .grok/config.toml проекта.',
 
@@ -190,18 +190,18 @@ export const ruAiMessages: Messages = {
   'ai.defaultAgent': 'Агент по умолчанию',
   'ai.defaultAgent.description': 'Агент, который будет использоваться при запуске новой AI-сессии',
   'ai.toolAccess.title': 'Доступ к инструментам',
-  'ai.toolAccess.mode': 'Режим доступа Netcatty',
-  'ai.toolAccess.description': 'Выберите, как внешние агенты получают доступ к сессиям Netcatty. MCP предоставляет встроенный сервер, а Skills + CLI указывает агентам на локальный skill Netcatty и команды CLI.',
+  'ai.toolAccess.mode': 'Режим доступа Intelligent Terminal',
+  'ai.toolAccess.description': 'Выберите, как внешние агенты получают доступ к сессиям Intelligent Terminal. MCP предоставляет встроенный сервер, а Skills + CLI указывает агентам на локальный skill Intelligent Terminal и команды CLI.',
   'ai.toolAccess.mode.mcp': 'MCP',
   'ai.toolAccess.mode.skills': 'Skills + CLI',
 
   'ai.externalMcp.title': 'Внешний MCP',
-  'ai.externalMcp.description': 'Откройте Netcatty как MCP-сервер для Codex, Claude Code, Cursor и Grok. Набор инструментов тот же, что у встроенных агентов. Держите Netcatty запущенным, пока клиенты подключены.',
+  'ai.externalMcp.description': 'Откройте Intelligent Terminal как MCP-сервер для Codex, Claude Code, Cursor и Grok. Набор инструментов тот же, что у встроенных агентов. Держите Intelligent Terminal запущенным, пока клиенты подключены.',
   'ai.externalMcp.sessionsExposed': 'Сессий в области: {count}',
   'ai.externalMcp.mode': 'Режим доступности',
   'ai.externalMcp.mode.temporary': 'Временный',
   'ai.externalMcp.mode.persistent': 'Постоянный',
-  'ai.externalMcp.mode.description': 'Временный режим отключается после простоя. Постоянный восстанавливает External MCP при запуске Netcatty.',
+  'ai.externalMcp.mode.description': 'Временный режим отключается после простоя. Постоянный восстанавливает External MCP при запуске Intelligent Terminal.',
   'ai.externalMcp.idleTimeout': 'Таймаут простоя',
   'ai.externalMcp.idleTimeout.description': 'В временном режиме отключить External MCP после указанного числа минут без MCP-операций.',
   'ai.externalMcp.idleTimeout.minutes': 'мин',
@@ -212,7 +212,7 @@ export const ruAiMessages: Messages = {
   'ai.externalMcp.sessionIdleTimeout': 'Тайм-аут открытого сеанса',
   'ai.externalMcp.sessionIdleTimeout.description': 'Автоматически закрывать сеансы, открытые ИИ, после указанного числа минут без операций терминала или файлов.',
   'ai.externalMcp.usage.title': 'Как пользоваться',
-  'ai.externalMcp.usage.keepRunning': '1. Включите External MCP и держите Netcatty запущенным.',
+  'ai.externalMcp.usage.keepRunning': '1. Включите External MCP и держите Intelligent Terminal запущенным.',
   'ai.externalMcp.usage.localhost': '2. Клиенты подключаются через локальный launcher (только 127.0.0.1). Discovery удаляется при отключении.',
   'ai.externalMcp.usage.permissions': '3. Запись следует Settings → AI → Safety и списку блокировки команд.',
   'ai.externalMcp.usage.capabilities': '4. Доступен полный catalog: терминал, SFTP, Vault и проброс портов. Секреты не возвращаются.',
@@ -221,7 +221,7 @@ export const ruAiMessages: Messages = {
   'ai.externalMcp.security.description': 'Слушает только 127.0.0.1 с ротацией token, использует AI Permission Mode для записи и удаляет discovery при отключении.',
   'ai.externalMcp.permissionMode': 'Текущий режим разрешений: {mode}',
   'ai.externalMcp.permissionMode.label': 'Режим разрешений на запись',
-  'ai.externalMcp.permissionMode.hint': 'Тот же параметр, что Settings → AI → Safety. Auto выполняет write-инструменты Netcatty без запросов; Confirm спрашивает каждый раз. Внешние клиенты (Codex / Claude / Grok) могут показывать своё подтверждение инструментов.',
+  'ai.externalMcp.permissionMode.hint': 'Тот же параметр, что Settings → AI → Safety. Auto выполняет write-инструменты Intelligent Terminal без запросов; Confirm спрашивает каждый раз. Внешние клиенты (Codex / Claude / Grok) могут показывать своё подтверждение инструментов.',
   'ai.externalMcp.permissionMode.unknown': 'Неизвестно',
   'ai.externalMcp.discovery': 'Discovery',
   'ai.externalMcp.launcher': 'Launcher',
@@ -265,7 +265,7 @@ export const ruAiMessages: Messages = {
   'ai.externalMcp.status.grokNotFound': 'Grok не найден',
   'ai.externalMcp.status.conflict': 'Конфликт',
   'ai.userSkills.title': 'Пользовательские skills',
-  'ai.userSkills.description': 'Откройте папку skills Netcatty, чтобы добавить свои каталоги skills. Netcatty автоматически сканирует их и добавляет только лёгкие индексы, если skill явно не соответствует текущему запросу.',
+  'ai.userSkills.description': 'Откройте папку skills Intelligent Terminal, чтобы добавить свои каталоги skills. Intelligent Terminal автоматически сканирует их и добавляет только лёгкие индексы, если skill явно не соответствует текущему запросу.',
   'ai.userSkills.openFolder': 'Открыть папку skills',
   'ai.userSkills.reload': 'Перезагрузить skills',
   'ai.userSkills.location': 'Расположение',
@@ -399,7 +399,7 @@ export const ruAiMessages: Messages = {
   'ai.chatShortcuts.selectionAction.description': 'Показывать небольшую кнопку AI рядом с выделенным текстом терминала.',
 
   // AI Error
-  'ai.codex.bridgeError': 'Обработчики главного процесса Codex ещё не загружены. Полностью перезапустите Netcatty или dev-процесс Electron и попробуйте снова.',
+  'ai.codex.bridgeError': 'Обработчики главного процесса Codex ещё не загружены. Полностью перезапустите Intelligent Terminal или dev-процесс Electron и попробуйте снова.',
 
   // AI Web Search
   'ai.webSearch.title': 'Веб-поиск',
@@ -419,7 +419,7 @@ export const ruAiMessages: Messages = {
   // AI Safety Settings
   'ai.safety.title': 'Безопасность',
   'ai.safety.permissionMode': 'Режим разрешений',
-  'ai.safety.permissionMode.description': 'Управляет тем, как AI взаимодействует с вашими терминалами. Режим наблюдателя блокирует все операции записи через Netcatty и применяется как к встроенным, так и к внешним агентам. Режим подтверждения носит рекомендательный характер для внешних агентов (они управляют собственным потоком одобрения инструментов).',
+  'ai.safety.permissionMode.description': 'Управляет тем, как AI взаимодействует с вашими терминалами. Режим наблюдателя блокирует все операции записи через Intelligent Terminal и применяется как к встроенным, так и к внешним агентам. Режим подтверждения носит рекомендательный характер для внешних агентов (они управляют собственным потоком одобрения инструментов).',
   'ai.safety.permissionMode.observer': 'Наблюдатель — только чтение, без действий',
   'ai.safety.permissionMode.confirm': 'Подтверждение — спрашивать перед действиями',
   'ai.safety.permissionMode.auto': 'Авто — выполнять свободно',
@@ -429,7 +429,7 @@ export const ruAiMessages: Messages = {
   'ai.safety.maxIterations': 'Макс. число итераций',
   'ai.safety.maxIterations.description': 'Максимальное число циклов использования инструментов AI, чтобы предотвратить бесконтрольное выполнение. У внешних агентов могут быть собственные внутренние лимиты итераций, имеющие приоритет.',
   'ai.safety.blocklist': 'Чёрный список команд',
-  'ai.safety.blocklist.description': 'Regex-шаблоны для блокировки опасных команд. Применяется как к встроенным, так и к внешним агентам через механизм выполнения Netcatty.',
+  'ai.safety.blocklist.description': 'Regex-шаблоны для блокировки опасных команд. Применяется как к встроенным, так и к внешним агентам через механизм выполнения Intelligent Terminal.',
   'ai.safety.blocklist.placeholder': 'Regex-шаблон...',
   'ai.safety.blocklist.reset': 'Сбросить по умолчанию',
   'ai.safety.blocklist.add': 'Добавить шаблон',
@@ -445,7 +445,7 @@ export const ruAiMessages: Messages = {
   'ai.safety.grants.remove': 'Удалить',
   'ai.safety.grants.export': 'Экспорт JSON',
   'ai.safety.grants.import': 'Импорт JSON',
-  'ai.safety.note': 'Эти настройки безопасности применяются к действиям, выполняемым через Netcatty. Внешние CLI-агенты могут иметь собственные локальные инструменты и собственные правила управления ими.',
+  'ai.safety.note': 'Эти настройки безопасности применяются к действиям, выполняемым через Intelligent Terminal. Внешние CLI-агенты могут иметь собственные локальные инструменты и собственные правила управления ими.',
 
   // Unified tooltips for terminal workspace and top tabs (issue #954)
   'terminal.layer.addTerminal': 'Добавить терминал',

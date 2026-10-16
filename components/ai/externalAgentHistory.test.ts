@@ -51,7 +51,7 @@ test("buildExternalAgentHistoryMessages compacts older external agent context an
   const result = buildExternalAgentHistoryMessages(messages);
 
   assert.equal(result[0].role, "user");
-  assert.match(result[0].content, /Compact prior Netcatty UI context/);
+  assert.match(result[0].content, /Compact prior Intelligent Terminal UI context/);
   assert.match(result[0].content, /最小改动/);
   assert.match(result[0].content, /pwsh\.exe/);
   assert.match(result[0].content, /PR #738/);
@@ -587,7 +587,7 @@ test("buildExternalAgentHistoryMessages does not duplicate recent raw turns into
 
   const result = buildExternalAgentHistoryMessages(messages);
 
-  const compact = result.find((m) => m.content.includes("[Compact prior Netcatty UI context]"));
+  const compact = result.find((m) => m.content.includes("[Compact prior Intelligent Terminal UI context]"));
   assert.ok(compact, "expected a compact context message");
 
   // Both markers belong to messages inside the raw window — they must
@@ -596,7 +596,7 @@ test("buildExternalAgentHistoryMessages does not duplicate recent raw turns into
   assert.doesNotMatch(compact.content, /RAW_TOOL_MARKER/);
 
   // Raw section still carries them verbatim.
-  const raw = result.filter((m) => !m.content.includes("[Compact prior Netcatty UI context]"));
+  const raw = result.filter((m) => !m.content.includes("[Compact prior Intelligent Terminal UI context]"));
   const rawFlat = raw.map((m) => m.content).join("\n");
   assert.match(rawFlat, /IMPORTANT_RAW_MARKER/);
   assert.match(rawFlat, /RAW_TOOL_MARKER/);

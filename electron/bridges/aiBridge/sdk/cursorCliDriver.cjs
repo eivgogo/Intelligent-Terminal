@@ -72,7 +72,7 @@ function resolveCursorCliModel(model) {
   return encoded || DEFAULT_CURSOR_CLI_MODEL;
 }
 
-/** Map Netcatty permission mode → Cursor CLI execution class. */
+/** Map Intelligent Terminal permission mode → Cursor CLI execution class. */
 function resolveCursorCliExecMode(permissionMode) {
   return String(permissionMode || "confirm").toLowerCase() === "observer" ? "ask" : "agent";
 }
@@ -130,9 +130,9 @@ function mcpConfigToCursorMcpJsonEntry(cfg) {
 }
 
 /**
- * Cursor CLI discovers MCP via `{cwd}/.cursor/mcp.json`. Packaged Netcatty
+ * Cursor CLI discovers MCP via `{cwd}/.cursor/mcp.json`. Packaged Intelligent Terminal
  * launched from Finder/Dock often has `process.cwd() === "/"`, which cannot
- * host that file. Always prefer a writable Netcatty temp workspace.
+ * host that file. Always prefer a writable Intelligent Terminal temp workspace.
  */
 function resolveCursorCliWorkspaceCwd({
   preferredCwd,
@@ -493,7 +493,7 @@ async function runCursorCliTurn({
     });
   } catch (err) {
     emitter.emitError(
-      "Failed to prepare Netcatty MCP for Cursor CLI "
+      "Failed to prepare Intelligent Terminal MCP for Cursor CLI "
       + `(cannot create workspace: ${err?.message || err}). `
       + "Terminal tools will be unavailable.",
     );
@@ -516,7 +516,7 @@ async function runCursorCliTurn({
       mcpHandle = doMerge(effectiveCwd, injectedMcpServers);
     } catch (err) {
       emitter.emitError(
-        "Failed to prepare Netcatty MCP for Cursor CLI "
+        "Failed to prepare Intelligent Terminal MCP for Cursor CLI "
         + `(cannot write workspace MCP config: ${err?.message || err}). `
         + "Terminal tools will be unavailable.",
       );

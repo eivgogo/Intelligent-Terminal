@@ -552,7 +552,7 @@ const VAULT_CAPABILITIES = [
     id: "vault.scripts.reference",
     domain: "vault",
     status: CAPABILITY_STATUS.IMPLEMENTED,
-    description: "Return Netcatty automation script syntax: nct API, triggers, host targeting, and source wrapping rules.",
+    description: "Return Intelligent Terminal automation script syntax: nct API, triggers, host targeting, and source wrapping rules.",
     policy: {
       write: false,
       sensitiveRead: false,

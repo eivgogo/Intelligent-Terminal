@@ -2,7 +2,7 @@ import { netcattyBridge } from "../../infrastructure/services/netcattyBridge";
 
 const requireBridge = () => {
   const bridge = netcattyBridge.get();
-  if (!bridge) throw new Error("Netcatty desktop bridge is unavailable");
+  if (!bridge) throw new Error("Intelligent Terminal desktop bridge is unavailable");
   return bridge;
 };
 

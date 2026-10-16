@@ -59,7 +59,7 @@ class PluginCredentialBroker {
       return {
         permission: "vault.credentials",
         resources: [`credential:${validated.secret.id}`],
-        reason: `Use Netcatty credential for ${validated.purpose}`,
+        reason: `Use Intelligent Terminal credential for ${validated.purpose}`,
         operationId: validated.operationId,
       };
     }
@@ -77,7 +77,7 @@ class PluginCredentialBroker {
     let resolveSecret;
     if (validated.secret.kind === "credential") {
       if (!this.credentialResolver) {
-        throw new PluginRpcError(RPC_ERRORS.unavailable, "Netcatty credential access is unavailable");
+        throw new PluginRpcError(RPC_ERRORS.unavailable, "Intelligent Terminal credential access is unavailable");
       }
       await this.credentialResolver.assertReference(validated.secret, {
         pluginId: context.pluginId,
