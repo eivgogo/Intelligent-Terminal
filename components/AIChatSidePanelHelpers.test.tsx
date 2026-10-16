@@ -13,6 +13,7 @@ import {
   normalizeSdkRuntimeModelPresets,
   shouldAdoptSdkCurrentModel,
   shouldLoadSdkRuntimeModels,
+  shouldSuppressStaticModelPresets,
   shouldUseStoredAgentModel,
 } from './AIChatSidePanelHelpers';
 import type { AgentModelPreset, ExternalAgentConfig } from '../infrastructure/ai/types';
@@ -140,6 +141,20 @@ test('shouldLoadSdkRuntimeModels includes SDK agents with model catalogs', () =>
   assert.equal(shouldLoadSdkRuntimeModels(agent('codex')), false);
   assert.equal(shouldLoadSdkRuntimeModels({ ...agent('codex'), codexRuntime: 'app-server' }), true);
   assert.equal(shouldLoadSdkRuntimeModels(undefined), false);
+});
+
+test('shouldSuppressStaticModelPresets hides curated presets only while live catalog loads', () => {
+  const presets: AgentModelPreset[] = [{ id: 'sonnet', name: 'Sonnet 4.6' }];
+  // No runtime catalog yet + first live fetch in flight -> suppress static list
+  // (e.g. Claude/Cursor/CodeBuddy/Grok flashing their curated presets).
+  assert.equal(shouldSuppressStaticModelPresets(undefined, true), true);
+  // Fetch resolved: keep the curated list as a genuine fallback.
+  assert.equal(shouldSuppressStaticModelPresets(undefined, false), false);
+  // Live catalog already applied: runtime presets win, never suppressed.
+  assert.equal(shouldSuppressStaticModelPresets(presets, true), false);
+  assert.equal(shouldSuppressStaticModelPresets(presets, false), false);
+  // Empty runtime array is still "no catalog yet".
+  assert.equal(shouldSuppressStaticModelPresets([], true), true);
 });
 
 test('Codex App Server model discovery uses a separate cache identity', () => {

@@ -262,6 +262,21 @@ export function shouldLoadSdkRuntimeModels(agent?: ExternalAgentConfig): boolean
     || sdkBackend === 'grok';
 }
 
+/**
+ * While the live SDK model catalog is being fetched for the first time, agents
+ * with a curated static preset list (Claude/Cursor/CodeBuddy/Grok/Copilot/…)
+ * would otherwise flash that stale list before it swaps to the live catalog.
+ * Suppress it so the composer renders its loading state instead. Once the fetch
+ * resolves — success or failure — `isLoading` clears and the curated list is
+ * available again as a genuine fallback (e.g. Codex SDK has no enumeration API).
+ */
+export function shouldSuppressStaticModelPresets(
+  runtimePresets: AgentModelPreset[] | undefined,
+  isLoading: boolean,
+): boolean {
+  return !(runtimePresets && runtimePresets.length > 0) && isLoading;
+}
+
 export function shouldAdoptSdkCurrentModel(
   currentModelId: string | null | undefined,
   storedModelId: string | null | undefined,

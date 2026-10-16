@@ -71,6 +71,7 @@ import {
   normalizeSdkRuntimeModelPresets,
   shouldAdoptSdkCurrentModel,
   shouldLoadSdkRuntimeModels,
+  shouldSuppressStaticModelPresets,
   shouldUseStoredAgentModel,
   type SdkRuntimeModelCatalog,
 } from './AIChatSidePanelHelpers';
@@ -869,11 +870,16 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     const target = buildExternalAgentRuntimeModelTarget(currentAgentConfig);
     if (!target) return;
 
+    // Only agents that actually enumerate a live catalog should drive the
+    // loading chip; Codex SDK has no enumeration API and relies entirely on its
+    // curated preset list, so it must render that immediately.
+    const expectsLiveCatalog = shouldLoadSdkRuntimeModels(currentAgentConfig);
+
     const cached = sdkRuntimeModelCache.read(target.cacheKey);
     if (cached) {
       applySdkRuntimeModelCatalog(target.agentId, cached);
       setRuntimeModelLoading((prev) => (prev[target.agentId] ? { ...prev, [target.agentId]: false } : prev));
-    } else {
+    } else if (expectsLiveCatalog) {
       // No cached catalog yet: mark the agent as loading so the composer shows a
       // loading chip (instead of a stale/fabricated model list) until the live
       // catalog arrives.
@@ -923,6 +929,12 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       return [];
     }
     if (runtimePresets) return runtimePresets;
+    // Suppress the curated static list while the first live catalog fetch is in
+    // flight, so the composer shows its loading chip instead of flashing a
+    // stale list that is about to be replaced.
+    if (shouldSuppressStaticModelPresets(runtimePresets, Boolean(runtimeModelLoading[currentAgentId]))) {
+      return [];
+    }
     const presets = getAgentModelPresets(
       currentAgentConfig?.command,
       getExternalAgentSdkBackend(currentAgentConfig),
@@ -934,6 +946,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     currentAgentConfig,
     currentAgentId,
     runtimeAgentModelPresets,
+    runtimeModelLoading,
     hasCodexCustomConfig,
     codexConfigModel,
     discoveredAgents,
