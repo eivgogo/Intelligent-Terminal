@@ -50,7 +50,6 @@ export const zhTWCoreMessages: Messages = {
   // Dialogs / prompts
   'confirm.deleteHost': '刪除主機 "{name}"？',
   'confirm.deleteIdentity': '刪除身份 "{name}"？',
-  'confirm.removeProvider': '移除供應商 "{name}"？',
   'confirm.closeBusyTerminal.title': '確認關閉',
   'confirm.closeBusyTerminal.message': '程序 "{command}" 仍在執行，關閉後會被終止。',
   'confirm.closeBusyTerminal.messageWithMore': '程序 "{command}" 及其他 {count} 個正在執行的程序將被終止。',

@@ -18,7 +18,6 @@ export const SETTINGS_TAB_IDS = [
 export type SettingsTabId = (typeof SETTINGS_TAB_IDS)[number];
 
 export const AI_SETTINGS_SUB_TAB_IDS = [
-  "providers",
   "agents",
   "tools",
   "search",
@@ -594,14 +593,6 @@ export const SETTINGS_SEARCH_CATALOG: readonly SettingsSearchEntry[] = [
   },
 
   // AI
-  {
-    id: "ai-providers",
-    tab: "ai",
-    aiSubTab: "providers",
-    labelKey: "ai.providers",
-    descriptionKey: "ai.providers.empty",
-    keywords: ["openai", "anthropic", "gemini", "provider"],
-  },
   {
     id: "ai-codex",
     tab: "ai",

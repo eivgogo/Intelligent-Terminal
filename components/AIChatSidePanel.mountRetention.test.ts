@@ -92,16 +92,11 @@ const baseProps = (overrides: Partial<AIChatSidePanelProps> = {}): AIChatSidePan
   updateLastMessage: () => undefined,
   updateMessageById: () => undefined,
   persistContextCompaction: () => undefined,
-  providers: [],
-  activeProviderId: '',
-  activeModelId: '',
   defaultAgentId: '',
   toolIntegrationMode: 'mcp',
   externalAgents: [],
   agentModelMap: {},
   setAgentModel: () => undefined,
-  agentProviderMap: {},
-  setAgentProvider: () => undefined,
   agentThinkingMap: {},
   setAgentThinking: () => undefined,
   globalPermissionMode: 'auto',
@@ -126,11 +121,10 @@ test('send preflight locks header agent and new-chat controls', () => {
   assert.match(selector, /if \(parked \|\| disabled\) setOpen\(false\)/);
 });
 
-test('first send awaits provider sync instead of idle-deferring it', () => {
+test('first send awaits web search sync instead of idle-deferring it', () => {
   const source = readFileSync(new URL('./AIChatSidePanel.tsx', import.meta.url), 'utf8');
-  assert.match(source, /await sendBridge\.aiSyncProviders\(providers\)/);
   assert.match(source, /await sendBridge\.aiSyncWebSearch\(/);
-  assert.doesNotMatch(source, /scheduleWhenAiComposerIdle\(\(\) => \{\s*void bridge\.aiSyncProviders/);
+  assert.doesNotMatch(source, /scheduleWhenAiComposerIdle\(\(\) => \{\s*void bridge\.aiSyncWebSearch/);
 });
 
 test('send and new chat discard pending composer text', () => {

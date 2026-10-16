@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
 import {
-  STORAGE_KEY_AI_PROVIDERS,
-  STORAGE_KEY_AI_ACTIVE_PROVIDER,
-  STORAGE_KEY_AI_ACTIVE_MODEL,
   STORAGE_KEY_AI_PERMISSION_MODE,
   STORAGE_KEY_AI_TOOL_INTEGRATION_MODE,
   STORAGE_KEY_AI_HOST_PERMISSIONS,
@@ -15,7 +12,6 @@ import {
   STORAGE_KEY_AI_SESSIONS,
   STORAGE_KEY_AI_ACTIVE_SESSION_MAP,
   STORAGE_KEY_AI_AGENT_MODEL_MAP,
-  STORAGE_KEY_AI_AGENT_PROVIDER_MAP,
   STORAGE_KEY_AI_AGENT_THINKING_MAP,
   STORAGE_KEY_AI_WEB_SEARCH,
   STORAGE_KEY_AI_QUICK_MESSAGES,
@@ -28,7 +24,6 @@ import type {
   AISession,
   AIPermissionMode,
   AIToolIntegrationMode,
-  ProviderConfig,
   HostAIPermission,
   ExternalAgentConfig,
   ChatMessage,
@@ -51,7 +46,6 @@ import {
   updateDraftForScope,
 } from './aiDraftState';
 import { convertFilesToUploads } from './useFileUpload';
-import { removeProviderReferences } from './aiProviderCleanup';
 import { publishAISessionsSnapshot } from './aiSessionsStore';
 import {
   AI_STATE_CHANGED_DRAFTS_BY_SCOPE,
@@ -81,39 +75,7 @@ import {
   seedWorkspaceAIActiveSessionFromMembers,
 } from '../../domain/workspaceAiScopeHandoff';
 
-function providerPatchIsNoop(
-  current: ProviderConfig,
-  updates: Partial<ProviderConfig>,
-): boolean {
-  for (const key of Object.keys(updates) as Array<keyof ProviderConfig>) {
-    const nextValue = updates[key];
-    const prevValue = current[key];
-    if (nextValue === prevValue) continue;
-    if (key === 'modelContextWindows') {
-      const prevWindows = (prevValue ?? {}) as Record<string, number>;
-      const nextWindows = (nextValue ?? {}) as Record<string, number>;
-      const nextKeys = Object.keys(nextWindows);
-      if (nextKeys.length !== Object.keys(prevWindows).length) return false;
-      if (nextKeys.some((modelId) => prevWindows[modelId] !== nextWindows[modelId])) return false;
-      continue;
-    }
-    return false;
-  }
-  return true;
-}
-
 export function useAIState() {
-  // ── Provider Config ──
-  const [providers, setProvidersRaw] = useState<ProviderConfig[]>(() =>
-    localStorageAdapter.read<ProviderConfig[]>(STORAGE_KEY_AI_PROVIDERS) ?? []
-  );
-  const [activeProviderId, setActiveProviderIdRaw] = useState<string>(() =>
-    localStorageAdapter.readString(STORAGE_KEY_AI_ACTIVE_PROVIDER) ?? ''
-  );
-  const [activeModelId, setActiveModelIdRaw] = useState<string>(() =>
-    localStorageAdapter.readString(STORAGE_KEY_AI_ACTIVE_MODEL) ?? ''
-  );
-
   // ── Permission Model ──
   const [globalPermissionMode, setGlobalPermissionModeRaw] = useState<AIPermissionMode>(() => {
     const stored = localStorageAdapter.readString(STORAGE_KEY_AI_PERMISSION_MODE);
@@ -183,20 +145,6 @@ export function useAIState() {
   useEffect(() => {
     agentModelMapRef.current = agentModelMap;
   }, [agentModelMap]);
-  // Per-agent provider override: remembers which provider config each agent
-  // should bind to. Falls back to the global `activeProviderId` when an agent
-  // has no entry. Used so that e.g. an agent can stay on DeepSeek while
-  // a Claude/Codex run continues on its existing provider.
-  const [agentProviderMap, setAgentProviderMapRaw] = useState<Record<string, string>>(() =>
-    localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_AI_AGENT_PROVIDER_MAP) ?? {}
-  );
-  // Mirror for non-functional reads inside removeProvider — needed to know
-  // which agents were bound to the deleted provider so we can also drop
-  // their saved model ids (those ids belonged to the now-missing provider).
-  const agentProviderMapRef = useRef(agentProviderMap);
-  useEffect(() => {
-    agentProviderMapRef.current = agentProviderMap;
-  }, [agentProviderMap]);
   const [agentThinkingMap, setAgentThinkingMapRaw] = useState<Record<string, string>>(() =>
     localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_AI_AGENT_THINKING_MAP) ?? {}
   );
@@ -303,24 +251,6 @@ export function useAIState() {
     });
   }, []);
 
-  const setAgentProvider = useCallback((agentId: string, providerId: string) => {
-    setAgentProviderMapRaw(prev => {
-      // Empty string clears the per-agent override and lets the agent fall
-      // back to the global `activeProviderId`.
-      if (providerId) {
-        if (prev[agentId] === providerId) return prev;
-        const next = { ...prev, [agentId]: providerId };
-        localStorageAdapter.write(STORAGE_KEY_AI_AGENT_PROVIDER_MAP, next);
-        return next;
-      }
-      if (!(agentId in prev)) return prev;
-      const next = { ...prev };
-      delete next[agentId];
-      localStorageAdapter.write(STORAGE_KEY_AI_AGENT_PROVIDER_MAP, next);
-      return next;
-    });
-  }, []);
-
   const setAgentThinking = useCallback((agentId: string, thinkingLevel: string) => {
     setAgentThinkingMapRaw((prev) => {
       if (thinkingLevel) {
@@ -357,25 +287,6 @@ export function useAIState() {
   }, []);
 
   // ── Persist helpers ──
-  const setProviders = useCallback((value: ProviderConfig[] | ((prev: ProviderConfig[]) => ProviderConfig[])) => {
-    setProvidersRaw(prev => {
-      const next = typeof value === 'function' ? value(prev) : value;
-      if (next === prev) return prev;
-      localStorageAdapter.write(STORAGE_KEY_AI_PROVIDERS, next);
-      return next;
-    });
-  }, []);
-
-  const setActiveProviderId = useCallback((id: string) => {
-    setActiveProviderIdRaw(id);
-    localStorageAdapter.writeString(STORAGE_KEY_AI_ACTIVE_PROVIDER, id);
-  }, []);
-
-  const setActiveModelId = useCallback((id: string) => {
-    setActiveModelIdRaw(id);
-    localStorageAdapter.writeString(STORAGE_KEY_AI_ACTIVE_MODEL, id);
-  }, []);
-
   const setGlobalPermissionMode = useCallback((mode: AIPermissionMode) => {
     setGlobalPermissionModeRaw(mode);
     localStorageAdapter.writeString(STORAGE_KEY_AI_PERMISSION_MODE, mode);
@@ -443,21 +354,6 @@ export function useAIState() {
     const handleStorage = (e: StorageEvent) => {
       try {
         switch (e.key) {
-          case STORAGE_KEY_AI_PROVIDERS: {
-            const parsed = localStorageAdapter.read<ProviderConfig[]>(STORAGE_KEY_AI_PROVIDERS);
-            if (parsed != null && !Array.isArray(parsed)) {
-              console.warn('[useAIState] Cross-window sync: AI_PROVIDERS is not an array, skipping');
-              break;
-            }
-            setProvidersRaw(parsed ?? []);
-            break;
-          }
-          case STORAGE_KEY_AI_ACTIVE_PROVIDER:
-            setActiveProviderIdRaw(localStorageAdapter.readString(STORAGE_KEY_AI_ACTIVE_PROVIDER) ?? '');
-            break;
-          case STORAGE_KEY_AI_ACTIVE_MODEL:
-            setActiveModelIdRaw(localStorageAdapter.readString(STORAGE_KEY_AI_ACTIVE_MODEL) ?? '');
-            break;
           case STORAGE_KEY_AI_PERMISSION_MODE: {
             const mode = localStorageAdapter.readString(STORAGE_KEY_AI_PERMISSION_MODE);
             if (mode === 'observer' || mode === 'confirm' || mode === 'auto') {
@@ -536,9 +432,6 @@ export function useAIState() {
           }
           case STORAGE_KEY_AI_AGENT_MODEL_MAP:
             setAgentModelMapRaw(localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_AI_AGENT_MODEL_MAP) ?? {});
-            break;
-          case STORAGE_KEY_AI_AGENT_PROVIDER_MAP:
-            setAgentProviderMapRaw(localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_AI_AGENT_PROVIDER_MAP) ?? {});
             break;
           case STORAGE_KEY_AI_AGENT_THINKING_MAP:
             setAgentThinkingMapRaw(localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_AI_AGENT_THINKING_MAP) ?? {});
@@ -1157,50 +1050,7 @@ export function useAIState() {
     }
   }, [persistSessions]);
 
-  // ── Provider CRUD helpers ──
-  const addProvider = useCallback((provider: ProviderConfig) => {
-    setProviders(prev => [...prev, provider]);
-  }, [setProviders]);
-
-  const updateProvider = useCallback((id: string, updates: Partial<ProviderConfig>) => {
-    setProviders((prev) => {
-      const index = prev.findIndex((provider) => provider.id === id);
-      if (index < 0) return prev;
-      const current = prev[index];
-      if (providerPatchIsNoop(current, updates)) return prev;
-      const next = prev.slice();
-      next[index] = { ...current, ...updates };
-      return next;
-    });
-  }, [setProviders]);
-
-  const removeProvider = useCallback((id: string) => {
-    setProviders(prev => prev.filter(p => p.id !== id));
-    setActiveProviderIdRaw(prevId => {
-      if (prevId === id) {
-        const next = '';
-        localStorageAdapter.writeString(STORAGE_KEY_AI_ACTIVE_PROVIDER, next);
-        return next;
-      }
-      return prevId;
-    });
-    const cleanup = removeProviderReferences(
-      id,
-      agentProviderMapRef.current,
-      agentModelMapRef.current,
-    );
-    if (cleanup.providerMapChanged) {
-      localStorageAdapter.write(STORAGE_KEY_AI_AGENT_PROVIDER_MAP, cleanup.agentProviderMap);
-      setAgentProviderMapRaw(cleanup.agentProviderMap);
-    }
-    if (cleanup.modelMapChanged) {
-      localStorageAdapter.write(STORAGE_KEY_AI_AGENT_MODEL_MAP, cleanup.agentModelMap);
-      setAgentModelMapRaw(cleanup.agentModelMap);
-    }
-  }, [setProviders]);
-
   // ── Computed ──
-  const activeProvider = providers.find(p => p.id === activeProviderId) ?? null;
 
   // Stream/message updates publish here so AIConfig Context consumers do not
   // re-render on every token. AIChatPanelsHost reads aiSessionsStore instead.
@@ -1214,16 +1064,6 @@ export function useAIState() {
   }, [sessions, activeSessionIdMap, draftsByScope, panelViewByScope]);
 
   return useMemo(() => ({
-    providers,
-    setProviders,
-    addProvider,
-    updateProvider,
-    removeProvider,
-    activeProviderId,
-    setActiveProviderId,
-    activeModelId,
-    setActiveModelId,
-    activeProvider,
     globalPermissionMode,
     setGlobalPermissionMode,
     toolIntegrationMode,
@@ -1242,8 +1082,6 @@ export function useAIState() {
     setMaxIterations,
     agentModelMap,
     setAgentModel,
-    agentProviderMap,
-    setAgentProvider,
     agentThinkingMap,
     setAgentThinking,
     webSearchConfig,
@@ -1274,16 +1112,6 @@ export function useAIState() {
     handoffDissolvedWorkspaceScope,
     retargetWorkspaceActiveChatForMemberLoss,
   }), [
-    providers,
-    setProviders,
-    addProvider,
-    updateProvider,
-    removeProvider,
-    activeProviderId,
-    setActiveProviderId,
-    activeModelId,
-    setActiveModelId,
-    activeProvider,
     globalPermissionMode,
     setGlobalPermissionMode,
     toolIntegrationMode,
@@ -1302,8 +1130,6 @@ export function useAIState() {
     setMaxIterations,
     agentModelMap,
     setAgentModel,
-    agentProviderMap,
-    setAgentProvider,
     agentThinkingMap,
     setAgentThinking,
     webSearchConfig,

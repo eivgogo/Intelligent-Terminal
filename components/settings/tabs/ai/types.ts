@@ -2,11 +2,7 @@
  * Shared types for AI settings sub-components
  */
 import type {
-  AIProviderId,
   ExternalAgentConfig,
-  ProviderAdvancedParams,
-  OpenAIApiFormat,
-  ProviderStyle,
 } from "../../../../infrastructure/ai/types";
 
 export type CodexIntegrationState =
@@ -115,32 +111,6 @@ export interface UserSkillsStatusResult {
   error?: string;
 }
 
-export interface ProviderFormState {
-  name: string;
-  apiKey: string;
-  baseURL: string;
-  defaultModel: string;
-  contextWindow: string;
-  modelContextWindows: Record<string, number>;
-  skipTLSVerify: boolean;
-  advancedParams: ProviderAdvancedParams;
-  style: ProviderStyle | "";  // "" means inherit-from-providerId
-  openaiApi: OpenAIApiFormat;
-  iconId: string;             // "" means no built-in pick (fall back to providerId)
-  iconDataUrl: string;        // "" means no upload override
-}
-
-export interface FetchedModel {
-  id: string;
-  name?: string;
-  contextWindow?: number;
-}
-
-export interface FetchBridge {
-  aiFetch?: (url: string, method?: string, headers?: Record<string, string>, body?: string, providerId?: string, skipHostCheck?: boolean, followRedirects?: boolean, skipTLSVerify?: boolean) => Promise<{ ok: boolean; status?: number; data: string; error?: string }>;
-  aiAllowlistAddHost?: (baseURL: string) => Promise<{ ok: boolean }>;
-}
-
 export interface NetcattyAiBridge {
   aiDiscoverAgents?: (options?: { refreshShellEnv?: boolean; apiKeyPresent?: boolean }) => Promise<Array<AgentPathInfo & { command: string }>>;
   aiPrewarmShellEnv?: () => Promise<{ ok: boolean; error?: string }>;
@@ -224,10 +194,6 @@ export function getBridge(): NetcattyAiBridge | undefined {
   return (window as unknown as { netcatty?: NetcattyAiBridge }).netcatty;
 }
 
-export function getFetchBridge(): FetchBridge | undefined {
-  return (window as unknown as { netcatty?: FetchBridge }).netcatty;
-}
-
 export function normalizeCodexBridgeError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes("No handler registered for 'netcatty:ai:codex:")) {
@@ -235,89 +201,3 @@ export function normalizeCodexBridgeError(error: unknown): string {
   }
   return message;
 }
-
-// ---------------------------------------------------------------------------
-// Provider icon helper
-// ---------------------------------------------------------------------------
-
-export type SettingsIconId = AIProviderId | "claude" | "copilot" | "codebuddy" | "opencode";
-
-export const SETTINGS_ICON_PATHS: Record<SettingsIconId, string> = {
-  openai: "/ai/providers/openai.svg",
-  anthropic: "/ai/providers/anthropic.svg",
-  claude: "/ai/agents/claude.svg",
-  copilot: "/ai/agents/copilot.svg",
-  codebuddy: "/ai/agents/codebuddy.svg",
-  opencode: "/ai/agents/opencode.svg",
-  google: "/ai/providers/google.svg",
-  ollama: "/ai/providers/ollama.svg",
-  openrouter: "/ai/providers/openrouter.svg",
-  qwen: "/ai/providers/qwen.svg",
-  deepseek: "/ai/providers/deepseek.svg",
-  kimi: "/ai/providers/kimi.svg",
-  zhipu: "/ai/providers/zhipu.svg",
-  doubao: "/ai/providers/doubao.svg",
-  mimo: "/ai/providers/xiaomi.svg",
-  custom: "/ai/providers/custom.svg",
-};
-
-export const SETTINGS_ICON_COLORS: Record<SettingsIconId, string> = {
-  openai: "bg-emerald-600",
-  anthropic: "bg-orange-600",
-  claude: "bg-orange-600",
-  copilot: "border border-zinc-300 bg-white",
-  codebuddy: "bg-indigo-600",
-  opencode: "bg-teal-600",
-  google: "bg-blue-600",
-  ollama: "bg-purple-600",
-  openrouter: "bg-pink-600",
-  qwen: "bg-[#615CED]",
-  deepseek: "bg-[#4D6BFE]",
-  kimi: "bg-zinc-800",
-  zhipu: "bg-[#3859FF]",
-  doubao: "bg-[#0066FF]",
-  mimo: "bg-[#FF6900]",
-  custom: "bg-zinc-600",
-};
-
-// ---------------------------------------------------------------------------
-// Extra brand icons (lobe-icons subset, MIT) for ProviderConfig.iconId
-// See public/ai/providers/NOTICE.md for attribution.
-// ---------------------------------------------------------------------------
-
-export interface BuiltinProviderIcon {
-  /** Identifier stored as ProviderConfig.iconId. */
-  id: string;
-  /** Display label shown in the icon picker. */
-  label: string;
-  /** Suggested display name when picking this preset (auto-fills ProviderConfig.name). */
-  name: string;
-  /** Absolute URL of the SVG asset. */
-  path: string;
-  /** Background tint applied behind the monochrome glyph. */
-  bgColor: string;
-}
-
-export const BUILTIN_PROVIDER_ICONS: BuiltinProviderIcon[] = [
-  { id: "anthropic", label: "Anthropic", name: "Anthropic", path: "/ai/providers/anthropic.svg", bgColor: "bg-orange-600" },
-  { id: "openai", label: "OpenAI", name: "OpenAI", path: "/ai/providers/openai.svg", bgColor: "bg-emerald-600" },
-  { id: "google", label: "Google", name: "Google", path: "/ai/providers/google.svg", bgColor: "bg-blue-600" },
-  { id: "ollama", label: "Ollama", name: "Ollama", path: "/ai/providers/ollama.svg", bgColor: "bg-purple-600" },
-  { id: "openrouter", label: "OpenRouter", name: "OpenRouter", path: "/ai/providers/openrouter.svg", bgColor: "bg-pink-600" },
-  { id: "deepseek", label: "DeepSeek", name: "DeepSeek", path: "/ai/providers/deepseek.svg", bgColor: "bg-[#4D6BFE]" },
-  { id: "moonshot", label: "Moonshot", name: "Moonshot", path: "/ai/providers/moonshot.svg", bgColor: "bg-zinc-800" },
-  { id: "kimi", label: "Kimi", name: "Kimi", path: "/ai/providers/kimi.svg", bgColor: "bg-zinc-800" },
-  { id: "qwen", label: "Qwen / 通义", name: "Qwen", path: "/ai/providers/qwen.svg", bgColor: "bg-[#615CED]" },
-  { id: "zhipu", label: "Zhipu / 智谱", name: "Zhipu", path: "/ai/providers/zhipu.svg", bgColor: "bg-[#3859FF]" },
-  { id: "doubao", label: "Doubao / 豆包", name: "Doubao", path: "/ai/providers/doubao.svg", bgColor: "bg-[#0066FF]" },
-  { id: "xiaomi", label: "Xiaomi / 小米", name: "Xiaomi MiMo", path: "/ai/providers/xiaomi.svg", bgColor: "bg-[#FF6900]" },
-  { id: "mistral", label: "Mistral", name: "Mistral", path: "/ai/providers/mistral.svg", bgColor: "bg-[#FA520F]" },
-  { id: "cohere", label: "Cohere", name: "Cohere", path: "/ai/providers/cohere.svg", bgColor: "bg-[#39594D]" },
-  { id: "grok", label: "Grok / xAI", name: "Grok", path: "/ai/providers/grok.svg", bgColor: "bg-zinc-900" },
-  { id: "perplexity", label: "Perplexity", name: "Perplexity", path: "/ai/providers/perplexity.svg", bgColor: "bg-[#1F8A8C]" },
-  { id: "groq", label: "Groq", name: "Groq", path: "/ai/providers/groq.svg", bgColor: "bg-[#F55036]" },
-  { id: "huggingface", label: "Hugging Face", name: "Hugging Face", path: "/ai/providers/huggingface.svg", bgColor: "bg-[#FF9D00]" },
-];
-
-export const BUILTIN_PROVIDER_ICON_BY_ID: Record<string, BuiltinProviderIcon> =
-  Object.fromEntries(BUILTIN_PROVIDER_ICONS.map((icon) => [icon.id, icon]));

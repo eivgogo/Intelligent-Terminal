@@ -261,9 +261,6 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   updateLastMessage,
   updateMessageById,
   persistContextCompaction,
-  providers,
-  activeProviderId,
-  activeModelId,
   defaultAgentId,
   toolIntegrationMode,
   externalAgents,
@@ -659,13 +656,6 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   useEffect(() => {
     if (!isVisible) return;
     const bridge = getNetcattyBridge();
-    if (!bridge?.aiSyncProviders || providers.length === 0) return;
-    void bridge.aiSyncProviders(providers);
-  }, [isVisible, providers]);
-
-  useEffect(() => {
-    if (!isVisible) return;
-    const bridge = getNetcattyBridge();
     if (!bridge?.aiSyncWebSearch) return;
     void bridge.aiSyncWebSearch(webSearchConfig?.apiHost || null, webSearchConfig?.apiKey || null);
   }, [isVisible, webSearchConfig?.apiHost, webSearchConfig?.apiKey, webSearchConfig?.enabled]);
@@ -704,22 +694,11 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
 
   const { handleExport } = useConversationExport(activeSession);
 
-  const activeProvider = useMemo(
-    () => providers.find((p) => p.id === activeProviderId),
-    [providers, activeProviderId],
-  );
-
   // Context usage ring is unavailable without the built-in agent.
   const contextUsage = null;
 
   // Manual /compact is not available; external agents own their own compaction.
   const canCompact = false;
-
-  const providersRef = useRef(providers);
-  providersRef.current = providers;
-
-  const providerDisplayName = activeProvider?.name ?? '';
-  const modelDisplayName = activeModelId || activeProvider?.defaultModel || '';
 
   const currentAgentConfig = useMemo(
     () => externalAgents.find(a => a.id === currentAgentId),
@@ -1087,9 +1066,6 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
 
     try {
       const sendBridge = getNetcattyBridge();
-      if (sendBridge?.aiSyncProviders && providers.length > 0) {
-        await sendBridge.aiSyncProviders(providers);
-      }
       if (sendBridge?.aiSyncWebSearch) {
         await sendBridge.aiSyncWebSearch(webSearchConfig?.apiHost || null, webSearchConfig?.apiKey || null);
       }
@@ -1193,7 +1169,6 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
           historyMessages: buildExternalAgentHistoryMessagesForBridge(currentSession?.messages ?? [], existingExternalSessionId),
           terminalSessions,
           defaultTargetSession,
-          providers,
           selectedAgentModel: sendSelectedAgentModel,
           toolIntegrationMode,
           selectedUserSkillSlugs: selectedSkillSlugs,
@@ -1219,7 +1194,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     createSession, addMessageToSession, updateLastMessage,
     setStreamingForScope,
     sendToExternalAgent, reportStreamError, autoTitleSession,
-    abortControllersRef, terminalSessions, defaultTargetSession, providers, selectedAgentModel, updateSessionExternalSessionId,
+    abortControllersRef, terminalSessions, defaultTargetSession, selectedAgentModel, updateSessionExternalSessionId,
     scopeType, scopeTargetId, scopeHostIds, toolIntegrationMode,
     clearScopeDraft, showScopeSessionView, setActiveSessionId,
     flushDraftText, currentAgentConfig, buildExternalAgentRuntimeModelTarget,
@@ -1462,8 +1437,6 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         steerWarning={steerWarning}
         lockTurnConfiguration={Boolean(isSending || (isStreaming && isCodexAppServer))}
         canSendCurrentAgent={canSendCurrentAgent}
-        providerDisplayName={providerDisplayName}
-        modelDisplayName={modelDisplayName}
         modelCatalogWarning={runtimeModelWarnings[currentAgentId]}
         agentModelPresets={agentModelPresets}
         selectedAgentModel={selectedAgentModel}
@@ -1514,20 +1487,14 @@ const AI_CHAT_SIDE_PANEL_AI_STATE_KEYS = [
   'updateLastMessage',
   'updateMessageById',
   'persistContextCompaction',
-  'providers',
-  'activeProviderId',
-  'activeModelId',
   'defaultAgentId',
   'toolIntegrationMode',
   'externalAgents',
   'setExternalAgents',
   'agentModelMap',
   'setAgentModel',
-  'agentProviderMap',
-  'setAgentProvider',
   'agentThinkingMap',
   'setAgentThinking',
-  'updateProvider',
   'globalPermissionMode',
   'setGlobalPermissionMode',
   'commandBlocklist',

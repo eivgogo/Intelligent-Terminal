@@ -208,14 +208,6 @@ test("buildCloudSyncPayload includes notes and note groups", async () => {
 });
 
 test("buildSyncPayload includes AI configuration settings", () => {
-  const providers = [{
-    id: "openai-main",
-    providerId: "openai",
-    name: "OpenAI",
-    apiKey: "enc:v1:djEwdGVzdAAAAAAAAAAAAAAAAA==",
-    defaultModel: "gpt-test",
-    enabled: true,
-  }];
   const webSearch = {
     providerId: "tavily",
     apiKey: "enc:v1:djEwd2ViAAAAAAAAAAAAAAAAAA==",
@@ -223,9 +215,6 @@ test("buildSyncPayload includes AI configuration settings", () => {
     maxResults: 7,
   };
 
-  localStorage.setItem(storageKeys.STORAGE_KEY_AI_PROVIDERS, JSON.stringify(providers));
-  localStorage.setItem(storageKeys.STORAGE_KEY_AI_ACTIVE_PROVIDER, "openai-main");
-  localStorage.setItem(storageKeys.STORAGE_KEY_AI_ACTIVE_MODEL, "gpt-test");
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_PERMISSION_MODE, "auto");
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_TOOL_INTEGRATION_MODE, "skills");
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_DEFAULT_AGENT, "codex");
@@ -233,7 +222,6 @@ test("buildSyncPayload includes AI configuration settings", () => {
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_COMMAND_TIMEOUT, "120");
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_MAX_ITERATIONS, "10");
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_MODEL_MAP, JSON.stringify({ codex: "gpt-test" }));
-  localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_PROVIDER_MAP, JSON.stringify({ codex: "openai-main" }));
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_THINKING_MAP, JSON.stringify({ codex: "high" }));
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH, JSON.stringify(webSearch));
   localStorage.setItem(storageKeys.STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION, "false");
@@ -241,12 +229,8 @@ test("buildSyncPayload includes AI configuration settings", () => {
   const payload = buildSyncPayload(vault([]));
 
   // Device-bound enc:v1 apiKeys are stripped from portable sync settings.
-  const { apiKey: _providerKey, ...providerWithoutKey } = providers[0]!;
   const { apiKey: _webKey, ...webSearchWithoutKey } = webSearch;
   assert.deepEqual(payload.settings?.ai, {
-    providers: [providerWithoutKey],
-    activeProviderId: "openai-main",
-    activeModelId: "gpt-test",
     globalPermissionMode: "auto",
     toolIntegrationMode: "skills",
     defaultAgentId: "codex",
@@ -254,7 +238,6 @@ test("buildSyncPayload includes AI configuration settings", () => {
     commandTimeout: 120,
     maxIterations: 10,
     agentModelMap: { codex: "gpt-test" },
-    agentProviderMap: { codex: "openai-main" },
     agentThinkingMap: { codex: "high" },
     webSearchConfig: webSearchWithoutKey,
     showTerminalSelectionAction: false,
@@ -340,91 +323,7 @@ test("buildSyncPayload excludes externalAgents (device-local OS-bound config)", 
   assert.equal("ai" in (payload.settings ?? {}), false);
 });
 
-test("buildSyncPayload omits device-bound encrypted AI API keys", () => {
-  localStorage.setItem(storageKeys.STORAGE_KEY_AI_PROVIDERS, JSON.stringify([{
-    id: "openai-main",
-    providerId: "openai",
-    name: "OpenAI",
-    apiKey: "enc:v1:djEwQUFBQQAAAAAAAAAAAAAAAA==",
-    enabled: true,
-  }]));
-  localStorage.setItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH, JSON.stringify({
-    providerId: "tavily",
-    apiKey: "enc:v1:djEwQUFBQQAAAAAAAAAAAAAAAA==",
-    enabled: true,
-  }));
-
-  const payload = buildSyncPayload(vault([]));
-
-  assert.equal("apiKey" in (payload.settings?.ai?.providers?.[0] ?? {}), false);
-  assert.equal("apiKey" in (payload.settings?.ai?.webSearchConfig ?? {}), false);
-});
-
-test("buildCloudSyncPayload includes decrypted AI API keys for portable cloud sync", async () => {
-  Object.defineProperty(globalThis, "window", {
-    value: {
-      netcatty: {
-        credentialsDecrypt: async (value: string) => {
-          if (value === "enc:v1:djEwUFJPVklERVIAAAAAAAAAAA==") return "sk-provider";
-          if (value === "enc:v1:djEwV0VCAAAAAAAAAAAAAAAAAA==") return "sk-web";
-          return value;
-        },
-      },
-    },
-    configurable: true,
-  });
-
-  localStorage.setItem(storageKeys.STORAGE_KEY_AI_PROVIDERS, JSON.stringify([{
-    id: "openai-main",
-    providerId: "openai",
-    name: "OpenAI",
-    apiKey: "enc:v1:djEwUFJPVklERVIAAAAAAAAAAA==",
-    enabled: true,
-  }]));
-  localStorage.setItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH, JSON.stringify({
-    providerId: "tavily",
-    apiKey: "enc:v1:djEwV0VCAAAAAAAAAAAAAAAAAA==",
-    enabled: true,
-  }));
-
-  const payload = await buildCloudSyncPayload(vault([]));
-
-  assert.equal(payload.settings?.ai?.providers?.[0]?.apiKey, "sk-provider");
-  assert.equal(payload.settings?.ai?.webSearchConfig?.apiKey, "sk-web");
-});
-
-test("buildCloudSyncPayload fails instead of deleting API keys when decrypt fails", async () => {
-  Object.defineProperty(globalThis, "window", {
-    value: {
-      netcatty: {
-        credentialsDecrypt: async (value: string) => value,
-      },
-    },
-    configurable: true,
-  });
-
-  localStorage.setItem(storageKeys.STORAGE_KEY_AI_PROVIDERS, JSON.stringify([{
-    id: "openai-main",
-    providerId: "openai",
-    name: "OpenAI",
-    apiKey: "enc:v1:djEwUFJPVklERVIAAAAAAAAAAA==",
-    enabled: true,
-  }]));
-
-  await assert.rejects(
-    () => buildCloudSyncPayload(vault([])),
-    /Unable to decrypt AI API key/,
-  );
-});
-
 test("applySyncPayload restores AI configuration settings", async () => {
-  const providers = [{
-    id: "anthropic-main",
-    providerId: "anthropic",
-    name: "Anthropic",
-    apiKey: "enc:v1:djEwdGVzdAAAAAAAAAAAAAAAAA==",
-    enabled: true,
-  }];
   const webSearch = {
     providerId: "exa",
     apiKey: "enc:v1:djEwd2ViAAAAAAAAAAAAAAAAAA==",
@@ -439,9 +338,6 @@ test("applySyncPayload restores AI configuration settings", async () => {
     customGroups: [],
     settings: {
       ai: {
-        providers,
-        activeProviderId: "anthropic-main",
-        activeModelId: "claude-test",
         globalPermissionMode: "observer",
         toolIntegrationMode: "mcp",
         defaultAgentId: "claude",
@@ -449,7 +345,6 @@ test("applySyncPayload restores AI configuration settings", async () => {
         commandTimeout: 30,
         maxIterations: 5,
         agentModelMap: { claude: "claude-test" },
-        agentProviderMap: { codex: "anthropic-main" },
         webSearchConfig: webSearch,
         showTerminalSelectionAction: false,
       },
@@ -459,9 +354,6 @@ test("applySyncPayload restores AI configuration settings", async () => {
 
   await applySyncPayload(payload, { importVaultData: () => {} });
 
-  assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_PROVIDERS)!), providers);
-  assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_AI_ACTIVE_PROVIDER), "anthropic-main");
-  assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_AI_ACTIVE_MODEL), "claude-test");
   assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_AI_PERMISSION_MODE), "observer");
   assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_AI_TOOL_INTEGRATION_MODE), "mcp");
   assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_AI_DEFAULT_AGENT), "claude");
@@ -469,62 +361,8 @@ test("applySyncPayload restores AI configuration settings", async () => {
   assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_AI_COMMAND_TIMEOUT), "30");
   assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_AI_MAX_ITERATIONS), "5");
   assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_AGENT_MODEL_MAP)!), { claude: "claude-test" });
-  assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_AGENT_PROVIDER_MAP)!), { codex: "anthropic-main" });
   assert.deepEqual(JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH)!), webSearch);
   assert.equal(localStorage.getItem(storageKeys.STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION), "false");
-});
-
-test("applySyncPayload encrypts synced plaintext AI API keys before saving locally", async () => {
-  Object.defineProperty(globalThis, "window", {
-    value: {
-      netcatty: {
-        credentialsEncrypt: async (value: string) => {
-          const body = Buffer.alloc(19, 0);
-          Buffer.from("v10", "utf8").copy(body, 0);
-          Buffer.from(`LOCAL_${value}`.slice(0, 16), "utf8").copy(body, 3);
-          return `enc:v1:${body.toString("base64")}`;
-        },
-      },
-      dispatchEvent: () => true,
-    },
-    configurable: true,
-  });
-
-  const payload: SyncPayload = {
-    hosts: [],
-    keys: [],
-    identities: [],
-    snippets: [],
-    customGroups: [],
-    settings: {
-      ai: {
-        providers: [
-          { id: "openai-main", providerId: "openai", name: "OpenAI", apiKey: "sk-provider", enabled: true },
-        ],
-        webSearchConfig: { providerId: "tavily", apiKey: "sk-web", enabled: true },
-      },
-    },
-    syncedAt: 1,
-  } as SyncPayload;
-
-  await applySyncPayload(payload, { importVaultData: () => {} });
-
-  const provider = JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_PROVIDERS)!)[0];
-  const webSearch = JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH)!);
-  const expectedProviderKey = (() => {
-    const body = Buffer.alloc(19, 0);
-    Buffer.from("v10", "utf8").copy(body, 0);
-    Buffer.from("LOCAL_sk-provider".slice(0, 16), "utf8").copy(body, 3);
-    return `enc:v1:${body.toString("base64")}`;
-  })();
-  const expectedWebKey = (() => {
-    const body = Buffer.alloc(19, 0);
-    Buffer.from("v10", "utf8").copy(body, 0);
-    Buffer.from("LOCAL_sk-web".slice(0, 16), "utf8").copy(body, 3);
-    return `enc:v1:${body.toString("base64")}`;
-  })();
-  assert.equal(provider.apiKey, expectedProviderKey);
-  assert.equal(webSearch.apiKey, expectedWebKey);
 });
 
 test("applySyncPayload restores host tree sidebar visibility setting", async () => {
@@ -567,8 +405,7 @@ test("applySyncPayload dispatches a same-window AI-state-changed event so the op
   };
   Object.defineProperty(globalThis, "window", { value: fakeWindow, configurable: true });
   try {
-    localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_PROVIDER_MAP, JSON.stringify({ codex: "deepseek-local" }));
-    localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_MODEL_MAP, JSON.stringify({ codex: "deepseek-v4-flash" }));
+    localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_MODEL_MAP, JSON.stringify({ codex: "gpt-test" }));
 
     const payload: SyncPayload = {
       hosts: [],
@@ -578,7 +415,8 @@ test("applySyncPayload dispatches a same-window AI-state-changed event so the op
       customGroups: [],
       settings: {
         ai: {
-          providers: [{ id: "openai-main", providerId: "openai", name: "OpenAI", enabled: true }],
+          globalPermissionMode: "confirm",
+          agentModelMap: { codex: "gpt-test" },
         },
       },
       syncedAt: 1,
@@ -588,59 +426,11 @@ test("applySyncPayload dispatches a same-window AI-state-changed event so the op
 
     const events = dispatched.filter((e) => e.type === "netcatty:ai-state-changed");
     const keys = events.map((e) => (e.detail as { key?: string })?.key);
-    assert.ok(keys.includes(storageKeys.STORAGE_KEY_AI_PROVIDERS), "providers nudge");
-    assert.ok(keys.includes(storageKeys.STORAGE_KEY_AI_AGENT_PROVIDER_MAP), "agentProviderMap nudge");
+    assert.ok(keys.includes(storageKeys.STORAGE_KEY_AI_PERMISSION_MODE), "permission mode nudge");
     assert.ok(keys.includes(storageKeys.STORAGE_KEY_AI_AGENT_MODEL_MAP), "agentModelMap nudge");
   } finally {
     delete (globalThis as { window?: unknown }).window;
   }
-});
-
-test("applySyncPayload prunes per-agent bindings that reference providers absent from the synced set", async () => {
-  // Local state has Catty bound to a provider the incoming sync no longer
-  // ships — both the per-agent provider override and the saved model should
-  // be cleared so we don't dispatch a ghost provider id (or its now-orphan
-  // model name) to the wrong endpoint.
-  localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_PROVIDER_MAP, JSON.stringify({
-    codex: "deepseek-local",
-    codex: "openai-main",
-  }));
-  localStorage.setItem(storageKeys.STORAGE_KEY_AI_AGENT_MODEL_MAP, JSON.stringify({
-    codex: "deepseek-v4-flash",
-    codex: "gpt-test",
-  }));
-
-  const syncedProviders = [
-    { id: "openai-main", providerId: "openai", name: "OpenAI", enabled: true },
-  ];
-
-  const payload: SyncPayload = {
-    hosts: [],
-    keys: [],
-    identities: [],
-    snippets: [],
-    customGroups: [],
-    settings: {
-      ai: {
-        providers: syncedProviders,
-        // Intentionally omit agentProviderMap — exercises the reconcile path.
-      },
-    },
-    syncedAt: 1,
-  } as SyncPayload;
-
-  await applySyncPayload(payload, { importVaultData: () => {} });
-
-  assert.deepEqual(
-    JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_AGENT_PROVIDER_MAP)!),
-    { codex: "openai-main" },
-  );
-  // Catty's saved model belonged to the now-missing deepseek-local — drop it.
-  // Codex's binding stays, so its saved model stays.
-  assert.deepEqual(
-    JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_AGENT_MODEL_MAP)!),
-    { codex: "gpt-test" },
-  );
 });
 
 test("applySyncPayload preserves local externalAgents and ignores legacy payload field", async () => {
@@ -672,90 +462,6 @@ test("applySyncPayload preserves local externalAgents and ignores legacy payload
     JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_EXTERNAL_AGENTS)!),
     localAgents,
   );
-});
-
-test("applySyncPayload preserves local AI provider apiKeys when synced payload omits them", async () => {
-  const localProviders = [
-    {
-      id: "openai-main",
-      providerId: "openai",
-      name: "OpenAI",
-      apiKey: "enc:v1:djEwTE9DQUwAAAAAAAAAAAAAAA==",
-      enabled: true,
-    },
-    {
-      id: "anthropic-main",
-      providerId: "anthropic",
-      name: "Anthropic",
-      apiKey: "enc:v1:djEwQU5USFJPUElDAAAAAAAAAA==",
-      enabled: true,
-    },
-  ];
-  localStorage.setItem(storageKeys.STORAGE_KEY_AI_PROVIDERS, JSON.stringify(localProviders));
-
-  // Synced payload mirrors what `collectSyncableSettings` produces on another device:
-  // metadata is preserved but encrypted device-bound apiKeys are stripped.
-  const syncedProviders = [
-    { id: "openai-main", providerId: "openai", name: "OpenAI (renamed)", enabled: true },
-    { id: "anthropic-main", providerId: "anthropic", name: "Anthropic", enabled: false },
-  ];
-
-  const payload: SyncPayload = {
-    hosts: [],
-    keys: [],
-    identities: [],
-    snippets: [],
-    customGroups: [],
-    settings: { ai: { providers: syncedProviders } },
-    syncedAt: 1,
-  } as SyncPayload;
-
-  await applySyncPayload(payload, { importVaultData: () => {} });
-
-  const stored = JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_PROVIDERS)!);
-  assert.deepEqual(stored, [
-    {
-      id: "openai-main",
-      providerId: "openai",
-      name: "OpenAI (renamed)",
-      apiKey: "enc:v1:djEwTE9DQUwAAAAAAAAAAAAAAA==",
-      enabled: true,
-    },
-    {
-      id: "anthropic-main",
-      providerId: "anthropic",
-      name: "Anthropic",
-      apiKey: "enc:v1:djEwQU5USFJPUElDAAAAAAAAAA==",
-      enabled: false,
-    },
-  ]);
-});
-
-test("applySyncPayload prefers explicit synced apiKey over local apiKey", async () => {
-  localStorage.setItem(storageKeys.STORAGE_KEY_AI_PROVIDERS, JSON.stringify([
-    { id: "openai-main", providerId: "openai", name: "OpenAI", apiKey: "enc:v1:djEwTE9DQUwAAAAAAAAAAAAAAA==", enabled: true },
-  ]));
-
-  const payload: SyncPayload = {
-    hosts: [],
-    keys: [],
-    identities: [],
-    snippets: [],
-    customGroups: [],
-    settings: {
-      ai: {
-        providers: [
-          { id: "openai-main", providerId: "openai", name: "OpenAI", apiKey: "plaintext-from-other-device", enabled: true },
-        ],
-      },
-    },
-    syncedAt: 1,
-  } as SyncPayload;
-
-  await applySyncPayload(payload, { importVaultData: () => {} });
-
-  const stored = JSON.parse(localStorage.getItem(storageKeys.STORAGE_KEY_AI_PROVIDERS)!);
-  assert.equal(stored[0].apiKey, "plaintext-from-other-device");
 });
 
 test("applySyncPayload preserves local web-search apiKey when synced config omits it", async () => {
@@ -1061,26 +767,6 @@ test("buildLocalVaultPayload preserves known hosts for local backups", () => {
   const payload = buildLocalVaultPayload(vault([knownHost("kh-local")]));
 
   assert.deepEqual(payload.knownHosts, [knownHost("kh-local")]);
-});
-
-test("buildLocalVaultPayload preserves local AI API keys for protective backups", () => {
-  localStorage.setItem(storageKeys.STORAGE_KEY_AI_PROVIDERS, JSON.stringify([{
-    id: "openai-main",
-    providerId: "openai",
-    name: "OpenAI",
-    apiKey: "enc:v1:djEwUFJPVklERVIAAAAAAAAAAA==",
-    enabled: true,
-  }]));
-  localStorage.setItem(storageKeys.STORAGE_KEY_AI_WEB_SEARCH, JSON.stringify({
-    providerId: "tavily",
-    apiKey: "enc:v1:djEwV0VCAAAAAAAAAAAAAAAAAA==",
-    enabled: true,
-  }));
-
-  const payload = buildLocalVaultPayload(vault([]));
-
-  assert.equal(payload.settings?.ai?.providers?.[0]?.apiKey, "enc:v1:djEwUFJPVklERVIAAAAAAAAAAA==");
-  assert.equal(payload.settings?.ai?.webSearchConfig?.apiKey, "enc:v1:djEwV0VCAAAAAAAAAAAAAAAAAA==");
 });
 
 test("applySyncPayload ignores legacy cloud known hosts", async () => {

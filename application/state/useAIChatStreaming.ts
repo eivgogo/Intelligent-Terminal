@@ -11,7 +11,6 @@ import type {
   AIToolIntegrationMode,
   ChatMessage,
   ExternalAgentConfig,
-  ProviderConfig,
 } from '../../infrastructure/ai/types';
 import { getAgentRuntime } from '../../infrastructure/ai/harness/globalAgentRuntime';
 import type {
@@ -86,7 +85,6 @@ export interface SendToExternalContext {
   historyMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
   terminalSessions: TerminalSessionInfo[];
   defaultTargetSession?: DefaultTargetSessionHint;
-  providers: ProviderConfig[];
   selectedAgentModel?: string;
   toolIntegrationMode: AIToolIntegrationMode;
   selectedUserSkillSlugs?: string[];

@@ -1,28 +1,22 @@
 /**
- * Settings AI Tab - AI provider configuration, agent CLI detection, and safety settings
+ * Settings AI Tab - agent CLI detection, tool access, web search, and safety settings
  *
  * Sub-components live in ./ai/ directory:
- *   - ProviderCard, ProviderConfigForm, AddProviderDropdown
- *   - ModelSelector
  *   - CodexConnectionCard, ClaudeCodeCard, CodebuddyCard
  *   - SafetySettings
  */
-import { AlertTriangle, Bot, FolderOpen, RefreshCcw } from "lucide-react";
+import { AlertTriangle, FolderOpen, RefreshCcw } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AIPermissionMode,
-  AIProviderId,
   AIToolIntegrationMode,
   CursorAuthMode,
   ExternalAgentConfig,
-  ProviderConfig,
   WebSearchConfig,
 } from "../../../infrastructure/ai/types";
 import type { ManagedAgentKey } from "../../../infrastructure/ai/managedAgents";
-import { PROVIDER_PRESETS } from "../../../infrastructure/ai/types";
 import { useI18n } from "../../../application/i18n/I18nProvider";
 import { Button } from "../../ui/button";
-import { ConfirmDialog } from "../../ui/confirm-dialog";
 import { Select, SettingCard, SettingsAnchor, SettingsSection, SettingsTabContent, SettingRow, Toggle } from "../settings-ui";
 import { useOptionalSettingsFocus } from "../SettingsFocusContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../ui/tabs";
@@ -43,8 +37,6 @@ import {
   isCursorAvailableForMode,
   normalizeCodexBridgeError,
 } from "./ai/types";
-import { ProviderCard } from "./ai/ProviderCard";
-import { AddProviderDropdown } from "./ai/AddProviderDropdown";
 import { CodexConnectionCard } from "./ai/CodexConnectionCard";
 import { ClaudeCodeCard } from "./ai/ClaudeCodeCard";
 import { CopilotCliCard } from "./ai/CopilotCliCard";
@@ -97,7 +89,7 @@ function scheduleAfterFirstPaint(callback: () => void, delayMs = 0): () => void 
   };
 }
 
-type AISettingsSubTab = "providers" | "agents" | "tools" | "search" | "safety";
+type AISettingsSubTab = "agents" | "tools" | "search" | "safety";
 
 function getSavedManagedAgentPathInfo(
   agents: ExternalAgentConfig[],
@@ -133,14 +125,6 @@ function getManagedAgentCommandPath(
 // ---------------------------------------------------------------------------
 
 interface SettingsAITabProps {
-  providers: ProviderConfig[];
-  addProvider: (provider: ProviderConfig) => void;
-  updateProvider: (id: string, updates: Partial<ProviderConfig>) => void;
-  removeProvider: (id: string) => void;
-  activeProviderId: string;
-  setActiveProviderId: (id: string) => void;
-  activeModelId: string;
-  setActiveModelId: (id: string) => void;
   globalPermissionMode: AIPermissionMode;
   setGlobalPermissionMode: (mode: AIPermissionMode) => void;
   toolIntegrationMode: AIToolIntegrationMode;
@@ -168,14 +152,6 @@ interface SettingsAITabProps {
 // ---------------------------------------------------------------------------
 
 const SettingsAITab: React.FC<SettingsAITabProps> = ({
-  providers,
-  addProvider,
-  updateProvider,
-  removeProvider,
-  activeProviderId,
-  setActiveProviderId,
-  activeModelId: _activeModelId,
-  setActiveModelId,
   globalPermissionMode,
   setGlobalPermissionMode,
   toolIntegrationMode,
@@ -206,8 +182,6 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
     exportGrants,
   } = useAIPermissionGrantsState();
   const { t } = useI18n();
-  const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
-  const [removeProviderConfirm, setRemoveProviderConfirm] = useState<{ id: string; name: string } | null>(null);
   const [codexIntegration, setCodexIntegration] = useState<CodexIntegrationStatus | null>(null);
   const [codexLoginSession, setCodexLoginSession] = useState<CodexLoginSession | null>(null);
   const [isCodexLoading, setIsCodexLoading] = useState(false);
@@ -232,7 +206,7 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   );
   const [codexCustomPath, setCodexCustomPath] = useState(() => initialManagedPathsRef.current?.codex ?? "");
   const [isResolvingCodex, setIsResolvingCodex] = useState(false);
-  const [activeSubTab, setActiveSubTab] = useState<AISettingsSubTab>("providers");
+  const [activeSubTab, setActiveSubTab] = useState<AISettingsSubTab>("agents");
   const settingsFocus = useOptionalSettingsFocus();
 
   const [claudePathInfo, setClaudePathInfo] = useState<AgentPathInfo | null>(
@@ -578,47 +552,6 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
       apiKeyPresent: Boolean(cursorApiKeyEncrypted),
     });
   }, [cursorApiKeyEncrypted, cursorPathInfo, resolveAgentPath, setExternalAgents]);
-
-  // Add a new provider from preset
-  const handleAddProvider = useCallback(
-    (providerId: AIProviderId) => {
-      const preset = PROVIDER_PRESETS[providerId];
-      const id = `provider_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      addProvider({
-        id,
-        providerId,
-        name: preset.name,
-        baseURL: preset.defaultBaseURL,
-        enabled: false,
-      });
-      // Auto-open config form
-      setEditingProviderId(id);
-    },
-    [addProvider],
-  );
-
-  // Remove provider with confirmation
-  const handleRemoveProvider = useCallback(
-    (id: string) => {
-      const provider = providers.find((p) => p.id === id);
-      const name = provider?.name || id;
-      setRemoveProviderConfirm({ id, name });
-    },
-    [providers],
-  );
-
-  const handleConfirmRemoveProvider = useCallback(
-    () => {
-      if (!removeProviderConfirm) return;
-      const { id } = removeProviderConfirm;
-      removeProvider(id);
-      if (editingProviderId === id) {
-        setEditingProviderId(null);
-      }
-      setRemoveProviderConfirm(null);
-    },
-    [removeProvider, editingProviderId, removeProviderConfirm],
-  );
 
   // Agent options for default agent
   const agentOptions = useMemo(() =>
@@ -995,74 +928,11 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
     <SettingsTabContent value="ai">
       <Tabs value={activeSubTab} onValueChange={(value) => setActiveSubTab(value as AISettingsSubTab)} className="space-y-5">
         <TabsList className="h-auto flex-wrap justify-start bg-muted/50">
-          <TabsTrigger value="providers">{t('ai.providers')}</TabsTrigger>
           <TabsTrigger value="agents">{t('ai.agents')}</TabsTrigger>
           <TabsTrigger value="tools">{t('ai.toolAccess.title')}</TabsTrigger>
           <TabsTrigger value="search">{t("ai.webSearch.title")}</TabsTrigger>
           <TabsTrigger value="safety">{t('ai.safety.title')}</TabsTrigger>
         </TabsList>
-
-        <TabsContent value="providers" className="m-0 space-y-6">
-          <SettingsSection
-            anchorId="ai-providers"
-            title={t('ai.providers')}
-            actions={<AddProviderDropdown onAdd={handleAddProvider} />}
-          >
-            {providers.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-border/60 p-6 text-center">
-                <Bot size={24} className="mx-auto text-muted-foreground mb-2" />
-                <p className="text-sm text-muted-foreground">
-                  {t('ai.providers.empty')}
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {providers.map((provider) => (
-                  <ProviderCard
-                    key={provider.id}
-                    provider={provider}
-                    isActive={provider.id === activeProviderId}
-                    onToggleEnabled={(enabled) => {
-                      if (enabled) {
-                        setActiveProviderId(provider.id);
-                        if (provider.defaultModel) {
-                          setActiveModelId(provider.defaultModel);
-                        }
-                        for (const p of providers) {
-                          if (p.id === provider.id) {
-                            if (!p.enabled) updateProvider(p.id, { enabled: true });
-                          } else if (p.enabled) {
-                            updateProvider(p.id, { enabled: false });
-                          }
-                        }
-                      } else {
-                        if (activeProviderId === provider.id) {
-                          setActiveProviderId("");
-                          setActiveModelId("");
-                        }
-                        updateProvider(provider.id, { enabled: false });
-                      }
-                    }}
-                    onEdit={() =>
-                      setEditingProviderId(
-                        editingProviderId === provider.id ? null : provider.id,
-                      )
-                    }
-                    onRemove={() => handleRemoveProvider(provider.id)}
-                    onUpdate={(updates) => {
-                      updateProvider(provider.id, updates);
-                      if (provider.id === activeProviderId && updates.defaultModel !== undefined) {
-                        setActiveModelId(updates.defaultModel || "");
-                      }
-                    }}
-                    isEditing={editingProviderId === provider.id}
-                    onCancelEdit={() => setEditingProviderId(null)}
-                  />
-                ))}
-              </div>
-            )}
-          </SettingsSection>
-        </TabsContent>
 
         <TabsContent value="agents" className="m-0 space-y-6">
           <SettingsSection
@@ -1390,16 +1260,6 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
           />
         </TabsContent>
       </Tabs>
-      <ConfirmDialog
-        open={removeProviderConfirm !== null}
-        title={removeProviderConfirm ? t('confirm.removeProvider', { name: removeProviderConfirm.name }) : ''}
-        confirmLabel={t('action.remove')}
-        destructive
-        onOpenChange={(open) => {
-          if (!open) setRemoveProviderConfirm(null);
-        }}
-        onConfirm={handleConfirmRemoveProvider}
-      />
     </SettingsTabContent>
   );
 };

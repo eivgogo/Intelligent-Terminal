@@ -54,7 +54,7 @@ function payload(label = 'Production'): SyncPayload {
     groupConfigs: [],
     settings: {
       theme: 'dark',
-      ai: { providers: [{ id: 'provider-1', apiKey: 'api-secret' }] },
+      ai: { agentModelMap: { codex: 'gpt-test' } },
     },
     syncedAt: NOW,
   };

@@ -7,7 +7,6 @@ import type {
   AISessionScope,
   ChatMessage,
   ExternalAgentConfig,
-  ProviderConfig,
   WebSearchConfig,
 } from '../infrastructure/ai/types';
 import type { AIQuickMessage } from '../infrastructure/ai/quickMessages';
@@ -54,11 +53,6 @@ export interface AIChatSidePanelProps {
     sessionId: string,
     compaction: import('../infrastructure/ai/types').AISessionContextCompaction,
   ) => void;
-  // Provider config
-  providers: ProviderConfig[];
-  activeProviderId: string;
-  activeModelId: string;
-
   // Agent info
   defaultAgentId: string;
   toolIntegrationMode: AIToolIntegrationMode;
@@ -66,11 +60,8 @@ export interface AIChatSidePanelProps {
   setExternalAgents?: (value: ExternalAgentConfig[] | ((prev: ExternalAgentConfig[]) => ExternalAgentConfig[])) => void;
   agentModelMap: Record<string, string>;
   setAgentModel: (agentId: string, modelId: string) => void;
-  agentProviderMap: Record<string, string>;
-  setAgentProvider: (agentId: string, providerId: string) => void;
   agentThinkingMap: Record<string, string>;
   setAgentThinking: (agentId: string, thinkingLevel: string) => void;
-  updateProvider?: (id: string, updates: Partial<ProviderConfig>) => void;
 
   // Safety
   globalPermissionMode: AIPermissionMode;

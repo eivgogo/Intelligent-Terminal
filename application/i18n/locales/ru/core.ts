@@ -63,7 +63,6 @@ export const ruCoreMessages: Messages = {
   // Dialogs / prompts
   'confirm.deleteHost': 'Удалить хост "{name}"?',
   'confirm.deleteIdentity': 'Удалить идентификатор "{name}"?',
-  'confirm.removeProvider': 'Удалить провайдера "{name}"?',
   'confirm.closeBusyTerminal.title': 'Подтвердите закрытие',
   'confirm.closeBusyTerminal.message': 'Процесс "{command}" всё ещё выполняется и будет завершён.',
   'confirm.closeBusyTerminal.messageWithMore': 'Процесс "{command}" и ещё {count} выполняющихся процесс(ов) будут завершены.',

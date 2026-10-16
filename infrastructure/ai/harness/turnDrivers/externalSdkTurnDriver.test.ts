@@ -155,7 +155,6 @@ test('plan updates replace the same activity across tool message boundaries', as
     attachedImages: [],
     context: {
       terminalSessions: [],
-      providers: [],
       toolIntegrationMode: 'mcp',
       selectedUserSkillSlugs: [],
       permissionMode: 'confirm',
@@ -245,7 +244,6 @@ test('accepted steering persists a user bubble and routes buffered output to a c
     attachedImages: [],
     context: {
       terminalSessions: [],
-      providers: [],
       toolIntegrationMode: 'mcp',
       selectedUserSkillSlugs: [],
       permissionMode: 'confirm',
@@ -349,7 +347,7 @@ test('accepted steering keeps buffered results for existing tool calls on their 
     },
     attachedImages: [],
     context: {
-      terminalSessions: [], providers: [], toolIntegrationMode: 'mcp',
+      terminalSessions: [], toolIntegrationMode: 'mcp',
       selectedUserSkillSlugs: [], permissionMode: 'confirm',
     },
     bridge,
@@ -462,7 +460,7 @@ test('failed steering keeps buffered output on the original assistant message', 
     },
     attachedImages: [],
     context: {
-      terminalSessions: [], providers: [], toolIntegrationMode: 'mcp',
+      terminalSessions: [], toolIntegrationMode: 'mcp',
       selectedUserSkillSlugs: [], permissionMode: 'confirm',
     },
     bridge,

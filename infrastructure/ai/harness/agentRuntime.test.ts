@@ -22,7 +22,6 @@ function externalTurnInput(overrides: Partial<ExternalTurnInput> & { chatSession
     attachedImages: [],
     context: {
       terminalSessions: [],
-      providers: [],
       toolIntegrationMode: 'mcp',
       permissionMode: 'confirm',
     },

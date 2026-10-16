@@ -200,14 +200,6 @@ const SettingsAITabContainer: React.FC = () => {
     return (
         <AITabErrorBoundary>
             <LazySettingsAITab
-                providers={aiState.providers}
-                addProvider={aiState.addProvider}
-                updateProvider={aiState.updateProvider}
-                removeProvider={aiState.removeProvider}
-                activeProviderId={aiState.activeProviderId}
-                setActiveProviderId={aiState.setActiveProviderId}
-                activeModelId={aiState.activeModelId}
-                setActiveModelId={aiState.setActiveModelId}
                 globalPermissionMode={aiState.globalPermissionMode}
                 setGlobalPermissionMode={aiState.setGlobalPermissionMode}
                 toolIntegrationMode={aiState.toolIntegrationMode}

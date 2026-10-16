@@ -5,7 +5,6 @@ import type {
   ChatMessage,
   ChatMessageAttachment,
   ExternalAgentConfig,
-  ProviderConfig,
 } from '../../types';
 import type { AgentBackend, AgentEvent, AgentEventListener } from '../types';
 import type { ToolOutputStore } from '../toolOutputStore';
@@ -53,7 +52,6 @@ export interface ExternalTurnContext {
   historyMessages?: Array<{ role: 'user' | 'assistant'; content: string }>;
   terminalSessions: TerminalSessionInfo[];
   defaultTargetSession?: DefaultTargetSessionHint;
-  providers: ProviderConfig[];
   selectedAgentModel?: string;
   toolIntegrationMode: AIToolIntegrationMode;
   selectedUserSkillSlugs?: string[];

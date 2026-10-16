@@ -1,9 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import type { ProviderConfig } from './types';
 import {
-  buildProviderSeedModels,
   filterComposerModels,
   mergeComposerModels,
   parseComposerModelPrefs,
@@ -66,19 +64,6 @@ test('filterComposerModels matches id, name, and description', () => {
   assert.deepEqual(filterComposerModels(models, '5.5').map((m) => m.id), ['gpt-5.5']);
   assert.deepEqual(filterComposerModels(models, 'v4').map((m) => m.id), ['deepseek-v4-pro']);
   assert.deepEqual(filterComposerModels(models, 'balanced').map((m) => m.id), ['gpt-5.5']);
-});
-
-test('buildProviderSeedModels includes default plus preset ids', () => {
-  const provider: ProviderConfig = {
-    id: 'p1',
-    providerId: 'deepseek',
-    name: 'DeepSeek',
-    defaultModel: 'deepseek-chat',
-    enabled: true,
-  };
-  const ids = buildProviderSeedModels(provider).map((model) => model.id);
-  assert.ok(ids.includes('deepseek-chat'));
-  assert.ok(ids.includes('deepseek-v4-pro'));
 });
 
 test('mergeComposerModels prefers a human name over a raw id', () => {

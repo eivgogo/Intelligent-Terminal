@@ -329,8 +329,7 @@ test("mergeSyncPayloads honors empty cloud setting maps as resets on the first m
         },
         ai: {
           agentModelMap: { codex: "gpt-local" },
-          agentProviderMap: { codex: "openai-local" },
-          activeModelId: "local-model",
+          agentThinkingMap: { codex: "high" },
         },
       },
     }),
@@ -339,8 +338,7 @@ test("mergeSyncPayloads honors empty cloud setting maps as resets on the first m
         customKeyBindings: {},
         ai: {
           agentModelMap: {},
-          agentProviderMap: {},
-          activeProviderId: "cloud-provider",
+          agentThinkingMap: {},
         },
       },
     }),
@@ -350,9 +348,7 @@ test("mergeSyncPayloads honors empty cloud setting maps as resets on the first m
     customKeyBindings: {},
     ai: {
       agentModelMap: {},
-      agentProviderMap: {},
-      activeModelId: "local-model",
-      activeProviderId: "cloud-provider",
+      agentThinkingMap: {},
     },
   });
 });
@@ -363,30 +359,30 @@ test("mergeSyncPayloads retains unique nested setting entries while cloud wins d
     payload({
       settings: {
         ai: {
-          providers: [
-            { id: "shared", name: "Local shared" },
-            { id: "local-only", name: "Local only" },
-          ],
+          agentModelMap: {
+            codex: "local-codex",
+            claude: "local-claude",
+          },
         },
       },
     }),
     payload({
       settings: {
         ai: {
-          providers: [
-            { id: "shared", name: "Cloud shared" },
-            { id: "cloud-only", name: "Cloud only" },
-          ],
+          agentModelMap: {
+            codex: "cloud-codex",
+            copilot: "cloud-copilot",
+          },
         },
       },
     }),
   );
 
-  assert.deepEqual(result.payload.settings?.ai?.providers, [
-    { id: "shared", name: "Cloud shared" },
-    { id: "cloud-only", name: "Cloud only" },
-    { id: "local-only", name: "Local only" },
-  ]);
+  assert.deepEqual(result.payload.settings?.ai?.agentModelMap, {
+    codex: "cloud-codex",
+    copilot: "cloud-copilot",
+    claude: "local-claude",
+  });
 });
 
 test("mergeSyncPayloads keeps local settings conflict policy when a base exists", () => {

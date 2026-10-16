@@ -50,7 +50,6 @@ export const zhCNCoreMessages: Messages = {
   // Dialogs / prompts
   'confirm.deleteHost': '删除主机 "{name}"？',
   'confirm.deleteIdentity': '删除身份 "{name}"？',
-  'confirm.removeProvider': '移除提供商 "{name}"？',
   'confirm.closeBusyTerminal.title': '确认关闭',
   'confirm.closeBusyTerminal.message': '进程 "{command}" 仍在运行，关闭后会被终止。',
   'confirm.closeBusyTerminal.messageWithMore': '进程 "{command}" 及其他 {count} 个正在运行的进程将被终止。',

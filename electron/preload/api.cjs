@@ -1671,23 +1671,8 @@ function createPreloadApi(ctx) {
   },
 
   // ── AI Bridge ──
-  aiSyncProviders: async (providers) => {
-    return ipcRenderer.invoke("netcatty:ai:sync-providers", { providers });
-  },
   aiSyncWebSearch: async (apiHost, apiKey) => {
     return ipcRenderer.invoke("netcatty:ai:sync-web-search", { apiHost, apiKey });
-  },
-  aiChatStream: async (requestId, url, headers, body, providerId) => {
-    return ipcRenderer.invoke("netcatty:ai:chat:stream", { requestId, url, headers, body, providerId });
-  },
-  aiChatCancel: async (requestId) => {
-    return ipcRenderer.invoke("netcatty:ai:chat:cancel", { requestId });
-  },
-  aiFetch: async (url, method, headers, body, providerId, skipHostCheck, followRedirects, skipTLSVerify) => {
-    return ipcRenderer.invoke("netcatty:ai:fetch", { url, method, headers, body, providerId, skipHostCheck, followRedirects, skipTLSVerify });
-  },
-  aiAllowlistAddHost: async (baseURL) => {
-    return ipcRenderer.invoke("netcatty:ai:allowlist:add-host", { baseURL });
   },
   aiExec: async (sessionId, command, chatSessionId) => {
     return ipcRenderer.invoke("netcatty:ai:exec", { sessionId, command, chatSessionId });

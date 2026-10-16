@@ -63,8 +63,6 @@ interface AIChatPanelContentProps {
   steerWarning?: string;
   lockTurnConfiguration: boolean;
   canSendCurrentAgent: boolean;
-  providerDisplayName?: string;
-  modelDisplayName?: string;
   modelCatalogWarning?: string;
   agentModelPresets: AgentModelPreset[];
   selectedAgentModel: string;
@@ -126,8 +124,6 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   steerWarning,
   lockTurnConfiguration,
   canSendCurrentAgent,
-  providerDisplayName,
-  modelDisplayName,
   modelCatalogWarning,
   agentModelPresets,
   selectedAgentModel,
@@ -316,8 +312,6 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                   isSteering={isSteering}
                   lockTurnConfiguration={lockTurnConfiguration}
                   disabled={!canSendCurrentAgent}
-                  providerName={providerDisplayName}
-                  modelName={modelDisplayName}
                   agentName={externalAgents.find(a => a.id === currentAgentId)?.name}
                   modelPresets={agentModelPresets}
                   selectedModelId={selectedAgentModel}

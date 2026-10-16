@@ -90,9 +90,6 @@ import {
   STORAGE_KEY_SHOW_TAB_NUMBER_BADGES,
   STORAGE_KEY_DISABLE_TERMINAL_FONT_ZOOM,
   STORAGE_KEY_WORKSPACE_FOCUS_STYLE,
-  STORAGE_KEY_AI_PROVIDERS,
-  STORAGE_KEY_AI_ACTIVE_PROVIDER,
-  STORAGE_KEY_AI_ACTIVE_MODEL,
   STORAGE_KEY_AI_PERMISSION_MODE,
   STORAGE_KEY_AI_TOOL_INTEGRATION_MODE,
   STORAGE_KEY_AI_HOST_PERMISSIONS,
@@ -101,7 +98,6 @@ import {
   STORAGE_KEY_AI_COMMAND_TIMEOUT,
   STORAGE_KEY_AI_MAX_ITERATIONS,
   STORAGE_KEY_AI_AGENT_MODEL_MAP,
-  STORAGE_KEY_AI_AGENT_PROVIDER_MAP,
   STORAGE_KEY_AI_AGENT_THINKING_MAP,
   STORAGE_KEY_AI_WEB_SEARCH,
   STORAGE_KEY_AI_QUICK_MESSAGES,
@@ -302,9 +298,6 @@ export const SYNCABLE_SETTING_STORAGE_KEYS = [
   STORAGE_KEY_SHELL_ONLY_TAB_NUMBER_SHORTCUTS,
   STORAGE_KEY_SHOW_TAB_NUMBER_BADGES,
   STORAGE_KEY_WORKSPACE_FOCUS_STYLE,
-  STORAGE_KEY_AI_PROVIDERS,
-  STORAGE_KEY_AI_ACTIVE_PROVIDER,
-  STORAGE_KEY_AI_ACTIVE_MODEL,
   STORAGE_KEY_AI_PERMISSION_MODE,
   STORAGE_KEY_AI_TOOL_INTEGRATION_MODE,
   STORAGE_KEY_AI_HOST_PERMISSIONS,
@@ -313,7 +306,6 @@ export const SYNCABLE_SETTING_STORAGE_KEYS = [
   STORAGE_KEY_AI_COMMAND_TIMEOUT,
   STORAGE_KEY_AI_MAX_ITERATIONS,
   STORAGE_KEY_AI_AGENT_MODEL_MAP,
-  STORAGE_KEY_AI_AGENT_PROVIDER_MAP,
   STORAGE_KEY_AI_AGENT_THINKING_MAP,
   STORAGE_KEY_AI_WEB_SEARCH,
   STORAGE_KEY_AI_QUICK_MESSAGES,
@@ -367,35 +359,9 @@ const withLocalEncryptedApiKey = async <T extends Record<string, unknown>>(value
 };
 
 /**
- * `collectSyncableSettings` strips device-bound encrypted apiKeys before upload,
- * so an incoming providers array typically has no apiKey for providers that
- * already exist locally. Re-attach the local apiKey by id; without this merge,
- * applying any synced settings change would silently wipe credentials on the
- * receiving device.
- */
-const mergeAiProvidersPreservingLocalApiKeys = (
-  incoming: Array<Record<string, unknown>>,
-): Array<Record<string, unknown>> => {
-  const local = readArraySetting(STORAGE_KEY_AI_PROVIDERS) ?? [];
-  const localById = new Map<string, Record<string, unknown>>();
-  for (const provider of local) {
-    if (typeof provider?.id === 'string') localById.set(provider.id, provider);
-  }
-  return incoming.map((provider) => {
-    if (provider.apiKey != null) return provider;
-    const id = typeof provider.id === 'string' ? provider.id : undefined;
-    const localProvider = id != null ? localById.get(id) : undefined;
-    if (localProvider && typeof localProvider.apiKey === 'string') {
-      return { ...provider, apiKey: localProvider.apiKey };
-    }
-    return provider;
-  });
-};
-
-/**
- * Same rationale as `mergeAiProvidersPreservingLocalApiKeys`. Only restores the
- * local apiKey when the incoming config still points at the same providerId - 
- * switching providers must not silently leak a key meant for a different one.
+ * Only restores the local apiKey when the incoming config still points at the
+ * same providerId - switching providers must not silently leak a key meant for
+ * a different one.
  */
 const mergeWebSearchConfigPreservingLocalApiKey = (
   incoming: Record<string, unknown>,
@@ -535,12 +501,6 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   }
 
   const ai: NonNullable<SyncPayload['settings']>['ai'] = {};
-  const providers = readArraySetting(STORAGE_KEY_AI_PROVIDERS);
-  if (providers) ai.providers = providers.map(stripDeviceBoundApiKey);
-  const activeProviderId = localStorageAdapter.readString(STORAGE_KEY_AI_ACTIVE_PROVIDER);
-  if (activeProviderId != null) ai.activeProviderId = activeProviderId;
-  const activeModelId = localStorageAdapter.readString(STORAGE_KEY_AI_ACTIVE_MODEL);
-  if (activeModelId != null) ai.activeModelId = activeModelId;
   const permissionMode = localStorageAdapter.readString(STORAGE_KEY_AI_PERMISSION_MODE);
   if (permissionMode === 'observer' || permissionMode === 'confirm' || permissionMode === 'auto') {
     ai.globalPermissionMode = permissionMode;
@@ -562,8 +522,6 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
   if (maxIterations != null && Number.isFinite(maxIterations)) ai.maxIterations = maxIterations;
   const agentModelMap = readRecordSetting<Record<string, string>>(STORAGE_KEY_AI_AGENT_MODEL_MAP);
   if (agentModelMap) ai.agentModelMap = agentModelMap;
-  const agentProviderMap = readRecordSetting<Record<string, string>>(STORAGE_KEY_AI_AGENT_PROVIDER_MAP);
-  if (agentProviderMap) ai.agentProviderMap = agentProviderMap;
   const agentThinkingMap = readRecordSetting<Record<string, string>>(STORAGE_KEY_AI_AGENT_THINKING_MAP);
   if (agentThinkingMap) ai.agentThinkingMap = agentThinkingMap;
   const webSearchConfig = readRecordSetting(STORAGE_KEY_AI_WEB_SEARCH);
@@ -582,21 +540,15 @@ export function collectSyncableSettings(): SyncPayload['settings'] {
 export async function collectCloudSyncableSettings(): Promise<SyncPayload['settings']> {
   const settings = collectSyncableSettings();
 
-  const providers = readArraySetting(STORAGE_KEY_AI_PROVIDERS);
   const webSearchConfig = readRecordSetting(STORAGE_KEY_AI_WEB_SEARCH);
-  if (!providers && !webSearchConfig) return settings;
+  if (!webSearchConfig) return settings;
 
   const nextSettings: SyncPayload['settings'] = settings ? { ...settings } : {};
   const ai: NonNullable<SyncPayload['settings']>['ai'] = {
     ...(settings?.ai ?? {}),
   };
 
-  if (providers) {
-    ai.providers = await Promise.all(providers.map(withPortableApiKey));
-  }
-  if (webSearchConfig) {
-    ai.webSearchConfig = await withPortableApiKey(webSearchConfig);
-  }
+  ai.webSearchConfig = await withPortableApiKey(webSearchConfig);
 
   nextSettings.ai = ai;
   return Object.keys(nextSettings).length > 0 ? nextSettings : undefined;
@@ -605,21 +557,15 @@ export async function collectCloudSyncableSettings(): Promise<SyncPayload['setti
 function collectLocalBackupSettings(): SyncPayload['settings'] {
   const settings = collectSyncableSettings();
 
-  const providers = readArraySetting(STORAGE_KEY_AI_PROVIDERS);
   const webSearchConfig = readRecordSetting(STORAGE_KEY_AI_WEB_SEARCH);
-  if (!providers && !webSearchConfig) return settings;
+  if (!webSearchConfig) return settings;
 
   const nextSettings: SyncPayload['settings'] = settings ? { ...settings } : {};
   const ai: NonNullable<SyncPayload['settings']>['ai'] = {
     ...(settings?.ai ?? {}),
   };
 
-  if (providers) {
-    ai.providers = providers;
-  }
-  if (webSearchConfig) {
-    ai.webSearchConfig = webSearchConfig;
-  }
+  ai.webSearchConfig = webSearchConfig;
 
   nextSettings.ai = ai;
   return Object.keys(nextSettings).length > 0 ? nextSettings : undefined;
@@ -780,15 +726,6 @@ async function applySyncableSettings(settings: NonNullable<SyncPayload['settings
 
   const ai = settings.ai;
   if (ai) {
-    if (ai.providers != null) {
-      const providers = await Promise.all(ai.providers.map(withLocalEncryptedApiKey));
-      localStorageAdapter.write(
-        STORAGE_KEY_AI_PROVIDERS,
-        mergeAiProvidersPreservingLocalApiKeys(providers),
-      );
-    }
-    if (ai.activeProviderId != null) localStorageAdapter.writeString(STORAGE_KEY_AI_ACTIVE_PROVIDER, ai.activeProviderId);
-    if (ai.activeModelId != null) localStorageAdapter.writeString(STORAGE_KEY_AI_ACTIVE_MODEL, ai.activeModelId);
     if (ai.globalPermissionMode != null) localStorageAdapter.writeString(STORAGE_KEY_AI_PERMISSION_MODE, ai.globalPermissionMode);
     if (ai.toolIntegrationMode != null) localStorageAdapter.writeString(STORAGE_KEY_AI_TOOL_INTEGRATION_MODE, ai.toolIntegrationMode);
     if (ai.hostPermissions != null) localStorageAdapter.write(STORAGE_KEY_AI_HOST_PERMISSIONS, ai.hostPermissions);
@@ -799,7 +736,6 @@ async function applySyncableSettings(settings: NonNullable<SyncPayload['settings
     if (ai.commandTimeout != null) localStorageAdapter.writeNumber(STORAGE_KEY_AI_COMMAND_TIMEOUT, ai.commandTimeout);
     if (ai.maxIterations != null) localStorageAdapter.writeNumber(STORAGE_KEY_AI_MAX_ITERATIONS, ai.maxIterations);
     if (ai.agentModelMap != null) localStorageAdapter.write(STORAGE_KEY_AI_AGENT_MODEL_MAP, ai.agentModelMap);
-    if (ai.agentProviderMap != null) localStorageAdapter.write(STORAGE_KEY_AI_AGENT_PROVIDER_MAP, ai.agentProviderMap);
     if (ai.agentThinkingMap != null) localStorageAdapter.write(STORAGE_KEY_AI_AGENT_THINKING_MAP, ai.agentThinkingMap);
     if (ai.webSearchConfig !== undefined) {
       if (ai.webSearchConfig === null) {
@@ -821,16 +757,9 @@ async function applySyncableSettings(settings: NonNullable<SyncPayload['settings
         ai.showTerminalSelectionAction,
       );
     }
-    // After all AI writes, reconcile per-agent bindings against the final
-    // provider list. Sync payloads can land with a new `providers` set but
-    // no `agentProviderMap`, or with a stale `agentProviderMap` that
-    // points at ids the synced provider set doesn't include - either way
-    // we'd leak overrides bound to ghost providers. Mirrors the same
-    // cleanup `removeProvider` does for explicit user deletes.
-    pruneOrphanPerAgentBindings();
     // Nudge same-window AI state listeners. localStorage writes only fire
     // `storage` events in *other* windows; without this nudge the open
-    // chat panel keeps showing pre-sync providers/bindings until reload.
+    // chat panel keeps showing pre-sync AI settings until reload.
     notifyAIStateAfterSync(ai);
   }
 }
@@ -841,9 +770,6 @@ function notifyAIStateAfterSync(ai: NonNullable<SyncPayload['settings']>['ai']):
   // gets a same-window nudge. `useAIState` listens for these and refreshes
   // the corresponding React state by re-reading localStorage.
   const touched: Array<string> = [];
-  if (ai.providers != null) touched.push(STORAGE_KEY_AI_PROVIDERS);
-  if (ai.activeProviderId != null) touched.push(STORAGE_KEY_AI_ACTIVE_PROVIDER);
-  if (ai.activeModelId != null) touched.push(STORAGE_KEY_AI_ACTIVE_MODEL);
   if (ai.globalPermissionMode != null) touched.push(STORAGE_KEY_AI_PERMISSION_MODE);
   if (ai.toolIntegrationMode != null) touched.push(STORAGE_KEY_AI_TOOL_INTEGRATION_MODE);
   if (ai.hostPermissions != null) touched.push(STORAGE_KEY_AI_HOST_PERMISSIONS);
@@ -853,14 +779,6 @@ function notifyAIStateAfterSync(ai: NonNullable<SyncPayload['settings']>['ai']):
   if (ai.maxIterations != null) touched.push(STORAGE_KEY_AI_MAX_ITERATIONS);
   if (ai.agentModelMap != null) touched.push(STORAGE_KEY_AI_AGENT_MODEL_MAP);
   if (ai.agentThinkingMap != null) touched.push(STORAGE_KEY_AI_AGENT_THINKING_MAP);
-  // agentProviderMap is *always* potentially mutated because the reconcile
-  // step may have pruned it even if the payload didn't ship one.
-  touched.push(STORAGE_KEY_AI_AGENT_PROVIDER_MAP);
-  // The reconcile may also have pruned saved models alongside provider
-  // bindings, so always nudge the model map too.
-  if (!touched.includes(STORAGE_KEY_AI_AGENT_MODEL_MAP)) {
-    touched.push(STORAGE_KEY_AI_AGENT_MODEL_MAP);
-  }
   if (ai.webSearchConfig !== undefined) touched.push(STORAGE_KEY_AI_WEB_SEARCH);
   if (ai.quickMessages != null) touched.push(STORAGE_KEY_AI_QUICK_MESSAGES);
   if (ai.showTerminalSelectionAction != null) {
@@ -868,41 +786,6 @@ function notifyAIStateAfterSync(ai: NonNullable<SyncPayload['settings']>['ai']):
   }
   for (const key of touched) {
     emitAIStateChanged(key);
-  }
-}
-
-function pruneOrphanPerAgentBindings(): void {
-  const providers = localStorageAdapter.read<Array<{ id?: string }>>(STORAGE_KEY_AI_PROVIDERS) ?? [];
-  const validIds = new Set(
-    providers
-      .map((p) => p?.id)
-      .filter((id): id is string => typeof id === 'string' && id.length > 0),
-  );
-  const providerMap = localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_AI_AGENT_PROVIDER_MAP) ?? {};
-  const modelMap = localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_AI_AGENT_MODEL_MAP) ?? {};
-  let providerChanged = false;
-  let modelChanged = false;
-  const nextProviderMap: Record<string, string> = {};
-  const nextModelMap: Record<string, string> = { ...modelMap };
-  for (const agentId of Object.keys(providerMap)) {
-    const providerId = providerMap[agentId];
-    if (providerId && validIds.has(providerId)) {
-      nextProviderMap[agentId] = providerId;
-    } else {
-      providerChanged = true;
-      // Drop the saved model too - that id belonged to the now-missing
-      // provider and isn't trustworthy against any other binding.
-      if (agentId in nextModelMap) {
-        delete nextModelMap[agentId];
-        modelChanged = true;
-      }
-    }
-  }
-  if (providerChanged) {
-    localStorageAdapter.write(STORAGE_KEY_AI_AGENT_PROVIDER_MAP, nextProviderMap);
-  }
-  if (modelChanged) {
-    localStorageAdapter.write(STORAGE_KEY_AI_AGENT_MODEL_MAP, nextModelMap);
   }
 }
 

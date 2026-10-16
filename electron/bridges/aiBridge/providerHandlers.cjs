@@ -36,16 +36,6 @@ function registerProviderHandlers(ctx) {
     }
   });
 
-  // ── Provider config sync (renderer → main, keys stay encrypted) ──
-  ipcMain.handle("netcatty:ai:sync-providers", async (event, { providers }) => {
-    if (!validateSenderOrSettings(event)) return { ok: false };
-    if (Array.isArray(providers)) {
-      providerConfigs = providers;
-      rebuildProviderFetchHosts();
-    }
-    return { ok: true };
-  });
-
   // ── Web search config sync (renderer → main, for fetch allowlist + key decryption) ──
   ipcMain.handle("netcatty:ai:sync-web-search", async (event, { apiHost, apiKey }) => {
     if (!validateSenderOrSettings(event)) return { ok: false };

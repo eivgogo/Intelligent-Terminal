@@ -64,7 +64,6 @@ export const enCoreMessages: Messages = {
   // Dialogs / prompts
   'confirm.deleteHost': 'Delete Host "{name}"?',
   'confirm.deleteIdentity': 'Delete Identity "{name}"?',
-  'confirm.removeProvider': 'Remove provider "{name}"?',
   'confirm.closeBusyTerminal.title': 'Confirm close',
   'confirm.closeBusyTerminal.message': 'Process "{command}" is still running and will be terminated.',
   'confirm.closeBusyTerminal.messageWithMore': 'Process "{command}" and {count} other running process(es) will be terminated.',

@@ -64,7 +64,6 @@ export const esCoreMessages: Messages = {
   // Dialogs / prompts
   'confirm.deleteHost': '¿Eliminar el host "{name}"?',
   'confirm.deleteIdentity': '¿Eliminar la identidad "{name}"?',
-  'confirm.removeProvider': '¿Quitar el proveedor "{name}"?',
   'confirm.closeBusyTerminal.title': 'Confirmar cierre',
   'confirm.closeBusyTerminal.message': 'El proceso "{command}" aún se está ejecutando y se terminará.',
   'confirm.closeBusyTerminal.messageWithMore': 'El proceso "{command}" y {count} procesos en ejecución más se terminarán.',

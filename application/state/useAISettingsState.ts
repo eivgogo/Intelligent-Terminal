@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { localStorageAdapter } from '../../infrastructure/persistence/localStorageAdapter';
 import {
-  STORAGE_KEY_AI_PROVIDERS,
-  STORAGE_KEY_AI_ACTIVE_PROVIDER,
-  STORAGE_KEY_AI_ACTIVE_MODEL,
   STORAGE_KEY_AI_PERMISSION_MODE,
   STORAGE_KEY_AI_TOOL_INTEGRATION_MODE,
   STORAGE_KEY_AI_EXTERNAL_AGENTS,
@@ -11,8 +8,6 @@ import {
   STORAGE_KEY_AI_COMMAND_BLOCKLIST,
   STORAGE_KEY_AI_COMMAND_TIMEOUT,
   STORAGE_KEY_AI_MAX_ITERATIONS,
-  STORAGE_KEY_AI_AGENT_MODEL_MAP,
-  STORAGE_KEY_AI_AGENT_PROVIDER_MAP,
   STORAGE_KEY_AI_WEB_SEARCH,
   STORAGE_KEY_AI_QUICK_MESSAGES,
   STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION,
@@ -23,7 +18,6 @@ import type {
   AIPermissionMode,
   AIToolIntegrationMode,
   ExternalAgentConfig,
-  ProviderConfig,
   WebSearchConfig,
 } from '../../infrastructure/ai/types';
 import {
@@ -31,7 +25,6 @@ import {
   DEFAULT_COMMAND_TIMEOUT_SECONDS,
   normalizeCommandTimeoutSeconds,
 } from '../../infrastructure/ai/types';
-import { removeProviderReferences } from './aiProviderCleanup';
 import { AI_STATE_CHANGED_EVENT, emitAIStateChanged } from './aiStateEvents';
 import { getAIBridge } from './aiStateSnapshots';
 import { useStoredBoolean } from './useStoredBoolean';
@@ -49,15 +42,6 @@ function readToolIntegrationMode(): AIToolIntegrationMode {
 }
 
 export function useAISettingsState() {
-  const [providers, setProvidersRaw] = useState<ProviderConfig[]>(() =>
-    localStorageAdapter.read<ProviderConfig[]>(STORAGE_KEY_AI_PROVIDERS) ?? []
-  );
-  const [activeProviderId, setActiveProviderIdRaw] = useState<string>(() =>
-    localStorageAdapter.readString(STORAGE_KEY_AI_ACTIVE_PROVIDER) ?? ''
-  );
-  const [activeModelId, setActiveModelIdRaw] = useState<string>(() =>
-    localStorageAdapter.readString(STORAGE_KEY_AI_ACTIVE_MODEL) ?? ''
-  );
   const [globalPermissionMode, setGlobalPermissionModeRaw] = useState<AIPermissionMode>(readPermissionMode);
   const [toolIntegrationMode, setToolIntegrationModeRaw] = useState<AIToolIntegrationMode>(readToolIntegrationMode);
   const [externalAgents, setExternalAgentsRaw] = useState<ExternalAgentConfig[]>(() =>
@@ -87,55 +71,6 @@ export function useAISettingsState() {
     STORAGE_KEY_AI_SHOW_TERMINAL_SELECTION_ACTION,
     true,
   );
-
-  const setProviders = useCallback((value: ProviderConfig[] | ((prev: ProviderConfig[]) => ProviderConfig[])) => {
-    setProvidersRaw((prev) => {
-      const next = typeof value === 'function' ? value(prev) : value;
-      localStorageAdapter.write(STORAGE_KEY_AI_PROVIDERS, next);
-      return next;
-    });
-  }, []);
-
-  const addProvider = useCallback((provider: ProviderConfig) => {
-    setProviders((prev) => [...prev, provider]);
-  }, [setProviders]);
-
-  const updateProvider = useCallback((id: string, updates: Partial<ProviderConfig>) => {
-    setProviders((prev) => prev.map((provider) => (
-      provider.id === id ? { ...provider, ...updates } : provider
-    )));
-  }, [setProviders]);
-
-  const removeProvider = useCallback((id: string) => {
-    setProviders((prev) => prev.filter((provider) => provider.id !== id));
-    setActiveProviderIdRaw((prevId) => {
-      if (prevId !== id) return prevId;
-      localStorageAdapter.writeString(STORAGE_KEY_AI_ACTIVE_PROVIDER, '');
-      return '';
-    });
-
-    const agentProviderMap =
-      localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_AI_AGENT_PROVIDER_MAP) ?? {};
-    const agentModelMap =
-      localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_AI_AGENT_MODEL_MAP) ?? {};
-    const cleanup = removeProviderReferences(id, agentProviderMap, agentModelMap);
-    if (cleanup.providerMapChanged) {
-      localStorageAdapter.write(STORAGE_KEY_AI_AGENT_PROVIDER_MAP, cleanup.agentProviderMap);
-    }
-    if (cleanup.modelMapChanged) {
-      localStorageAdapter.write(STORAGE_KEY_AI_AGENT_MODEL_MAP, cleanup.agentModelMap);
-    }
-  }, [setProviders]);
-
-  const setActiveProviderId = useCallback((id: string) => {
-    setActiveProviderIdRaw(id);
-    localStorageAdapter.writeString(STORAGE_KEY_AI_ACTIVE_PROVIDER, id);
-  }, []);
-
-  const setActiveModelId = useCallback((id: string) => {
-    setActiveModelIdRaw(id);
-    localStorageAdapter.writeString(STORAGE_KEY_AI_ACTIVE_MODEL, id);
-  }, []);
 
   const setGlobalPermissionMode = useCallback((mode: AIPermissionMode) => {
     setGlobalPermissionModeRaw(mode);
@@ -204,18 +139,6 @@ export function useAISettingsState() {
     const syncFromStorageKey = (key: string | null) => {
       try {
         switch (key) {
-          case STORAGE_KEY_AI_PROVIDERS: {
-            const parsed = localStorageAdapter.read<ProviderConfig[]>(STORAGE_KEY_AI_PROVIDERS);
-            if (parsed != null && !Array.isArray(parsed)) break;
-            setProvidersRaw(parsed ?? []);
-            break;
-          }
-          case STORAGE_KEY_AI_ACTIVE_PROVIDER:
-            setActiveProviderIdRaw(localStorageAdapter.readString(STORAGE_KEY_AI_ACTIVE_PROVIDER) ?? '');
-            break;
-          case STORAGE_KEY_AI_ACTIVE_MODEL:
-            setActiveModelIdRaw(localStorageAdapter.readString(STORAGE_KEY_AI_ACTIVE_MODEL) ?? '');
-            break;
           case STORAGE_KEY_AI_PERMISSION_MODE:
             setGlobalPermissionModeRaw(readPermissionMode());
             getAIBridge()?.aiMcpSetPermissionMode?.(readPermissionMode());
@@ -290,19 +213,7 @@ export function useAISettingsState() {
     bridge?.aiMcpSetToolIntegrationMode?.(toolIntegrationMode);
   }, [commandBlocklist, commandTimeout, globalPermissionMode, maxIterations, toolIntegrationMode]);
 
-  const activeProvider = providers.find((provider) => provider.id === activeProviderId) ?? null;
-
   return useMemo(() => ({
-    providers,
-    setProviders,
-    addProvider,
-    updateProvider,
-    removeProvider,
-    activeProviderId,
-    setActiveProviderId,
-    activeModelId,
-    setActiveModelId,
-    activeProvider,
     globalPermissionMode,
     setGlobalPermissionMode,
     toolIntegrationMode,
@@ -324,16 +235,6 @@ export function useAISettingsState() {
     showTerminalSelectionAIAction,
     setShowTerminalSelectionAIAction,
   }), [
-    providers,
-    setProviders,
-    addProvider,
-    updateProvider,
-    removeProvider,
-    activeProviderId,
-    setActiveProviderId,
-    activeModelId,
-    setActiveModelId,
-    activeProvider,
     globalPermissionMode,
     setGlobalPermissionMode,
     toolIntegrationMode,

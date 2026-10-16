@@ -1,5 +1,5 @@
-import type { AgentModelPreset, ProviderConfig } from './types';
-import { formatThinkingLabel, PROVIDER_PRESETS, resolveAgentModelSelection } from './types';
+import type { AgentModelPreset } from './types';
+import { formatThinkingLabel, resolveAgentModelSelection } from './types';
 
 export const CLAUDE_REASONING_LEVELS = ['low', 'medium', 'high', 'max'] as const;
 
@@ -120,21 +120,6 @@ export function filterComposerModels(
     || model.name.toLowerCase().includes(q)
     || (model.description ?? '').toLowerCase().includes(q)
   ));
-}
-
-export function buildProviderSeedModels(provider: ProviderConfig): ComposerPickerModel[] {
-  const byId = new Map<string, ComposerPickerModel>();
-  const defaultModel = provider.defaultModel?.trim();
-  if (defaultModel) {
-    byId.set(defaultModel, { id: defaultModel, name: defaultModel });
-  }
-  const presetModels = PROVIDER_PRESETS[provider.providerId]?.defaultModels ?? [];
-  for (const modelId of presetModels) {
-    const id = modelId.trim();
-    if (!id || byId.has(id)) continue;
-    byId.set(id, { id, name: id });
-  }
-  return Array.from(byId.values());
 }
 
 export function mergeComposerModels(

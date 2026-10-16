@@ -347,9 +347,6 @@ export interface SyncPayload {
     workspaceFocusStyle?: 'dim' | 'border';
     // AI configuration
     ai?: {
-      providers?: Array<Record<string, unknown>>;
-      activeProviderId?: string;
-      activeModelId?: string;
       globalPermissionMode?: 'observer' | 'confirm' | 'auto';
       toolIntegrationMode?: 'mcp' | 'skills';
       hostPermissions?: Array<Record<string, unknown>>;
@@ -360,7 +357,6 @@ export interface SyncPayload {
       commandTimeout?: number;
       maxIterations?: number;
       agentModelMap?: Record<string, string>;
-      agentProviderMap?: Record<string, string>;
       agentThinkingMap?: Record<string, string>;
       webSearchConfig?: Record<string, unknown> | null;
       quickMessages?: Array<Record<string, unknown>>;

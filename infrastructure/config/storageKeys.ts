@@ -173,9 +173,6 @@ export const STORAGE_KEY_WINDOW_OPACITY = 'netcatty_window_opacity_v1';
 export const STORAGE_KEY_CUSTOM_THEMES = 'netcatty_custom_themes_v1';
 
 // AI Settings
-export const STORAGE_KEY_AI_PROVIDERS = 'netcatty_ai_providers_v1';
-export const STORAGE_KEY_AI_ACTIVE_PROVIDER = 'netcatty_ai_active_provider_v1';
-export const STORAGE_KEY_AI_ACTIVE_MODEL = 'netcatty_ai_active_model_v1';
 export const STORAGE_KEY_AI_PERMISSION_MODE = 'netcatty_ai_permission_mode_v1';
 export const STORAGE_KEY_AI_TOOL_INTEGRATION_MODE = 'netcatty_ai_tool_integration_mode_v1';
 export const STORAGE_KEY_AI_HOST_PERMISSIONS = 'netcatty_ai_host_permissions_v1';
@@ -187,7 +184,6 @@ export const STORAGE_KEY_AI_MAX_ITERATIONS = 'netcatty_ai_max_iterations_v1';
 export const STORAGE_KEY_AI_SESSIONS = 'netcatty_ai_sessions_v1';
 export const STORAGE_KEY_AI_ACTIVE_SESSION_MAP = 'netcatty_ai_active_session_map_v1';
 export const STORAGE_KEY_AI_AGENT_MODEL_MAP = 'netcatty_ai_agent_model_map_v1';
-export const STORAGE_KEY_AI_AGENT_PROVIDER_MAP = 'netcatty_ai_agent_provider_map_v1';
 export const STORAGE_KEY_AI_AGENT_THINKING_MAP = 'netcatty_ai_agent_thinking_map_v1';
 export const STORAGE_KEY_AI_COMPOSER_MODEL_PREFS = 'netcatty_ai_composer_model_prefs_v1';
 export const STORAGE_KEY_AI_WEB_SEARCH = 'netcatty_ai_web_search_v1';
