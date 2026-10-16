@@ -263,7 +263,7 @@ export const zhCNAiMessages: Messages = {
 
   // AI OpenCode
   'ai.opencode.title': 'OpenCode',
-  'ai.opencode.description': '通过官方 SDK 接入 OpenCode。先在 OpenCode 里配置 provider 和密钥，检测到后即可作为外部编程 Agent 使用。',
+  'ai.opencode.description': '支持 OpenCode 1.x（官方 SDK）与 2.x（本地服务）。先在 OpenCode 里配置 provider 和密钥，检测到后即可作为外部编程 Agent 使用。',
   'ai.opencode.detecting': '检测中...',
   'ai.opencode.detected': '已检测到',
   'ai.opencode.notFound': '未找到',

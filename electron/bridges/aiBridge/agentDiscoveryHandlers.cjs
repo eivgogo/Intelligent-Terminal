@@ -81,7 +81,7 @@ function registerAgentDiscoveryHandlers(ctx) {
       { command: "codebuddy", name: "CodeBuddy Code", icon: "codebuddy",
         description: "Tencent's coding agent CLI (Agent SDK)", sdkBackend: "codebuddy", args: [] },
       { command: "opencode", name: "OpenCode", icon: "opencode",
-        description: "Open source coding agent via the official OpenCode SDK", sdkBackend: "opencode", args: [] },
+        description: "Open source coding agent (1.x SDK or 2.x local server)", sdkBackend: "opencode", args: [] },
       { command: "grok", name: "Grok Build", icon: "grok",
         description: "xAI's Grok Build coding agent CLI", sdkBackend: "grok", args: [] },
     ];

@@ -39,9 +39,15 @@ export function useAgentDiscovery(
 
   enabledRef.current = enabled;
 
-  useEffect(() => () => {
-    mountedRef.current = false;
-    discoverSeqRef.current += 1;
+  useEffect(() => {
+    // Re-arm on mount: StrictMode and Fast Refresh both run the cleanup while
+    // keeping refs, and a permanently-false flag would drop every discovery
+    // result and leave `isDiscovering` stuck.
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      discoverSeqRef.current += 1;
+    };
   }, []);
 
   const cursorApiKeyPresent = externalAgents.some(

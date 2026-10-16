@@ -263,7 +263,7 @@ export const zhTWAiMessages: Messages = {
 
   // AI OpenCode
   'ai.opencode.title': 'OpenCode',
-  'ai.opencode.description': '透過官方 SDK 介接 OpenCode。先在 OpenCode 裡設定 provider 和金鑰，偵測到後即可作為外部程式設計 Agent 使用。',
+  'ai.opencode.description': '支援 OpenCode 1.x（官方 SDK）與 2.x（本機服務）。先在 OpenCode 裡設定 provider 和金鑰，偵測到後即可作為外部程式設計 Agent 使用。',
   'ai.opencode.detecting': '偵測中...',
   'ai.opencode.detected': '已偵測到',
   'ai.opencode.notFound': '未找到',

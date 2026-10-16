@@ -943,4 +943,5 @@ module.exports = {
   toOpenCodeMcpConfig,
   translateOpenCodeEvent,
   OPENCODE_LIST_SERVER_IDLE_MS,
+  OPENCODE_IMAGE_MEDIA_TYPES,
 };

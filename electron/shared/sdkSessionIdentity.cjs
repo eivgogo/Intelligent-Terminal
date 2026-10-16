@@ -10,12 +10,17 @@ function normalizeCursorCliMode(cliMode) {
   return cliMode === "ask" ? "ask" : cliMode === "agent" ? "agent" : undefined;
 }
 
-/** Codex app-server | Grok acp/streaming-json | default sdk. */
+/**
+ * Codex app-server | Grok acp/streaming-json | OpenCode http-v2 | default sdk.
+ * OpenCode 1.x and 2.x must never share a resume id: the v2 server stores its
+ * sessions in a different shape and rejects v1 ids (and vice versa).
+ */
 function normalizeSdkRuntime(runtime) {
   const raw = String(runtime || "").trim().toLowerCase();
   if (raw === "app-server") return "app-server";
   if (raw === "acp") return "acp";
   if (raw === "streaming-json" || raw === "cli" || raw === "headless") return "streaming-json";
+  if (raw === "http-v2" || raw === "opencode-v2" || raw === "v2") return "http-v2";
   return "sdk";
 }
 

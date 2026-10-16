@@ -13,6 +13,7 @@ const { CodexAppServerRuntime } = require("../codexAppServer/runtime.cjs");
 const { probeCodexAppServer } = require("../codexAppServer/probe.cjs");
 const { codebuddySessionManager } = require("./codebuddySessionManager.cjs");
 const codebuddyDriver = require("./codebuddyDriver.cjs");
+const { resolveOpenCodeRuntime } = require("./opencodeRuntime.cjs");
 
 const VALID_BACKENDS = new Set(listBackends());
 
@@ -621,7 +622,17 @@ function registerSdkStreamHandlers(ctx) {
           const grokRuntime = backendKey === "grok"
             ? resolveGrokRuntimeToken(env, env?.NETCATTY_GROK_RUNTIME)
             : "sdk";
-          const sessionRuntime = backendKey === "grok" ? grokRuntime : codexRuntime;
+          // OpenCode 1.x (in-process SDK) and 2.x (`opencode serve` HTTP/SSE)
+          // must not share resume identity either: each transport only
+          // understands sessions written by its own generation.
+          const opencodeRuntime = backendKey === "opencode"
+            ? (await resolveOpenCodeRuntime({ binPath, env })).runtime
+            : "sdk";
+          const sessionRuntime = backendKey === "grok"
+            ? grokRuntime
+            : backendKey === "opencode"
+              ? opencodeRuntime
+              : codexRuntime;
           sdkRequestRuntimes.set(requestId, {
             backendKey,
             codexRuntime,
@@ -770,6 +781,7 @@ function registerSdkStreamHandlers(ctx) {
             cursorAuthMode: backendKey === "cursor" ? cursorAuthMode : undefined,
             cursorCliBinPath: backendKey === "cursor" ? cursorCliBinPath : undefined,
             grokRuntime: backendKey === "grok" ? grokRuntime : undefined,
+            opencodeRuntime: backendKey === "opencode" ? sessionRuntime : undefined,
             historySeed: backendKey === "grok" ? historySeed : undefined,
             getTempDir: () => tempDirBridge.getTempDir(),
             injectedMcpServers,

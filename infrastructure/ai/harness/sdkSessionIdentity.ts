@@ -2,8 +2,11 @@ export const SDK_SESSION_ID_PREFIX = 'netcatty-sdk-session:';
 
 export type CursorAuthModeIdentity = 'api-key' | 'cli-login';
 export type CursorCliModeIdentity = 'ask' | 'agent';
-/** Codex dual runtime + Grok dual runtime. */
-export type SdkRuntimeIdentity = 'sdk' | 'app-server' | 'acp' | 'streaming-json';
+/**
+ * Codex dual runtime + Grok dual runtime + OpenCode dual runtime.
+ * OpenCode 1.x and 2.x must never share a resume id.
+ */
+export type SdkRuntimeIdentity = 'sdk' | 'app-server' | 'acp' | 'streaming-json' | 'http-v2';
 
 export interface SdkSessionIdentityPayload {
   v: 1;
@@ -34,6 +37,7 @@ export function normalizeSdkRuntime(
   if (raw === 'app-server') return 'app-server';
   if (raw === 'acp') return 'acp';
   if (raw === 'streaming-json' || raw === 'cli' || raw === 'headless') return 'streaming-json';
+  if (raw === 'http-v2' || raw === 'opencode-v2' || raw === 'v2') return 'http-v2';
   return 'sdk';
 }
 

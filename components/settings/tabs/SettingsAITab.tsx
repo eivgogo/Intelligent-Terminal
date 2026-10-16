@@ -337,6 +337,12 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   const mountedRef = useRef(true);
   const agentPathRequestIdRef = useRef<Partial<Record<ManagedAgentKey, number>>>({});
   const codexRequestIdRef = useRef(0);
+  useEffect(() => {
+    // Re-arm on mount. StrictMode and Fast Refresh run the cleanup below while
+    // keeping refs, so a flag that is only ever set to false would drop every
+    // resolved path and leave `isResolvingPath` stuck on "Detecting...".
+    mountedRef.current = true;
+  }, []);
   useEffect(() => () => {
     mountedRef.current = false;
     codexRequestIdRef.current += 1;

@@ -16,9 +16,26 @@ const cursor = require("./cursorDriver.cjs");
 const cursorCli = require("./cursorCliDriver.cjs");
 const codebuddy = require("./codebuddyDriver.cjs");
 const opencode = require("./opencodeDriver.cjs");
+const opencodeV2 = require("./opencodeV2Driver.cjs");
 const grok = require("./grokDriver.cjs");
 const grokAcp = require("./grokAcpDriver.cjs");
 const { codebuddySessionManager } = require("./codebuddySessionManager.cjs");
+const {
+  OPENCODE_RUNTIME_V2,
+  resolveOpenCodeRuntime,
+} = require("./opencodeRuntime.cjs");
+
+/**
+ * Pick the OpenCode transport for this turn.
+ *
+ * `sdkStreamHandlers` resolves the runtime before it builds the session
+ * identity and forwards the token, so the driver never re-probes mid-turn.
+ * Direct callers (tests, internal tooling) fall back to the cached probe.
+ */
+async function resolveOpenCodeDriverRuntime(ctx = {}) {
+  if (ctx.opencodeRuntime) return { runtime: ctx.opencodeRuntime };
+  return resolveOpenCodeRuntime({ binPath: ctx.binPath, env: ctx.env });
+}
 
 function hasCodebuddyQueryOnlyOptions(options) {
   return Boolean(
@@ -288,6 +305,27 @@ const DRIVER_REGISTRY = {
   },
   opencode: {
     async runTurn(ctx) {
+      // 2.x talks to `opencode serve` over HTTP/SSE; 1.x keeps the in-process
+      // SDK client. The installed CLI major version decides (see
+      // opencodeRuntime.cjs) and the choice is part of the session identity.
+      const { runtime } = await resolveOpenCodeDriverRuntime(ctx);
+      if (runtime === OPENCODE_RUNTIME_V2) {
+        return opencodeV2.runOpenCodeV2Turn({
+          prompt: ctx.prompt,
+          systemPrompt: ctx.systemPrompt,
+          attachments: ctx.attachments,
+          cwd: ctx.cwd,
+          model: ctx.model,
+          env: ctx.env,
+          binPath: ctx.binPath,
+          injectedMcpServers: ctx.injectedMcpServers,
+          toolIntegrationMode: ctx.toolIntegrationMode,
+          skillsPathAllowlist: ctx.skillsPathAllowlist,
+          resumeSessionId: ctx.resumeSessionId,
+          emitter: ctx.emitter,
+          abortController: ctx.abortController,
+        });
+      }
       return opencode.runOpenCodeTurn({
         prompt: ctx.prompt,
         systemPrompt: ctx.systemPrompt,
@@ -305,6 +343,15 @@ const DRIVER_REGISTRY = {
       });
     },
     async listModels(ctx) {
+      const { runtime } = await resolveOpenCodeDriverRuntime(ctx);
+      if (runtime === OPENCODE_RUNTIME_V2) {
+        return opencodeV2.listOpenCodeV2Models({
+          env: ctx.env,
+          binPath: ctx.binPath,
+          abortController: ctx.abortController,
+          signal: ctx.abortController?.signal || ctx.signal,
+        });
+      }
       return opencode.listOpenCodeModels({
         env: ctx.env,
         binPath: ctx.binPath,

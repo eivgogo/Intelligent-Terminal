@@ -263,7 +263,7 @@ export const enAiMessages: Messages = {
 
   // AI OpenCode
   'ai.opencode.title': 'OpenCode',
-  'ai.opencode.description': 'Uses OpenCode via the official SDK. Configure providers and keys in OpenCode, then select it as an external coding agent.',
+  'ai.opencode.description': 'Supports OpenCode 1.x (official SDK) and 2.x (local server). Configure providers and keys in OpenCode, then select it as an external coding agent.',
   'ai.opencode.detecting': 'Detecting...',
   'ai.opencode.detected': 'Detected',
   'ai.opencode.notFound': 'Not found',
