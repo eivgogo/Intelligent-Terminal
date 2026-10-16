@@ -1,6 +1,6 @@
 import type { ChatMessage } from '../types';
 import type { ExternalBridgeHistoryMessage } from './types';
-import { buildHistoricalToolResultReplayText, buildHistoricalUserReplayContent } from '../../../components/ai/cattyHistoryReplay';
+import { buildHistoricalToolResultReplayText, buildHistoricalUserReplayContent } from '../../../components/ai/agentHistoryReplay';
 
 type ExternalAgentHistoryMessage = ExternalBridgeHistoryMessage;
 type RawHistoryMessage = ExternalAgentHistoryMessage & { sourceId: string };

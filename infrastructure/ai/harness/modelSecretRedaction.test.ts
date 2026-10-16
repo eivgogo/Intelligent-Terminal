@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { fitTerminalExecuteResultForModel } from './terminalCompression';
 import { fitLargeToolResultForModel } from './toolResultFitting';
-import { ToolOutputStore } from './toolOutputStore';
 import { redactSecretsForModel, redactSecretsInValueForModel } from './modelSecretRedaction';
 
 test('redactSecretsForModel removes common terminal secrets', () => {
@@ -54,27 +52,6 @@ test('redactSecretsForModel redacts JSON and quoted shell assignments', () => {
   assert.doesNotMatch(output, /short value|tiny|two words|quoted secret|one-line-key/);
   assert.match(output, /"username":"operator"/);
   assert.equal((output.match(/\[REDACTED\]/g) ?? []).length, 5);
-});
-
-test('terminal fitting keeps raw output in the local handle but redacts model-visible text', () => {
-  const store = new ToolOutputStore();
-  const secret = 'API_TOKEN=tok_live_1234567890';
-  const fitted = fitTerminalExecuteResultForModel({
-    stdout: `${secret}\n${'build line\n'.repeat(10_000)}`,
-    stderr: '',
-    exitCode: 1,
-    command: `deploy --token tok_live_1234567890`,
-    sessionId: 'session-1',
-  }, {
-    chatSessionId: 'chat-1',
-    toolOutputStore: store,
-  });
-
-  assert.doesNotMatch(fitted.stdout, /tok_live/);
-  assert.doesNotMatch(fitted.command ?? '', /tok_live/);
-  assert.match(fitted.stdout, /restartPersistence=unavailable \(read before closing the app\)/);
-  const handle = store.listPendingHandles('chat-1')[0];
-  assert.match(handle.fullContent, /tok_live/);
 });
 
 test('generic tool fitting redacts short strings even when truncation is unnecessary', () => {

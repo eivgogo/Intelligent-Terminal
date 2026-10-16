@@ -419,7 +419,7 @@ function messageHasAssistantContent(message: Record<string, unknown>): boolean {
 /**
  * OpenAI-compatible chat APIs reject a request when an assistant message
  * contains tool_calls that are not immediately answered by matching tool
- * messages. This can happen when a prior Catty tool loop was interrupted
+ * messages. This can happen when a prior tool loop was interrupted
  * mid-flight. Repair the outgoing history instead of letting one broken
  * turn permanently brick the chat session.
  */

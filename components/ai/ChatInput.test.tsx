@@ -114,7 +114,7 @@ test('does not render a standalone slash command toolbar button', () => {
         onSend={() => {}}
         isStreaming={false}
         disabled={false}
-        agentName="Catty Agent"
+        agentName="Codex"
         quickMessages={[{
           id: 'qm-1',
           slug: 'hello',
@@ -191,14 +191,14 @@ test('allows terminal-selection-only steering submissions', () => {
   );
 });
 
-test('renders the Catty context usage ring after the model chip', () => {
+test('renders the context usage ring after the model chip', () => {
   const html = renderToStaticMarkup(
     <TooltipProvider>
       <ChatInput
         value=""
         onChange={() => {}}
         onSend={() => {}}
-        agentName="Catty Agent"
+        agentName="Codex"
         contextUsage={{
           sessionId: 'session-1',
           inputTokens: 64_000,
@@ -245,83 +245,6 @@ test('keeps thinking on a separate chip instead of mixing it into the model list
   assert.match(html, /aria-label="ai\.chat\.thinkingLevel"/);
   assert.match(html, />High</);
   assert.doesNotMatch(html, /GPT-5\.5 \/ High/);
-});
-
-test('Catty composer exposes a provider switcher without a mixed thinking submenu', () => {
-  const source = readFileSync(new URL('./ChatInput.tsx', import.meta.url), 'utf8');
-  assert.match(source, /ComposerModelPicker/);
-  assert.match(source, /ComposerThinkingChip/);
-  assert.match(source, /cattyReasoningLevelsForSelection/);
-  assert.match(source, /if \(!thinkingLevel\) return;/);
-  assert.doesNotMatch(source, /showThinkingLevels/);
-});
-
-test('Catty thinking chip is hidden for OpenAI models that reject reasoningEffort', () => {
-  const openai = {
-    id: 'p1',
-    providerId: 'openai' as const,
-    name: 'OpenAI',
-    enabled: true,
-  };
-  const gpt4o = renderToStaticMarkup(
-    <TooltipProvider>
-      <ChatInput
-        value=""
-        onChange={() => {}}
-        onSend={() => {}}
-        agentName="Catty Agent"
-        thinkingLevel="high"
-        onThinkingLevelChange={() => {}}
-        providerSwitcher={{
-          providers: [openai],
-          selectedProviderId: 'p1',
-          selectedModelId: 'gpt-4o',
-          onSelect: () => {},
-        }}
-      />
-    </TooltipProvider>,
-  );
-  assert.doesNotMatch(gpt4o, /aria-label="ai\.chat\.thinkingLevel"/);
-
-  const gpt51Chat = renderToStaticMarkup(
-    <TooltipProvider>
-      <ChatInput
-        value=""
-        onChange={() => {}}
-        onSend={() => {}}
-        agentName="Catty Agent"
-        thinkingLevel="high"
-        onThinkingLevelChange={() => {}}
-        providerSwitcher={{
-          providers: [openai],
-          selectedProviderId: 'p1',
-          selectedModelId: 'gpt-5.1-chat-latest',
-          onSelect: () => {},
-        }}
-      />
-    </TooltipProvider>,
-  );
-  assert.doesNotMatch(gpt51Chat, /aria-label="ai\.chat\.thinkingLevel"/);
-
-  const gpt55 = renderToStaticMarkup(
-    <TooltipProvider>
-      <ChatInput
-        value=""
-        onChange={() => {}}
-        onSend={() => {}}
-        agentName="Catty Agent"
-        thinkingLevel="high"
-        onThinkingLevelChange={() => {}}
-        providerSwitcher={{
-          providers: [openai],
-          selectedProviderId: 'p1',
-          selectedModelId: 'gpt-5.5',
-          onSelect: () => {},
-        }}
-      />
-    </TooltipProvider>,
-  );
-  assert.match(gpt55, /aria-label="ai\.chat\.thinkingLevel"/);
 });
 
 test('ChatInput wires /compact through getSystemSlashCommand and canCompact', () => {

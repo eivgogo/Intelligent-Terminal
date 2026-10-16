@@ -2,7 +2,7 @@
 
 /**
  * Input field definitions keyed by capability id.
- * Single source for MCP, Catty, and CLI tool schemas.
+ * Single source for MCP and CLI tool schemas.
  */
 const TOOL_INPUT_FIELDS = Object.freeze({
   "terminal.execute": {
@@ -346,31 +346,6 @@ const TOOL_INPUT_FIELDS = Object.freeze({
   },
   "portforward.stop": {
     ruleId: { type: "string", description: "Port forwarding rule ID." },
-  },
-  "harness.tool_output.read": {
-    handleId: { type: "string", description: "Tool output handle id from a prior truncated result." },
-    mode: { type: "string", optional: true, description: "Which portion to read: head, tail, range, search, or bounded full." },
-    maxChars: { type: "number", optional: true, description: "Requested characters to return. The service enforces a hard upper bound." },
-    offset: { type: "number", optional: true, description: "Zero-based character offset for range reads or search continuation." },
-    query: { type: "string", optional: true, description: "Case-insensitive search text when mode is search." },
-  },
-  "harness.workspace.get_info": {},
-  "harness.workspace.get_session_info": {
-    sessionId: { type: "string", description: "The session ID to get information about." },
-  },
-  "harness.terminal.read_context": {
-    sessionId: { type: "string", optional: true, description: "Terminal session ID. Required when the current AI scope contains more than one terminal." },
-    range: { type: "string", optional: true, description: "Which terminal slice to read: viewport, tail, head, or lines. Defaults to viewport." },
-    startLine: { type: "number", optional: true, description: "Zero-based terminal buffer line to start from when range is lines." },
-    maxLines: { type: "number", optional: true, description: "Maximum terminal rows to return. Defaults to 80, capped at 300." },
-  },
-  "harness.web.search": {
-    query: { type: "string", description: "The search query to look up on the web." },
-    maxResults: { type: "number", optional: true, description: "Maximum number of search results to return." },
-  },
-  "harness.url.fetch": {
-    url: { type: "string", description: "The HTTPS URL to fetch." },
-    maxLength: { type: "number", optional: true, description: "Maximum characters to return (default 50000)." },
   },
 });
 

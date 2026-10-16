@@ -2,7 +2,7 @@
  * AI Bridge - Handles AI provider API calls and agent tool execution
  *
  * Proxies LLM API calls through the main process (avoiding CORS),
- * and provides tool execution capabilities for the Catty Agent.
+ * and provides tool execution capabilities for in-app agents.
  */
 
 const https = require("node:https");
@@ -24,7 +24,7 @@ const {
   buildUserSkillsContext,
   toPublicUserSkillsStatus,
 } = require("./ai/userSkills.cjs");
-const { registerProviderHandlers } = require("./aiBridge/providerHandlers.cjs"), { registerCattyExecHandlers } = require("./aiBridge/cattyExecHandlers.cjs"), { createAgentCliHelpers } = require("./aiBridge/agentCliHelpers.cjs");
+const { registerProviderHandlers } = require("./aiBridge/providerHandlers.cjs"), { registerAiExecHandlers } = require("./aiBridge/aiExecHandlers.cjs"), { createAgentCliHelpers } = require("./aiBridge/agentCliHelpers.cjs");
 const { createVaultAgentBridge } = require("./aiBridge/vaultAgentBridge.cjs");
 const { registerAgentDiscoveryHandlers } = require("./aiBridge/agentDiscoveryHandlers.cjs"), { registerAgentProcessHandlers } = require("./aiBridge/agentProcessHandlers.cjs"), { registerSdkStreamHandlers } = require("./aiBridge/sdk/sdkStreamHandlers.cjs");
 const { probeClaudeAuth, probeCopilotAuth, probeCodexAuth, probeCodebuddyAuth, probeCursorCliAuth, probeGrokAuth } = require("./aiBridge/agentAuthProbes.cjs");
@@ -521,7 +521,7 @@ function safeReadJson(filePath) {
   }
 }
 
-// Hard cap for a single model HTTP stream. Matches Catty's 30-minute floor so
+// Hard cap for a single model HTTP stream. Matches the agent's 30-minute floor so
 // long reasoning can finish; runaway bodies are still bounded by time + size.
 const DEFAULT_AI_STREAM_TOTAL_TIMEOUT_MS = 30 * 60 * 1000;
 // Abort only after this much silence. Thinking tokens re-arm the timer, so an
@@ -962,7 +962,7 @@ function registerHandlers(ipcMain) {
   registeredVaultAgentBridge.registerHandlers(ipcMain);
 
   registerProviderHandlers(context);
-  registerCattyExecHandlers(context);
+  registerAiExecHandlers(context);
   registerAgentDiscoveryHandlers(context);
   registerAgentProcessHandlers(context);
   registerSdkStreamHandlers(context);

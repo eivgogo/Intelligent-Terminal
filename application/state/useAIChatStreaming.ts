@@ -9,14 +9,10 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   AIPermissionMode,
   AIToolIntegrationMode,
-  AISession,
   ChatMessage,
-  ChatMessageAttachment,
   ExternalAgentConfig,
   ProviderConfig,
-  WebSearchConfig,
 } from '../../infrastructure/ai/types';
-import type { ExecutorContext } from '../../infrastructure/ai/cattyAgent/executor';
 import { getAgentRuntime } from '../../infrastructure/ai/harness/globalAgentRuntime';
 import type {
   TurnSteerInput,
@@ -70,16 +66,6 @@ export interface UseAIChatStreamingReturn {
   streamingSessionIds: Set<string>;
   setStreamingForScope: (key: string, val: boolean) => void;
   abortControllersRef: React.MutableRefObject<Map<string, AbortController>>;
-  sendToCattyAgent: (
-    sessionId: string,
-    sendScopeKey: string,
-    trimmed: string,
-    abortController: AbortController,
-    currentSession: AISession | undefined,
-    assistantMsgId: string,
-    context: SendToCattyContext,
-    attachments?: ChatMessageAttachment[],
-  ) => Promise<void>;
   sendToExternalAgent: (
     sessionId: string,
     assistantMsgId: string,
@@ -92,25 +78,6 @@ export interface UseAIChatStreamingReturn {
   steerExternalAgent: (input: TurnSteerInput) => Promise<TurnSteerResult>;
   reportStreamError: (sessionId: string, abortSignal: AbortSignal, err: unknown) => void;
   activeCompaction: import('./useAgentCompactionUi').ActiveCompactionUi | null;
-}
-
-export interface SendToCattyContext {
-  activeProvider: ProviderConfig | undefined;
-  activeModelId: string;
-  scopeType: 'terminal' | 'workspace';
-  scopeTargetId?: string;
-  scopeLabel?: string;
-  globalPermissionMode: AIPermissionMode;
-  commandBlocklist?: string[];
-  commandTimeout?: number;
-  terminalSessions: TerminalSessionInfo[];
-  webSearchConfig?: WebSearchConfig | null;
-  getExecutorContext?: () => ExecutorContext;
-  autoTitleSession: (sessionId: string, text: string) => void;
-  titleText?: string;
-  selectedUserSkillSlugs?: string[];
-  permissionMode?: AIPermissionMode;
-  forceCompaction?: boolean;
 }
 
 export interface SendToExternalContext {
@@ -127,7 +94,6 @@ export interface SendToExternalContext {
 }
 
 export function useAIChatStreaming({
-  maxIterations,
   addMessageToSession,
   updateLastMessage,
   updateMessageById,
@@ -224,42 +190,10 @@ export function useAIChatStreaming({
     return getAgentRuntime().steerTurn(input);
   }, []);
 
-  const sendToCattyAgent = useCallback(async (
-    sessionId: string,
-    sendScopeKey: string,
-    trimmed: string,
-    abortController: AbortController,
-    currentSession: AISession | undefined,
-    assistantMsgId: string,
-    context: SendToCattyContext,
-    attachments?: ChatMessageAttachment[],
-  ) => {
-    const bridge = getNetcattyBridge();
-    try {
-      await getAgentRuntime().runTurn({
-        backend: 'catty',
-        chatSessionId: sessionId,
-        sendScopeKey,
-        userText: trimmed,
-        signal: abortController.signal,
-        currentSession,
-        assistantMsgId,
-        context,
-        attachments,
-        maxIterations,
-        bridge,
-        ui: uiCallbacks(),
-      });
-    } finally {
-      abortControllersRef.current.delete(sessionId);
-    }
-  }, [maxIterations, uiCallbacks]);
-
   return {
     streamingSessionIds,
     setStreamingForScope,
     abortControllersRef,
-    sendToCattyAgent,
     sendToExternalAgent,
     steerExternalAgent,
     reportStreamError,

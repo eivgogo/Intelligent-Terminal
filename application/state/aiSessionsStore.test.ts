@@ -6,7 +6,7 @@ import { aiSessionsStore } from './aiSessionsStore.ts';
 
 test('AI sessions store does not notify listeners when only composer text changes', () => {
   const previous = aiSessionsStore.getSnapshot();
-  const draft = createEmptyDraft('catty');
+  const draft = createEmptyDraft('codex');
   const base = {
     sessions: Object.freeze([]),
     activeSessionIdMap: Object.freeze({}),

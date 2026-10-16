@@ -1,10 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { ModelMessage } from 'ai';
-import { prepareTurnContext, prepareStepContext } from './contextManager.ts';
+import { prepareTurnContext } from './contextManager.ts';
 import { TraceStore } from './traceStore.ts';
-import { ToolOutputStore } from './toolOutputStore.ts';
-import { createInitialCattyRuntimeContext } from './cattyRuntimeContext.ts';
 
 test('prepareTurnContext applies typed compression before LLM summarize threshold', async () => {
   const longOutput = 'line\n'.repeat(20_000);
@@ -44,7 +42,7 @@ test('prepareTurnContext applies typed compression before LLM summarize threshol
   const traces: string[] = [];
   const prepared = await prepareTurnContext({
     messages,
-    backend: 'catty',
+    backend: 'external-bridge',
     contextWindow: 128_000,
     trigger: 'pre-turn',
     sessionId: 'chat-1',
@@ -73,7 +71,7 @@ test('prepareTurnContext skips reinjection when no compaction occurred', async (
   const events: string[] = [];
   const prepared = await prepareTurnContext({
     messages,
-    backend: 'catty',
+    backend: 'external-bridge',
     contextWindow: 128_000,
     trigger: 'pre-turn',
     sessionId: 'chat-no-compact',
@@ -103,7 +101,7 @@ test('prepareTurnContext force trigger retains recent user goal in replay', asyn
 
   const prepared = await prepareTurnContext({
     messages,
-    backend: 'catty',
+    backend: 'external-bridge',
     contextWindow: 128_000,
     trigger: 'force',
     force: true,
@@ -119,7 +117,7 @@ test('TraceStore records compaction events for export', async () => {
   const store = new TraceStore();
   await prepareTurnContext({
     messages: [{ role: 'user', content: 'x'.repeat(500_000) }],
-    backend: 'catty',
+    backend: 'external-bridge',
     contextWindow: 1000,
     trigger: 'force',
     force: true,
@@ -145,167 +143,6 @@ test('TraceStore bounds compaction history independently from events', () => {
   assert.equal(store.getCompactions('chat-bounded-compactions').length, 3);
 });
 
-test('prepareStepContext replaces prior step handle notices under v7 carry-forward semantics', async () => {
-  const store = new ToolOutputStore();
-  store.store({
-    chatSessionId: 'chat-4',
-    capabilityId: 'sftp.read',
-    content: 'large payload',
-  });
-  const runtimeContext = createInitialCattyRuntimeContext({
-    chatSessionId: 'chat-4',
-    turnId: 'turn-1',
-    permissionMode: 'confirm',
-    scopeType: 'terminal',
-  });
-  const priorNotice: ModelMessage = {
-    role: 'user',
-    content: '[step 1] Tool output handles available: tool-output-old',
-  };
-  const prepared = await prepareStepContext({
-    messages: [priorNotice, { role: 'user', content: 'continue' }],
-    stepNumber: 2,
-    sessionId: 'chat-4',
-    chatSessionId: 'chat-4',
-    toolOutputStore: store,
-    runtimeContext,
-  });
-
-  const notices = prepared.messages.filter(
-    (message) => message.role === 'user'
-      && typeof message.content === 'string'
-      && message.content.includes('Tool output handles available'),
-  );
-  assert.equal(notices.length, 1);
-  assert.match(String(notices[0]?.content), /\[step 2\]/);
-  assert.doesNotMatch(String(notices[0]?.content), /tool-output-old/);
-});
-
-test('prepareStepContext emits step compaction trace when over budget', async () => {
-  const messages: ModelMessage[] = Array.from({ length: 30 }, (_, index) => ({
-    role: index % 2 === 0 ? 'user' : 'assistant',
-    content: 'payload '.repeat(2_000),
-  })) as ModelMessage[];
-
-  const events: string[] = [];
-  const prepared = await prepareStepContext({
-    messages,
-    stepNumber: 3,
-    sessionId: 'chat-5',
-    chatSessionId: 'chat-5',
-    contextWindow: 4_000,
-    reservedTokens: 500,
-    maxOutputTokens: 512,
-    providerId: 'anthropic',
-    runtimeContext: createInitialCattyRuntimeContext({
-      chatSessionId: 'chat-5',
-      turnId: 'turn-2',
-      permissionMode: 'confirm',
-      scopeType: 'terminal',
-    }),
-    onEvent: (event) => {
-      if (event.type === 'compaction') events.push(event.trace.trigger);
-    },
-  });
-
-  assert.equal(prepared.didAdjust, true);
-  assert.equal(prepared.trace?.trigger, 'step');
-  assert.ok(events.includes('step'));
-});
-
-test('prepareStepContext retains handle notice after step budget guard', async () => {
-  const store = new ToolOutputStore();
-  store.store({
-    chatSessionId: 'chat-handle',
-    capabilityId: 'sftp.read',
-    content: 'large payload',
-  });
-  const messages: ModelMessage[] = Array.from({ length: 30 }, (_, index) => ({
-    role: index % 2 === 0 ? 'user' : 'assistant',
-    content: 'payload '.repeat(2_000),
-  })) as ModelMessage[];
-
-  const prepared = await prepareStepContext({
-    messages,
-    stepNumber: 2,
-    sessionId: 'chat-handle',
-    chatSessionId: 'chat-handle',
-    contextWindow: 4_000,
-    reservedTokens: 500,
-    maxOutputTokens: 512,
-    toolOutputStore: store,
-    runtimeContext: createInitialCattyRuntimeContext({
-      chatSessionId: 'chat-handle',
-      turnId: 'turn-handle',
-      permissionMode: 'confirm',
-      scopeType: 'terminal',
-    }),
-  });
-
-  const notices = prepared.messages.filter(
-    (message) => message.role === 'user'
-      && typeof message.content === 'string'
-      && message.content.includes('Tool output handles available'),
-  );
-  assert.equal(notices.length, 1);
-  assert.match(String(notices[0]?.content), /\[step 2\]/);
-});
-
-test('prepareStepContext never leaves orphan results from a parallel tool batch', async () => {
-  const toolCallIds = ['a', 'b', 'c', 'd', 'e', 'f'];
-  const messages: ModelMessage[] = [
-    {
-      role: 'assistant',
-      content: toolCallIds.map((toolCallId) => ({
-        type: 'tool-call' as const,
-        toolCallId,
-        toolName: 'terminal_poll',
-        input: { jobId: toolCallId },
-      })),
-    },
-    ...toolCallIds.map((toolCallId) => ({
-      role: 'tool' as const,
-      content: [{
-        type: 'tool-result' as const,
-        toolCallId,
-        toolName: 'terminal_poll',
-        output: { type: 'text' as const, value: `${toolCallId}:${'output '.repeat(4_000)}` },
-      }],
-    })),
-    { role: 'user', content: 'summarize the completed jobs' },
-  ];
-
-  const prepared = await prepareStepContext({
-    messages,
-    stepNumber: 4,
-    sessionId: 'chat-parallel',
-    chatSessionId: 'chat-parallel',
-    contextWindow: 8_000,
-    reservedTokens: 500,
-    maxOutputTokens: 512,
-    runtimeContext: createInitialCattyRuntimeContext({
-      chatSessionId: 'chat-parallel',
-      turnId: 'turn-parallel',
-      permissionMode: 'confirm',
-      scopeType: 'terminal',
-    }),
-  });
-
-  const knownCalls = new Set<string>();
-  for (const message of prepared.messages) {
-    if (message.role === 'assistant' && Array.isArray(message.content)) {
-      for (const part of message.content as Array<{ type?: string; toolCallId?: string }>) {
-        if (part.type === 'tool-call' && part.toolCallId) knownCalls.add(part.toolCallId);
-      }
-    }
-    if (message.role === 'tool' && Array.isArray(message.content)) {
-      for (const part of message.content as Array<{ type?: string; toolCallId?: string }>) {
-        if (part.type === 'tool-result') assert.equal(knownCalls.has(part.toolCallId ?? ''), true);
-      }
-    }
-  }
-});
-
 test('prepareTurnContext calls summarize when over dynamic threshold', async () => {
   let summarizeCalls = 0;
   const messages: ModelMessage[] = Array.from({ length: 24 }, (_, index) => ({
@@ -315,7 +152,7 @@ test('prepareTurnContext calls summarize when over dynamic threshold', async () 
 
   const prepared = await prepareTurnContext({
     messages,
-    backend: 'catty',
+    backend: 'external-bridge',
     contextWindow: 8_000,
     maxOutputTokens: 512,
     trigger: 'pre-turn',

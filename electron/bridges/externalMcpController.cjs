@@ -182,7 +182,7 @@ function createExternalMcpController(options = {}) {
     }
     const port = await bridge.getOrCreateHost();
     // External MCP uses a dedicated token (rotated on enable) so disable can
-    // invalidate discovery without rotating the shared Catty/CLI TCP token.
+    // invalidate discovery without rotating the shared CLI TCP token.
     const token = typeof bridge.issueExternalMcpAuthToken === "function"
       ? bridge.issueExternalMcpAuthToken()
       : (typeof bridge.getExternalMcpAuthToken === "function" ? bridge.getExternalMcpAuthToken() : "");

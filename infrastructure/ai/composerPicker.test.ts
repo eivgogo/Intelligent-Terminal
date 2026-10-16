@@ -6,7 +6,6 @@ import {
   buildProviderSeedModels,
   filterComposerModels,
   mergeComposerModels,
-  normalizeCattyReasoningLevel,
   parseComposerModelPrefs,
   resolveComposerEnterModelId,
   resolveModelSelectionWithThinking,
@@ -15,12 +14,6 @@ import {
   toggleComposerPinnedPref,
   upsertComposerPrefFront,
 } from './composerPicker';
-
-test('normalizeCattyReasoningLevel falls back to off', () => {
-  assert.equal(normalizeCattyReasoningLevel('high'), 'high');
-  assert.equal(normalizeCattyReasoningLevel('nope'), 'off');
-  assert.equal(normalizeCattyReasoningLevel(undefined), 'off');
-});
 
 test('resolveComposerEnterModelId prefers exact id, then the visible custom row', () => {
   const models = [

@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react';
 import type { ContextPrepareTrigger } from '../../infrastructure/ai/harness/types';
 import { getAgentRuntime } from '../../infrastructure/ai/harness/globalAgentRuntime';
-import { CATTY_COMPACTION_STATUS_KEYS } from '../../infrastructure/ai/harness/compactionStatusKeys';
+
+/** i18n keys for compaction status, resolved in the AI chat panel. */
+const COMPACTION_STATUS_KEYS = {
+  preTurn: 'ai.chat.compactingContext',
+  step: 'ai.chat.compactingStep',
+  retry: 'ai.chat.compactionRetry',
+} as const;
 
 export interface ActiveCompactionUi {
   sessionId: string;
@@ -18,11 +24,11 @@ export interface AgentContextUsage {
 function statusKeyForTrigger(trigger: ContextPrepareTrigger): string {
   switch (trigger) {
     case 'step':
-      return CATTY_COMPACTION_STATUS_KEYS.step;
+      return COMPACTION_STATUS_KEYS.step;
     case '413-retry':
-      return CATTY_COMPACTION_STATUS_KEYS.retry;
+      return COMPACTION_STATUS_KEYS.retry;
     default:
-      return CATTY_COMPACTION_STATUS_KEYS.preTurn;
+      return COMPACTION_STATUS_KEYS.preTurn;
   }
 }
 

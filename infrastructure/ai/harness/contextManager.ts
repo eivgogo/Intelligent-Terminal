@@ -1,6 +1,5 @@
 import type { ModelMessage } from 'ai';
 import type { ChatMessage, AIPermissionMode } from '../types';
-import { isStepHandleNoticeMessage } from './agentEventAdapter';
 import {
   DEFAULT_CONTEXT_WINDOW_TOKENS,
   DEFAULT_PROTECT_RECENT_MESSAGES,
@@ -17,7 +16,6 @@ import {
 } from './contextBudget';
 import { estimateModelMessagesTokensWithKind } from './tokenEstimator';
 import { pruneStaleToolContext } from './staleContextPruner';
-import type { PrepareStepContextInput } from './turnDrivers/types';
 import type {
   AgentEventListener,
   CompactionTrace,
@@ -31,7 +29,7 @@ import { pruneFirstModelMessage } from './compactionPruner';
 
 export interface PrepareTurnContextInput {
   messages: ModelMessage[];
-  backend: 'catty' | 'external-bridge';
+  backend: 'external-bridge';
   contextWindow?: number;
   reservedTokens?: number;
   maxOutputTokens?: number;
@@ -70,30 +68,9 @@ function emitCompactionEvent(
     type: 'compaction',
     sessionId: input.sessionId,
     chatSessionId: input.chatSessionId,
-    backend: input.backend === 'catty' ? 'catty' : 'external-sdk',
+    backend: 'external-sdk',
     timestamp: Date.now(),
     trace,
-  });
-}
-
-function emitCompactionStart(
-  onEvent: AgentEventListener | undefined,
-  input: {
-    sessionId?: string;
-    chatSessionId?: string;
-    backend: PrepareTurnContextInput['backend'];
-  },
-  trigger: ContextPrepareTrigger,
-): void {
-  if (!onEvent || !input.sessionId) return;
-  onEvent({
-    id: `compaction-start-${Date.now()}`,
-    type: 'compaction_start',
-    sessionId: input.sessionId,
-    chatSessionId: input.chatSessionId,
-    backend: input.backend === 'catty' ? 'catty' : 'external-sdk',
-    timestamp: Date.now(),
-    trigger,
   });
 }
 
@@ -386,139 +363,5 @@ function applyStepBudgetGuard(
     messages: next,
     didAdjust: didAdjust || next.length !== messages.length,
     didTypedCompression: compressedHead.didAdjust,
-  };
-}
-
-/** Step-level typed pruning — no LLM summarize (reserved for pre-turn / 413). */
-export async function prepareStepContext(
-  input: PrepareStepContextInput,
-): Promise<ContextPrepareResult & { runtimeContext?: import('./cattyRuntimeContext').CattyRuntimeContext }> {
-  const contextWindow = input.contextWindow ?? DEFAULT_CONTEXT_WINDOW_TOKENS;
-  const maxOutputTokens = input.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
-  const protectRecent = input.protectRecentMessages ?? DEFAULT_PROTECT_RECENT_MESSAGES;
-  const messagesBeforeCount = input.messages.length;
-  const integrity = repairToolMessageIntegrity(input.messages);
-
-  const underBudgetPressure = isContextUnderBudgetPressure({
-    messages: integrity.messages,
-    contextWindow,
-    maxOutputTokens,
-    providerId: input.providerId,
-    reservedTokens: input.reservedTokens,
-  });
-  const stale = pruneStaleToolContext(integrity.messages, {
-    underBudgetPressure,
-  });
-  let working = stale.messages;
-
-  const typed = compressMessagesForRequestTooLargeRetry(working);
-  working = typed.messages;
-
-  const pendingHandles = input.toolOutputStore?.listPendingHandles(input.chatSessionId ?? input.sessionId) ?? [];
-  let didHandleNotice = false;
-  if (pendingHandles.length > 0 && input.stepNumber > 0) {
-    working = working.filter((message) => {
-      if (message.role !== 'user') return true;
-      const content = typeof message.content === 'string' ? message.content : '';
-      return !isStepHandleNoticeMessage(content);
-    });
-    const notice: ModelMessage = {
-      role: 'user',
-      content: `[step ${input.stepNumber}] Tool output handles available: ${pendingHandles.map(h => h.id).join(', ')}`,
-    };
-    working = [notice, ...working];
-    didHandleNotice = true;
-  }
-
-  const budgetGuard = applyStepBudgetGuard(working, {
-    contextWindow,
-    reservedTokens: input.reservedTokens ?? 0,
-    maxOutputTokens,
-    providerId: input.providerId,
-    protectRecentMessages: protectRecent,
-  });
-  working = budgetGuard.messages;
-  if (didHandleNotice && pendingHandles.length > 0) {
-    const hasHandleNotice = working.some(
-      (message) => message.role === 'user' && isStepHandleNoticeMessage(message.content),
-    );
-    if (!hasHandleNotice) {
-      working = [{
-        role: 'user',
-        content: `[step ${input.stepNumber}] Tool output handles available: ${pendingHandles.map(h => h.id).join(', ')}`,
-      }, ...working];
-    }
-  }
-  if (didHandleNotice) {
-    const notices = working.filter(
-      message => message.role === 'user' && isStepHandleNoticeMessage(message.content),
-    );
-    const body = working.filter(
-      message => !(message.role === 'user' && isStepHandleNoticeMessage(message.content)),
-    );
-    const noticeTokens = estimateModelMessagesTokensWithKind({
-      messages: notices,
-      providerId: input.providerId,
-    }).tokens;
-    const finalGuard = applyStepBudgetGuard(body, {
-      contextWindow,
-      reservedTokens: (input.reservedTokens ?? 0) + noticeTokens,
-      maxOutputTokens,
-      providerId: input.providerId,
-      protectRecentMessages: protectRecent,
-    });
-    working = [...notices, ...finalGuard.messages];
-    budgetGuard.didAdjust = budgetGuard.didAdjust || finalGuard.didAdjust;
-  }
-  const didBudgetAdjust = integrity.didAdjust || stale.didAdjust || typed.didAdjust || budgetGuard.didAdjust;
-  const didAdjust = didBudgetAdjust || didHandleNotice;
-
-  const before = estimateModelMessagesTokensWithKind({
-    messages: input.messages,
-    providerId: input.providerId,
-  });
-  const after = estimateModelMessagesTokensWithKind({
-    messages: working,
-    providerId: input.providerId,
-  });
-
-  const trace = didBudgetAdjust ? buildCompactionTrace({
-    trigger: 'step',
-    tokensBefore: before.tokens,
-    tokensAfter: after.tokens,
-    messagesBefore: messagesBeforeCount,
-    messagesAfter: working.length,
-    compressedMessageCount: Math.max(0, messagesBeforeCount - working.length),
-    retainedTailCount: working.length,
-    didTypedCompression: typed.didAdjust || budgetGuard.didTypedCompression,
-    didLlmSummarize: false,
-    did413Fallback: false,
-    estimatorKind: before.estimatorKind,
-  }) : undefined;
-
-  if (trace && didBudgetAdjust && input.onEvent && input.sessionId) {
-    emitCompactionStart(input.onEvent, {
-      sessionId: input.sessionId,
-      chatSessionId: input.chatSessionId,
-      backend: 'catty',
-    }, 'step');
-    emitCompactionEvent(input.onEvent, {
-      sessionId: input.sessionId,
-      chatSessionId: input.chatSessionId,
-      backend: 'catty',
-    }, trace);
-  }
-
-  const runtimeContext = {
-    ...input.runtimeContext,
-    ...(trace ? { lastCompaction: trace, lastStepAdjusted: didBudgetAdjust } : {}),
-    ...(didAdjust ? { lastStepAdjusted: true } : {}),
-  };
-
-  return {
-    messages: working,
-    didAdjust,
-    trace,
-    runtimeContext,
   };
 }

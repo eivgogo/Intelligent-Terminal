@@ -353,7 +353,7 @@ export const ToolCall = ({
       || reviewCommand.includes('\n')),
   );
 
-  // Each review interaction re-arms the Catty idle window (capped by hard
+  // Each review interaction re-arms the agent idle window (capped by hard
   // deadline). Do not one-shot cancel — subsequent focus/scroll/key events
   // must keep extending idle while the user is still deciding.
   const markReviewing = useCallback(() => {

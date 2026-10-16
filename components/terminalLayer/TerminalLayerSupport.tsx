@@ -33,7 +33,7 @@ import { cn } from '../../lib/utils';
 import { LazyLoadBoundary } from '../ui/lazy-load-boundary';
 import type { DropEntry } from '../../lib/sftpFileUtils';
 import type { GroupConfig, Host, Identity, KnownHost, ProxyProfile, SSHKey, Snippet, TerminalSession, VaultNote, Workspace } from '../../types';
-import type { ExecutorContext } from '../../infrastructure/ai/cattyAgent/executor';
+import type { ExecutorContext } from '../../infrastructure/ai/bridgeTypes';
 import type { AISession } from '../../infrastructure/ai/types';
 import Terminal from '../Terminal';
 import { removePaneVisible, setPaneVisible } from '../terminal/paneVisibilityStore';

@@ -53,7 +53,7 @@ test.beforeEach(() => {
 
 const draft = (overrides: Partial<AIDraft> = {}): AIDraft => ({
   text: '',
-  agentId: 'catty',
+  agentId: 'codex',
   attachments: [],
   selectedUserSkillSlugs: [],
   updatedAt: 1,
@@ -63,7 +63,7 @@ const draft = (overrides: Partial<AIDraft> = {}): AIDraft => ({
 const session = (overrides: Partial<AISession> = {}): AISession => ({
   id: 'session-1',
   title: 'Session',
-  agentId: 'catty',
+  agentId: 'codex',
   scope: { type: 'terminal', targetId: 'terminal-1' },
   messages: [],
   createdAt: 1,
@@ -95,7 +95,7 @@ const baseProps = (overrides: Partial<AIChatSidePanelProps> = {}): AIChatSidePan
   providers: [],
   activeProviderId: '',
   activeModelId: '',
-  defaultAgentId: 'catty',
+  defaultAgentId: '',
   toolIntegrationMode: 'mcp',
   externalAgents: [],
   agentModelMap: {},

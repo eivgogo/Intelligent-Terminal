@@ -1,6 +1,6 @@
 import React, { type Dispatch, type SetStateAction } from 'react';
 import { History, Plus } from 'lucide-react';
-import type { AIPermissionMode, AISession, ChatMessage, DiscoveredAgent, ExternalAgentConfig, AgentModelPreset, ProviderConfig, UploadedFile } from '../infrastructure/ai/types';
+import type { AIPermissionMode, AISession, ChatMessage, DiscoveredAgent, ExternalAgentConfig, AgentModelPreset, UploadedFile } from '../infrastructure/ai/types';
 import type { Host, VaultNote } from '../types';
 import type { UserSkillOption } from './ai/userSkillsState';
 import type { AIQuickMessage } from '../infrastructure/ai/quickMessages';
@@ -69,12 +69,6 @@ interface AIChatPanelContentProps {
   agentModelPresets: AgentModelPreset[];
   selectedAgentModel: string;
   handleAgentModelSelect: (modelId: string) => void;
-  cattyConfiguredProviders: ProviderConfig[];
-  effectiveActiveProvider?: ProviderConfig;
-  effectiveActiveModelId?: string;
-  handleAgentProviderModelSelect: (providerId: string, modelId: string, contextWindow?: number) => void;
-  selectedCattyThinking?: string;
-  handleCattyThinkingSelect?: (level: string) => void;
   files: UploadedFile[];
   addFiles: (inputFiles: File[]) => Promise<void>;
   removeFile: (fileId: string) => void;
@@ -138,12 +132,6 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   agentModelPresets,
   selectedAgentModel,
   handleAgentModelSelect,
-  cattyConfiguredProviders,
-  effectiveActiveProvider,
-  effectiveActiveModelId,
-  handleAgentProviderModelSelect,
-  selectedCattyThinking,
-  handleCattyThinkingSelect,
   files,
   addFiles,
   removeFile,
@@ -171,25 +159,6 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
       connected: session.connected,
     })),
     [terminalSessions],
-  );
-  const providerSwitcher = React.useMemo(
-    () => (
-      currentAgentId === 'catty' && cattyConfiguredProviders.length > 0
-        ? {
-            providers: cattyConfiguredProviders,
-            selectedProviderId: effectiveActiveProvider?.id,
-            selectedModelId: effectiveActiveModelId || undefined,
-            onSelect: handleAgentProviderModelSelect,
-          }
-        : undefined
-    ),
-    [
-      cattyConfiguredProviders,
-      currentAgentId,
-      effectiveActiveModelId,
-      effectiveActiveProvider?.id,
-      handleAgentProviderModelSelect,
-    ],
   );
   const hiddenParts = getAIPanelDiagnosticHiddenParts();
   const hideHeader = isAIPanelDiagnosticPartHidden('header', hiddenParts);
@@ -349,14 +318,11 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                   disabled={!canSendCurrentAgent}
                   providerName={providerDisplayName}
                   modelName={modelDisplayName}
-                  agentName={currentAgentId === 'catty' ? 'Catty Agent' : externalAgents.find(a => a.id === currentAgentId)?.name}
+                  agentName={externalAgents.find(a => a.id === currentAgentId)?.name}
                   modelPresets={agentModelPresets}
                   selectedModelId={selectedAgentModel}
                   onModelSelect={handleAgentModelSelect}
-                  providerSwitcher={providerSwitcher}
                   pickerScope={currentAgentId}
-                  thinkingLevel={currentAgentId === 'catty' ? selectedCattyThinking : undefined}
-                  onThinkingLevelChange={currentAgentId === 'catty' ? handleCattyThinkingSelect : undefined}
                   files={files}
                   onAddFiles={addFiles}
                   onRemoveFile={removeFile}

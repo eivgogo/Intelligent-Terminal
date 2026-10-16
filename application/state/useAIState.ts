@@ -133,7 +133,7 @@ export function useAIState() {
     localStorageAdapter.read<ExternalAgentConfig[]>(STORAGE_KEY_AI_EXTERNAL_AGENTS) ?? []
   );
   const [defaultAgentId, setDefaultAgentIdRaw] = useState<string>(() =>
-    localStorageAdapter.readString(STORAGE_KEY_AI_DEFAULT_AGENT) ?? 'catty'
+    localStorageAdapter.readString(STORAGE_KEY_AI_DEFAULT_AGENT) ?? ''
   );
 
   // ── Safety Settings ──
@@ -185,7 +185,7 @@ export function useAIState() {
   }, [agentModelMap]);
   // Per-agent provider override: remembers which provider config each agent
   // should bind to. Falls back to the global `activeProviderId` when an agent
-  // has no entry. Used so that e.g. Catty Agent can stay on DeepSeek while
+  // has no entry. Used so that e.g. an agent can stay on DeepSeek while
   // a Claude/Codex run continues on its existing provider.
   const [agentProviderMap, setAgentProviderMapRaw] = useState<Record<string, string>>(() =>
     localStorageAdapter.read<Record<string, string>>(STORAGE_KEY_AI_AGENT_PROVIDER_MAP) ?? {}
@@ -485,7 +485,7 @@ export function useAIState() {
             break;
           }
           case STORAGE_KEY_AI_DEFAULT_AGENT:
-            setDefaultAgentIdRaw(localStorageAdapter.readString(STORAGE_KEY_AI_DEFAULT_AGENT) ?? 'catty');
+            setDefaultAgentIdRaw(localStorageAdapter.readString(STORAGE_KEY_AI_DEFAULT_AGENT) ?? '');
             break;
           case STORAGE_KEY_AI_COMMAND_BLOCKLIST: {
             const list = localStorageAdapter.read<string[]>(STORAGE_KEY_AI_COMMAND_BLOCKLIST);

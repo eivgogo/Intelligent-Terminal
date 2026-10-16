@@ -1,7 +1,6 @@
 /**
  * approvalGate — Promise-based approval system for tool execution.
  *
- * Catty write tools are gated by `streamText({ toolApproval })` (see cattyToolApproval.ts).
  * MCP/external agents use main-process approval via `setupMcpApprovalBridge()`.
  * `requestApproval()` is the shared renderer Promise used by both paths.
  * a Promise that resolves when the user approves/rejects from the UI, or after
@@ -40,7 +39,7 @@ export interface ApprovalRequest {
   /** Optional chat session scope — used to clear only relevant approvals on stop */
   chatSessionId?: string;
   capabilityId?: string;
-  source?: 'catty' | 'mcp' | 'codex-app-server';
+  source?: 'mcp' | 'codex-app-server';
   approvalType?: 'command' | 'file-change' | 'permissions';
   itemId?: string;
   allowSession?: boolean;
@@ -127,7 +126,7 @@ function emitApprovalEvent(
   const base = {
     sessionId,
     chatSessionId: request.chatSessionId,
-    backend: request.source === 'codex-app-server' ? 'external-sdk' as const : 'catty' as const,
+    backend: 'external-sdk' as const,
     timestamp: Date.now(),
     toolCallId: request.toolCallId,
     toolName: request.toolName,

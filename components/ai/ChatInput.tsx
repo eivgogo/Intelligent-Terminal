@@ -13,10 +13,6 @@ import {
   type ComposerModelPrefs,
 } from '../../infrastructure/ai/composerPicker';
 import {
-  cattyReasoningLevelsForSelection,
-  resolveVisibleCattyThinkingLevel,
-} from '../../infrastructure/ai/cattyReasoning';
-import {
   readComposerModelPrefs,
   rememberComposerRecentModel,
   subscribeComposerModelPrefs,
@@ -25,7 +21,6 @@ import {
 import {
   ComposerModelPicker,
   COMPOSER_MODEL_PICKER_WIDTH,
-  COMPOSER_PROVIDER_PICKER_WIDTH,
 } from './ComposerModelPicker';
 import { ComposerThinkingChip } from './ComposerThinkingChip';
 import {
@@ -53,8 +48,7 @@ import {
   PromptInputTools,
 } from '../ai-elements/prompt-input';
 import type { PromptInputStatus } from '../ai-elements/prompt-input';
-import type { AgentModelPreset, AIPermissionMode, ProviderConfig, UploadedFile } from '../../infrastructure/ai/types';
-import { ProviderIconBadge } from '../settings/tabs/ai/ProviderIconBadge';
+import type { AgentModelPreset, AIPermissionMode, UploadedFile } from '../../infrastructure/ai/types';
 import { VariableSizeVirtualList, type VariableSizeVirtualListHandle } from '../ui/VariableSizeVirtualList';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { isAppLockOverlayActive } from '../../infrastructure/appLockOverlayDom';
@@ -82,24 +76,6 @@ function formatContextTokens(tokens: number): string {
   if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
   if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(tokens >= 100_000 ? 0 : 1)}K`;
   return String(Math.max(0, Math.round(tokens)));
-}
-
-/**
- * Provider picker payload used by Catty Agent. When set, the model chip
- * opens a single-column model list. The current provider sits on a
- * one-line header that drills into a second-level provider list.
- */
-export interface ProviderSwitcherConfig {
-  /** Every configured provider — Settings-level visibility, not the
-   *  `enabled` toggle, since the user expects to swap between everything
-   *  they've set up. */
-  providers: ProviderConfig[];
-  /** Currently bound provider id (falls back to providers[0] when missing). */
-  selectedProviderId?: string;
-  /** Currently bound model id under the selected provider. */
-  selectedModelId?: string;
-  /** Fires when the user picks a (providerId, modelId) pair. */
-  onSelect: (providerId: string, modelId: string, contextWindow?: number) => void;
 }
 
 type ComposerHasTextStore = {
@@ -226,22 +202,12 @@ interface ChatInputProps {
   onAddUserSkill?: (slug: string) => void;
   /** Callback to remove a selected user skill */
   onRemoveUserSkill?: (slug: string) => void;
-  /** Permission mode (only shown for Catty Agent) */
+  /** Permission mode (only shown when the agent supports it) */
   permissionMode?: AIPermissionMode;
   /** Callback when user changes permission mode */
   onPermissionModeChange?: (mode: AIPermissionMode) => void;
-  /**
-   * Provider→model two-level picker payload. When provided, replaces the
-   * single-list model dropdown with a provider-aware picker. Used for the
-   * Catty Agent only — external SDK agents (Claude/Codex) keep the
-   * `modelPresets` dropdown because their provider is wired inside the CLI.
-   */
-  providerSwitcher?: ProviderSwitcherConfig;
   /** Scope key for recent/pinned model prefs. */
   pickerScope?: string;
-  /** Catty-only reasoning effort, stored separately from the model id. */
-  thinkingLevel?: string;
-  onThinkingLevelChange?: (level: string) => void;
   /** Hidden retained panels must not leave body-portaled menus open. */
   parked?: boolean;
 }
@@ -278,10 +244,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   onRemoveUserSkill,
   permissionMode,
   onPermissionModeChange,
-  providerSwitcher,
   pickerScope = 'default',
-  thinkingLevel,
-  onThinkingLevelChange,
   parked = false,
 }) => {
   const { t } = useI18n();
@@ -899,74 +862,14 @@ const ChatInput: React.FC<ChatInputProps> = ({
     modelPresets,
   );
   const selectedBaseModelId = selectedPreset?.id;
-  // Provider switcher mode (Catty Agent): single-column popover, chip carries
-  // the provider's icon + name + model name. Falls back to the existing
-  // single-list model dropdown for external SDK agents.
-  const hasProviderSwitcher = !!providerSwitcher && providerSwitcher.providers.length > 0;
-  // Resolve to the actually-bound provider only — no `?? providers[0]`
-  // fallback, since a provider that isn't really bound will still hit the
-  // `!sendActiveProvider` guard at send time. Faking a selection in the
-  // chip would lie about a state the rest of the system treats as empty.
-  const selectedSwitcherProvider = hasProviderSwitcher
-    ? providerSwitcher!.providers.find((p) => p.id === providerSwitcher!.selectedProviderId)
-    : undefined;
-  const providerSwitcherChipLabel = hasProviderSwitcher
-    ? (selectedSwitcherProvider
-        ? (providerSwitcher!.selectedModelId
-            ? `${selectedSwitcherProvider.name} · ${providerSwitcher!.selectedModelId}`
-            : selectedSwitcherProvider.name)
-        : t('ai.chat.selectProvider'))
-    : '';
-  const modelLabel = hasProviderSwitcher
-    ? providerSwitcherChipLabel
-    : (selectedPreset?.name || modelName || providerName || t('ai.chat.noModel'));
-  const modelChipMaxWidth = hasProviderSwitcher ? 'max-w-[168px]' : 'max-w-[96px]';
-  const hasModelPicker = hasProviderSwitcher || (modelPresets.length > 0 && !!onModelSelect);
-  const thinkingLevels = useMemo(
-    () => (
-      hasProviderSwitcher && onThinkingLevelChange
-        ? cattyReasoningLevelsForSelection(
-          selectedSwitcherProvider,
-          providerSwitcher?.selectedModelId,
-        )
-        : (selectedPreset?.thinkingLevels ?? [])
-    ),
-    [
-      hasProviderSwitcher,
-      onThinkingLevelChange,
-      selectedSwitcherProvider,
-      providerSwitcher?.selectedModelId,
-      selectedPreset?.thinkingLevels,
-    ],
-  );
-  const selectedThinking = hasProviderSwitcher
-    ? thinkingLevel
-    : selectedPresetThinking;
-  const visibleThinking = hasProviderSwitcher
-    ? (selectedThinking
-      ? resolveVisibleCattyThinkingLevel(thinkingLevels, selectedThinking)
-      : undefined)
-    : selectedThinking;
-
-  useEffect(() => {
-    if (!hasProviderSwitcher || !onThinkingLevelChange) return;
-    if (!thinkingLevels.length) return;
-    if (!thinkingLevel) return;
-    if (thinkingLevels.includes(thinkingLevel)) return;
-    const next = resolveVisibleCattyThinkingLevel(thinkingLevels, thinkingLevel);
-    if (next && next !== thinkingLevel) onThinkingLevelChange(next);
-  }, [
-    hasProviderSwitcher,
-    onThinkingLevelChange,
-    providerSwitcher?.selectedProviderId,
-    providerSwitcher?.selectedModelId,
-    thinkingLevel,
-    thinkingLevels,
-  ]);
-  const showThinkingChip = thinkingLevels.length > 0 && (!hasProviderSwitcher || !!onThinkingLevelChange);
-  const popoverMaxWidth = hasProviderSwitcher
-    ? COMPOSER_PROVIDER_PICKER_WIDTH
-    : COMPOSER_MODEL_PICKER_WIDTH;
+  const modelLabel = selectedPreset?.name || modelName || providerName || t('ai.chat.noModel');
+  const modelChipMaxWidth = 'max-w-[96px]';
+  const hasModelPicker = modelPresets.length > 0 && !!onModelSelect;
+  const thinkingLevels = selectedPreset?.thinkingLevels ?? [];
+  const selectedThinking = selectedPresetThinking;
+  const visibleThinking = selectedThinking;
+  const showThinkingChip = thinkingLevels.length > 0;
+  const popoverMaxWidth = COMPOSER_MODEL_PICKER_WIDTH;
   const contextUsagePercent = contextUsage
     ? Math.min(100, Math.max(0, (contextUsage.inputTokens / contextUsage.contextWindow) * 100))
     : 0;
@@ -1358,14 +1261,10 @@ const ChatInput: React.FC<ChatInputProps> = ({
               }}
               disabled={lockTurnConfiguration}
               className={`${chipClassName} min-w-0 ${hasModelPicker && !lockTurnConfiguration ? 'cursor-pointer hover:bg-muted/24 transition-colors' : 'opacity-60'}`}
-              aria-label={hasProviderSwitcher ? t('ai.chat.selectProviderAndModel') : t('ai.chat.selectModel')}
+              aria-label={t('ai.chat.selectModel')}
               aria-expanded={showModelPicker}
             >
-              {hasProviderSwitcher && selectedSwitcherProvider ? (
-                <ProviderIconBadge provider={selectedSwitcherProvider} size="xs" />
-              ) : (
-                <Cpu size={11} className="text-muted-foreground/64" />
-              )}
+              <Cpu size={11} className="text-muted-foreground/64" />
               <span className={`truncate min-w-0 ${modelChipMaxWidth}`}>{modelLabel}</span>
               {hasModelPicker && <ChevronDown size={9} className="text-muted-foreground/50" />}
             </button>
@@ -1416,21 +1315,14 @@ const ChatInput: React.FC<ChatInputProps> = ({
                 <div className="fixed inset-0 z-[999]" onClick={closeAllMenus} />
                 <div
                   role="listbox"
-                  aria-label={hasProviderSwitcher ? t('ai.chat.selectProviderAndModel') : t('ai.chat.selectModel')}
+                  aria-label={t('ai.chat.selectModel')}
                   className="fixed z-[1000] overflow-hidden rounded-lg border border-border/50 bg-popover shadow-lg"
                   style={{ left: menuPos.left, bottom: menuPos.bottom, maxWidth: popoverMaxWidth }}
                 >
                   <ComposerModelPicker
-                    providers={hasProviderSwitcher ? providerSwitcher!.providers : undefined}
-                    selectedProviderId={providerSwitcher?.selectedProviderId}
-                    selectedModelId={hasProviderSwitcher ? providerSwitcher?.selectedModelId : selectedBaseModelId}
-                    modelPresets={hasProviderSwitcher ? undefined : modelPresets}
+                    selectedModelId={selectedBaseModelId}
+                    modelPresets={modelPresets}
                     prefs={modelPrefs}
-                    onSelectProviderModel={(providerId, modelId, contextWindow) => {
-                      providerSwitcher?.onSelect(providerId, modelId, contextWindow);
-                      setModelPrefs(rememberComposerRecentModel(pickerScope, { providerId, modelId }));
-                      closeAllMenus();
-                    }}
                     onSelectModel={(modelId) => {
                       const preset = modelPresets.find((item) => item.id === modelId);
                       const nextId = preset
@@ -1471,9 +1363,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                   }
                 }}
                 onSelect={(level) => {
-                  if (hasProviderSwitcher) {
-                    onThinkingLevelChange?.(level);
-                  } else if (selectedPreset) {
+                  if (selectedPreset) {
                     onModelSelect?.(
                       level && selectedPreset.thinkingLevels?.includes(level)
                         ? `${selectedPreset.id}/${level}`
@@ -1485,7 +1375,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
                 onClose={closeAllMenus}
               />
             )}
-            {/* Permission mode chip — only for Catty Agent */}
+            {/* Permission mode chip — only when the agent supports it */}
             {permissionMode && onPermissionModeChange && (
               <>
                 <Tooltip>
@@ -1647,10 +1537,7 @@ function chatInputPropsAreEqual(prev: ChatInputProps, next: ChatInputProps): boo
     && prev.onRemoveUserSkill === next.onRemoveUserSkill
     && prev.permissionMode === next.permissionMode
     && prev.onPermissionModeChange === next.onPermissionModeChange
-    && prev.providerSwitcher === next.providerSwitcher
     && prev.pickerScope === next.pickerScope
-    && prev.thinkingLevel === next.thinkingLevel
-    && prev.onThinkingLevelChange === next.onThinkingLevelChange
     && prev.parked === next.parked
   );
 }

@@ -12,7 +12,6 @@ import type {
   DiscoveredAgent,
   ExternalAgentConfig,
 } from '../infrastructure/ai/types';
-import type { ExecutorContext } from '../infrastructure/ai/cattyAgent/executor';
 import {
   filterAgentModelPresetsForCliVersion,
   getAgentModelPresets,
@@ -39,7 +38,6 @@ import {
   tryBeginSendForKey,
 } from './ai/draftSendGate';
 import { draftsByScopeEqualIgnoringComposerText, selectDraftForAgentSwitch } from '../application/state/aiDraftState';
-import { sanitizeContextWindow } from '../infrastructure/ai/contextCompaction';
 import {
   buildPromptWithTerminalSelectionAttachments,
   isTerminalSelectionAttachment,
@@ -61,7 +59,6 @@ import { stopAgentTurn } from '../infrastructure/ai/harness/agentStop';
 import { getAgentRuntime } from '../infrastructure/ai/harness/globalAgentRuntime';
 import { useAIPermissionGrantsState } from '../application/state/useAIPermissionGrantsState';
 import { useConversationExport } from './ai/hooks/useConversationExport';
-import { useAgentContextUsage } from '../application/state/useAgentCompactionUi';
 import type { AIChatSidePanelProps } from './AIChatSidePanel.types';
 import {
   buildCursorListModelsAgentEnv,
@@ -273,25 +270,16 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   setExternalAgents,
   agentModelMap,
   setAgentModel,
-  agentProviderMap,
-  setAgentProvider,
-  agentThinkingMap,
-  setAgentThinking,
-  updateProvider,
   globalPermissionMode,
   setGlobalPermissionMode,
-  commandBlocklist,
-  commandTimeout,
   maxIterations = 20,
   webSearchConfig,
   quickMessages = [],
   scopeType,
   scopeTargetId,
   scopeHostIds,
-  scopeLabel,
   focusedSessionId,
   terminalSessions = [],
-  resolveExecutorContext,
   isVisible = true,
   notes = [],
   hosts = [],
@@ -315,14 +303,11 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   const { openSettingsWindow } = useWindowControls();
   const terminalSessionsRef = useRef(terminalSessions);
   terminalSessionsRef.current = terminalSessions;
-  const resolveExecutorContextRef = useRef(resolveExecutorContext);
-  resolveExecutorContextRef.current = resolveExecutorContext;
 
   const {
     streamingSessionIds,
     setStreamingForScope,
     abortControllersRef,
-    sendToCattyAgent,
     sendToExternalAgent,
     steerExternalAgent,
     reportStreamError,
@@ -405,7 +390,6 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   const isStreaming = activeSessionId ? streamingSessionIds.has(activeSessionId) : false;
   const isSteering = activeSessionId != null && steeringSessionId === activeSessionId;
   const currentAgentId = activeSession?.agentId ?? currentDraft?.agentId ?? defaultAgentId;
-  const observedContextUsage = useAgentContextUsage(activeSessionId);
   const inputValue = pendingComposerTextRef.current ?? currentDraft?.text ?? '';
   const files = currentDraft?.attachments ?? [];
   const panelViewRef = useRef(normalizedPanelView);
@@ -725,75 +709,20 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     [providers, activeProviderId],
   );
 
-  const cattyAgentProvider = useMemo(() => {
-    const overrideId = agentProviderMap['catty'];
-    if (overrideId) {
-      const p = providers.find((cfg) => cfg.id === overrideId);
-      if (p) return p;
-    }
-    return activeProvider;
-  }, [agentProviderMap, providers, activeProvider]);
+  // Context usage ring is unavailable without the built-in agent.
+  const contextUsage = null;
 
-  const cattyAgentModelId = useMemo(() => {
-    const trim = (s: string | undefined | null): string => (s ?? '').trim();
-    const overrideId = agentProviderMap['catty'];
-    const overrideProvider = overrideId
-      ? providers.find((cfg) => cfg.id === overrideId)
-      : undefined;
-    if (overrideProvider) {
-      return trim(agentModelMap['catty']) || trim(overrideProvider.defaultModel);
-    }
-    return trim(cattyAgentProvider?.defaultModel) || trim(activeModelId);
-  }, [agentModelMap, agentProviderMap, providers, cattyAgentProvider, activeModelId]);
-
-  const effectiveActiveProvider = currentAgentId === 'catty' ? cattyAgentProvider : activeProvider;
-  const effectiveActiveModelId = currentAgentId === 'catty' ? cattyAgentModelId : activeModelId;
-
-  const cattyConfiguredProviders = useMemo(
-    () => (currentAgentId === 'catty' ? providers : []),
-    [currentAgentId, providers],
-  );
-
-  // Hide the ring until a real context_snapshot arrives. A synthetic 0% fallback
-  // misleads users when reopening long sessions (looks empty until the next turn).
-  const contextUsage = currentAgentId === 'catty' ? observedContextUsage : null;
-
-  // Catty-only manual compact. External agents own their own compaction.
-  // No minimum message count: short sessions may still run /compact (even if
-  // there is little to summarize).
-  const canCompact = currentAgentId === 'catty'
-    && Boolean(activeSessionId)
-    && !isStreaming
-    && Boolean(effectiveActiveProvider)
-    && Boolean(effectiveActiveModelId.trim());
+  // Manual /compact is not available; external agents own their own compaction.
+  const canCompact = false;
 
   const providersRef = useRef(providers);
   providersRef.current = providers;
 
-  const handleAgentProviderModelSelect = useCallback(
-    (providerId: string, modelId: string, contextWindow?: number) => {
-      setAgentProvider(currentAgentId, providerId);
-      setAgentModel(currentAgentId, modelId);
-      const sanitized = sanitizeContextWindow(contextWindow);
-      if (!updateProvider || sanitized == null) return;
-      const provider = providersRef.current.find((item) => item.id === providerId);
-      if (!provider) return;
-      if (provider.modelContextWindows?.[modelId] === sanitized) return;
-      updateProvider(providerId, {
-        modelContextWindows: {
-          ...(provider.modelContextWindows ?? {}),
-          [modelId]: sanitized,
-        },
-      });
-    },
-    [currentAgentId, setAgentProvider, setAgentModel, updateProvider],
-  );
-
-  const providerDisplayName = effectiveActiveProvider?.name ?? '';
-  const modelDisplayName = effectiveActiveModelId || effectiveActiveProvider?.defaultModel || '';
+  const providerDisplayName = activeProvider?.name ?? '';
+  const modelDisplayName = activeModelId || activeProvider?.defaultModel || '';
 
   const currentAgentConfig = useMemo(
-    () => currentAgentId !== 'catty' ? externalAgents.find(a => a.id === currentAgentId) : undefined,
+    () => externalAgents.find(a => a.id === currentAgentId),
     [currentAgentId, externalAgents],
   );
   const isCodexManagedAgent = useMemo(
@@ -1051,11 +980,6 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     setAgentModel(currentAgentId, modelId);
   }, [currentAgentId, setAgentModel]);
 
-  const selectedCattyThinking = agentThinkingMap.catty;
-  const handleCattyThinkingSelect = useCallback((level: string) => {
-    setAgentThinking('catty', level);
-  }, [setAgentThinking]);
-
 
   const handleNewChat = useCallback(() => {
     clearScopeDraft();
@@ -1086,20 +1010,6 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       updateSessionTitle(sessionId, text.length > 50 ? text.slice(0, 50) + '...' : text);
     }
   }, [updateSessionTitle]);
-
-  const buildExecutorContextForScope = useCallback((scope: {
-    type: 'terminal' | 'workspace';
-    targetId?: string;
-    label?: string;
-  }): ExecutorContext => {
-    const resolved = resolveExecutorContextRef.current?.(scope);
-    if (resolved) return resolved;
-    return {
-      sessions: terminalSessionsRef.current,
-      workspaceId: scope.type === 'workspace' ? scope.targetId : undefined,
-      workspaceName: scope.type === 'workspace' ? scope.label : undefined,
-    };
-  }, []);
 
   const addSelectedUserSkill = useCallback((slug: string) => {
     const normalizedSlug = String(slug || '').trim().toLowerCase();
@@ -1140,7 +1050,6 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     const currentPanelView = panelViewRef.current;
     const currentSessionView = activeSessionRef.current;
     const trimmed = draft?.text.trim() ?? '';
-    const sendScopeKey = scopeKey;
     const attachments = (draft?.attachments ?? []).map((file) => ({
       base64Data: file.base64Data,
       mediaType: file.mediaType,
@@ -1153,8 +1062,8 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     const hasTerminalSelectionAttachments = attachments.some(isTerminalSelectionAttachment);
     if ((!trimmed && !hasTerminalSelectionAttachments) || isStreaming) return;
     const sendAgentId = currentSessionView?.agentId ?? draft?.agentId ?? currentAgentId;
-    const agentConfig = sendAgentId !== 'catty' ? findEnabledExternalAgent(externalAgents, sendAgentId) : undefined;
-    if (sendAgentId !== 'catty' && !agentConfig) return;
+    const agentConfig = findEnabledExternalAgent(externalAgents, sendAgentId);
+    if (!agentConfig) return;
 
     const selectedSkillSlugs = draft?.selectedUserSkillSlugs ?? [];
     const modelPrompt = buildPromptWithTerminalSelectionAttachments(trimmed, attachments);
@@ -1253,38 +1162,8 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         return;
       }
 
-      const isExternalAgent = sendAgentId !== 'catty';
-
-      const sendActiveProvider = isExternalAgent ? activeProvider : effectiveActiveProvider;
-      const sendActiveModelId = isExternalAgent ? activeModelId : effectiveActiveModelId;
-
-      if (!isExternalAgent && !sendActiveProvider) {
-        addMessageToSession(sessionId, {
-          id: generateId(), role: 'user', content: trimmed,
-          ...(attachments.length > 0 ? { attachments } : {}),
-          timestamp: Date.now(),
-        });
-        addMessageToSession(sessionId, { id: generateId(), role: 'assistant', content: t('ai.chat.noProvider'), timestamp: Date.now() });
-        if (currentPanelView.mode === 'session') {
-          clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
-          showScopeSessionView(sessionId);
-        }
-        return;
-      }
-
-      if (!isExternalAgent && !sendActiveModelId.trim()) {
-        addMessageToSession(sessionId, {
-          id: generateId(), role: 'user', content: trimmed,
-          ...(attachments.length > 0 ? { attachments } : {}),
-          timestamp: Date.now(),
-        });
-        addMessageToSession(sessionId, { id: generateId(), role: 'assistant', content: t('ai.chat.noProviderModel'), timestamp: Date.now() });
-        if (currentPanelView.mode === 'session') {
-          clearScopeDraft({ keepPendingText: keepPendingAfterSend() });
-          showScopeSessionView(sessionId);
-        }
-        return;
-      }
+      const agentConfigForSend = agentConfig;
+      if (!agentConfigForSend) return;
 
       addMessageToSession(sessionId, {
         id: generateId(), role: 'user', content: trimmed,
@@ -1299,67 +1178,34 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       const assistantMsgId = generateId();
       addMessageToSession(sessionId, {
         id: assistantMsgId, role: 'assistant', content: '', timestamp: Date.now(),
-        model: isExternalAgent
-          ? (sendSelectedAgentModel || agentConfig?.name || 'external')
-          : (sendActiveModelId || sendActiveProvider?.defaultModel || ''),
-        providerId: isExternalAgent ? undefined : sendActiveProvider?.providerId,
+        model: sendSelectedAgentModel || agentConfigForSend.name || 'external',
       });
 
       const abortController = new AbortController();
       abortControllersRef.current.set(sessionId, abortController);
       currentSession = currentSession ?? sessionsRef.current.find((session) => session.id === sessionId) ?? null;
 
-      if (isExternalAgent) {
-        if (!agentConfig) {
-          updateMessageById(sessionId, assistantMsgId, msg => ({ ...msg, content: 'External agent not found. Please check settings.', executionStatus: 'failed' }));
-          setStreamingForScope(sessionId, false);
-          return;
-        }
-        try {
-          const existingExternalSessionId = currentSession?.externalSessionId;
-          await sendToExternalAgent(sessionId, assistantMsgId, modelPrompt, agentConfig, abortController, modelAttachments, {
-            existingSessionId: existingExternalSessionId,
-            updateExternalSessionId: updateSessionExternalSessionId,
-            historyMessages: buildExternalAgentHistoryMessagesForBridge(currentSession?.messages ?? [], existingExternalSessionId),
-            terminalSessions,
-            defaultTargetSession,
-            providers,
-            selectedAgentModel: sendSelectedAgentModel,
-            toolIntegrationMode,
-            selectedUserSkillSlugs: selectedSkillSlugs,
-            permissionMode: sendPermissionMode,
-          });
-        } catch (err) {
-          reportStreamError(sessionId, abortController.signal, err);
-        }
-        updateLastMessage(sessionId, msg => msg.statusText ? { ...msg, statusText: '' } : msg);
-        setStreamingForScope(sessionId, false);
-        abortControllersRef.current.delete(sessionId);
-        autoTitleSession(sessionId, trimmed);
-      } else {
-        const toolScope = {
-          type: scopeType,
-          targetId: scopeTargetId,
-          label: scopeLabel,
-        } as const;
-        await sendToCattyAgent(sessionId, sendScopeKey, modelPrompt, abortController, currentSession ?? undefined, assistantMsgId, {
-          activeProvider: sendActiveProvider,
-          activeModelId: sendActiveModelId,
-          reasoningEffort: selectedCattyThinking,
-          scopeType,
-          scopeTargetId,
-          scopeLabel,
-          globalPermissionMode: sendPermissionMode,
-          commandBlocklist,
-          commandTimeout,
+      try {
+        const existingExternalSessionId = currentSession?.externalSessionId;
+        await sendToExternalAgent(sessionId, assistantMsgId, modelPrompt, agentConfigForSend, abortController, modelAttachments, {
+          existingSessionId: existingExternalSessionId,
+          updateExternalSessionId: updateSessionExternalSessionId,
+          historyMessages: buildExternalAgentHistoryMessagesForBridge(currentSession?.messages ?? [], existingExternalSessionId),
           terminalSessions,
-          webSearchConfig,
-          getExecutorContext: () => buildExecutorContextForScope(toolScope),
-          autoTitleSession,
+          defaultTargetSession,
+          providers,
+          selectedAgentModel: sendSelectedAgentModel,
+          toolIntegrationMode,
           selectedUserSkillSlugs: selectedSkillSlugs,
-          titleText: trimmed,
-        }, modelAttachments.length > 0 ? modelAttachments : undefined);
+          permissionMode: sendPermissionMode,
+        });
+      } catch (err) {
+        reportStreamError(sessionId, abortController.signal, err);
       }
+      updateLastMessage(sessionId, msg => msg.statusText ? { ...msg, statusText: '' } : msg);
+      setStreamingForScope(sessionId, false);
+      abortControllersRef.current.delete(sessionId);
+      autoTitleSession(sessionId, trimmed);
     } finally {
       setIsSending(false);
       endSendForKey(sendGateKey);
@@ -1368,94 +1214,23 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
       }
     }
   }, [
-    isStreaming, activeProvider, effectiveActiveProvider, effectiveActiveModelId, selectedCattyThinking, scopeKey, currentAgentId,
-    activeModelId, externalAgents,
-    createSession, addMessageToSession, updateMessageById, updateLastMessage,
+    isStreaming, scopeKey, currentAgentId,
+    externalAgents,
+    createSession, addMessageToSession, updateLastMessage,
     setStreamingForScope,
-    sendToExternalAgent, sendToCattyAgent, reportStreamError, autoTitleSession, t,
+    sendToExternalAgent, reportStreamError, autoTitleSession,
     abortControllersRef, terminalSessions, defaultTargetSession, providers, selectedAgentModel, updateSessionExternalSessionId,
-    scopeType, scopeTargetId, scopeHostIds, scopeLabel, commandBlocklist, commandTimeout, webSearchConfig, buildExecutorContextForScope,
-    toolIntegrationMode,
+    scopeType, scopeTargetId, scopeHostIds, toolIntegrationMode,
     clearScopeDraft, showScopeSessionView, setActiveSessionId,
     flushDraftText, currentAgentConfig, buildExternalAgentRuntimeModelTarget,
     loadSdkRuntimeModelCatalog, applySdkRuntimeModelCatalog,
+    webSearchConfig,
   ]);
 
   const handleCompact = useCallback(async () => {
-    const session = activeSessionRef.current;
-    if (
-      currentAgentId !== 'catty'
-      || !session
-      || isStreaming
-      || isAIChatSessionStreaming(session.id)
-      || !effectiveActiveProvider
-      || !effectiveActiveModelId.trim()
-    ) {
-      return;
-    }
-
-    if (!tryBeginSendForKey(session.id)) return;
-
-    const controller = new AbortController();
-    abortControllersRef.current.set(session.id, controller);
-    setStreamingForScope(session.id, true);
-    try {
-      await sendToCattyAgent(
-        session.id,
-        scopeKey,
-        '',
-        controller,
-        session,
-        '',
-        {
-          activeProvider: effectiveActiveProvider,
-          activeModelId: effectiveActiveModelId,
-          reasoningEffort: selectedCattyThinking,
-          scopeType,
-          scopeTargetId,
-          scopeLabel,
-          globalPermissionMode,
-          commandBlocklist,
-          commandTimeout,
-          terminalSessions,
-          webSearchConfig,
-          getExecutorContext: () => buildExecutorContextForScope({
-            type: scopeType,
-            targetId: scopeTargetId,
-            label: scopeLabel,
-          }),
-          autoTitleSession: () => {},
-          selectedUserSkillSlugs: [],
-          forceCompaction: true,
-        },
-      );
-    } finally {
-      setStreamingForScope(session.id, false);
-      if (abortControllersRef.current.get(session.id) === controller) {
-        abortControllersRef.current.delete(session.id);
-      }
-      endSendForKey(session.id);
-    }
-  }, [
-    abortControllersRef,
-    buildExecutorContextForScope,
-    commandBlocklist,
-    commandTimeout,
-    currentAgentId,
-    effectiveActiveModelId,
-    effectiveActiveProvider,
-    selectedCattyThinking,
-    globalPermissionMode,
-    isStreaming,
-    scopeKey,
-    scopeLabel,
-    scopeTargetId,
-    scopeType,
-    sendToCattyAgent,
-    setStreamingForScope,
-    terminalSessions,
-    webSearchConfig,
-  ]);
+    // Manual compaction is only available for the built-in agent, which has
+    // been removed. External SDK agents own their own compaction.
+  }, []);
 
   const handleSteer = useCallback(async () => {
     const sessionId = activeSessionRef.current?.id;
@@ -1693,12 +1468,6 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         agentModelPresets={agentModelPresets}
         selectedAgentModel={selectedAgentModel}
         handleAgentModelSelect={handleAgentModelSelect}
-        cattyConfiguredProviders={cattyConfiguredProviders}
-        effectiveActiveProvider={effectiveActiveProvider}
-        effectiveActiveModelId={effectiveActiveModelId}
-        handleAgentProviderModelSelect={handleAgentProviderModelSelect}
-        selectedCattyThinking={selectedCattyThinking}
-        handleCattyThinkingSelect={handleCattyThinkingSelect}
         files={files}
         addFiles={addFiles}
         removeFile={removeFile}

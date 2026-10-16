@@ -9,7 +9,7 @@ declare global {
     aiFetch?(url: string, method?: string, headers?: Record<string, string>, body?: string, providerId?: string, skipHostCheck?: boolean, followRedirects?: boolean, skipTLSVerify?: boolean): Promise<{ ok: boolean; status?: number; data: string; error?: string }>;
     aiAllowlistAddHost?(baseURL: string): Promise<{ ok: boolean; error?: string }>;
     aiExec?(sessionId: string, command: string, chatSessionId?: string): Promise<{ ok: boolean; stdout?: string; stderr?: string; exitCode?: number | null; error?: string }>;
-    aiCattyCancelExec?(chatSessionId: string): Promise<{ ok: boolean; error?: string }>;
+    aiCancelExec?(chatSessionId: string): Promise<{ ok: boolean; error?: string }>;
     aiDiscoverAgents?(options?: { refreshShellEnv?: boolean; apiKeyPresent?: boolean }): Promise<Array<{
       command: string;
       name: string;
@@ -195,7 +195,7 @@ declare global {
     onCodexAppServerInteractionCleared?(cb: (payload: { interactionIds: string[]; chatSessionId?: string }) => void): () => void;
     respondCodexAppServerInteraction?(payload: Record<string, unknown>): Promise<{ ok: boolean; error?: string }>;
     cancelCodexAppServerInteractionTimeout?(interactionId: string): Promise<{ ok: boolean; cancelled?: boolean; error?: string }>;
-    aiCattyCancelExec?(chatSessionId: string): Promise<unknown>;
+    aiCancelExec?(chatSessionId: string): Promise<unknown>;
     aiSetChatSessionCancelled?(chatSessionId: string, cancelled?: boolean): Promise<{ ok: boolean; error?: string }>;
     aiMcpSyncPermissionGrants?(grants: Array<Record<string, unknown>>): Promise<{ ok: boolean; count?: number; error?: string }>;
     externalMcpGetStatus?(): Promise<{

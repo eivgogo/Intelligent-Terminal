@@ -377,7 +377,7 @@ function createWorkerAiJobStartHandler({
     activeSessionJobs.set(sessionId, jobId);
 
     // Insert into backgroundJobs *before* the shell-kind probe so
-    // netcatty:ai:catty:cancel / cancelWorkerBackgroundJobsForSession can
+    // netcatty:ai:exec:cancel / cancelWorkerBackgroundJobsForSession can
     // latch cancellation while we await. Without this, the first job on an
     // unprobed remote session has no map entry during the probe and still
     // writes to the PTY after chat cancel (Codex P2 on #2061).
@@ -565,7 +565,7 @@ function registerWorkerAiExecHandlers(ipcMain, { sessions }) {
   ipcMain.handle("netcatty:ai:jobStop", createWorkerAiJobStopHandler({
     backgroundJobs,
   }));
-  ipcMain.on("netcatty:ai:catty:cancel", (_event, payload = {}) => {
+  ipcMain.on("netcatty:ai:exec:cancel", (_event, payload = {}) => {
     cancelPtyExecsForSession(activePtyExecs, payload.chatSessionId);
     cancelWorkerBackgroundJobsForSession(backgroundJobs, payload.chatSessionId);
   });

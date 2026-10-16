@@ -15,7 +15,7 @@ function createSession(
   return {
     id,
     title: id,
-    agentId: "catty",
+    agentId: "codex",
     scope,
     messages: [],
     createdAt: updatedAt,

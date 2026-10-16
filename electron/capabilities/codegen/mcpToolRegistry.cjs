@@ -78,7 +78,7 @@ function formatTerminalExecuteResult(result) {
   return parts.join("\n");
 }
 
-// Align with Catty executor wording when a command ran but produced no text.
+// Align with catalog executor wording when a command ran but produced no text.
 const TERMINAL_EXECUTE_NO_OUTPUT_TEXT = "Command completed (no output)";
 
 /**

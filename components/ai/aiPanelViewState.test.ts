@@ -22,7 +22,7 @@ function createSession(id: string): AISession {
     messages: [],
     createdAt: 1,
     updatedAt: 1,
-    agentId: "catty",
+    agentId: "codex",
     scope: {
       type: "terminal",
       targetId: "terminal-1",

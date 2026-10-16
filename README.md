@@ -44,11 +44,11 @@
 
 ---
 
-<a name="catty-agent"></a>
-# 🔥 Catty Agent — Your IT Ops AI Partner
+<a name="ai-agents"></a>
+# 🔥 AI Agents — Your IT Ops AI Partner
 
-> 🚀 **Boost your IT ops daily work with AI power.** Catty Agent is the built-in AI assistant that understands your servers, executes commands, and handles complex multi-host operations — all through natural conversation.
-### 🔥 What can Catty Agent do?
+> 🚀 **Boost your IT ops daily work with AI power.** Intelligent Terminal brings your own CLI/SDK agents (Codex, Claude Code, GitHub Copilot CLI, Cursor, CodeBuddy, OpenCode, and more) into the terminal so they understand your servers, execute commands, and handle complex multi-host operations — all through natural conversation.
+### 🔥 What can the agents do?
 
 - 🚀 **Natural language server management** — just tell it what you need, no more memorizing commands
 - 🔥 **Real-time server diagnostics** — check status, inspect logs, monitor resources through conversation
@@ -60,13 +60,13 @@
 
 #### 🔥 Single Host — Intelligent Server Diagnostics
 
-Ask Catty Agent to check a server's health, and it runs the right commands, analyzes the output, and gives you a clear summary — all in seconds.
+Ask an agent to check a server's health, and it runs the right commands, analyzes the output, and gives you a clear summary — all in seconds.
 
 <img width="1510" height="870" alt="ai-single" src="https://github.com/user-attachments/assets/d3f34e53-8476-4fab-8634-394b931d1ff1" />
 
 #### 🚀 Multi-Host — Docker Swarm Cluster Setup
 
-Watch Catty Agent orchestrate a Docker Swarm cluster across two servers in one conversation. It handles the init, token exchange, and node joining — you just tell it what you want.
+Watch an agent orchestrate a Docker Swarm cluster across two servers in one conversation. It handles the init, token exchange, and node joining — you just tell it what you want.
 
 <img width="1515" height="870" alt="ai-muti" src="https://github.com/user-attachments/assets/ca166fc5-65d9-4d7b-951a-962c2ef230d8" />
 
@@ -74,7 +74,7 @@ Watch Catty Agent orchestrate a Docker Swarm cluster across two servers in one c
 
 # Contents <!-- omit in toc -->
 
-- [🔥 Catty Agent — AI Partner](#catty-agent)
+- [🔥 AI Agents — Your AI Partner](#ai-agents)
 - [What is Intelligent Terminal](#what-is-intelligent-terminal)
 - [Why Intelligent Terminal](#why-intelligent-terminal)
 - [Features](#features)

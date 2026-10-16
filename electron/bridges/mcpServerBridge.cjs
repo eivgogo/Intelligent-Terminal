@@ -800,7 +800,7 @@ function updateSessionMetadata(sessionList, chatSessionId) {
 /**
  * Merge session metadata into an existing chat scope without dropping
  * previously known sessions. Used for the app-wide External MCP scope so a
- * single Catty sidebar push cannot shrink the exposed host set.
+ * single in-app agent push cannot shrink the exposed host set.
  */
 function mergeSessionMetadata(sessionList, chatSessionId) {
   if (!chatSessionId || !Array.isArray(sessionList)) return { ok: false, count: 0 };
@@ -1759,7 +1759,7 @@ function cancelWorkerBackgroundJobsForSession(chatSessionId) {
     }
   }
   try {
-    terminalWorkerManager?.send?.("netcatty:ai:catty:cancel", { chatSessionId }, {});
+    terminalWorkerManager?.send?.("netcatty:ai:exec:cancel", { chatSessionId }, {});
   } catch {
     // Worker may already be gone while cancelling a torn-down chat/session.
   }

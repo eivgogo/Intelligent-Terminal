@@ -1692,14 +1692,11 @@ function createPreloadApi(ctx) {
   aiExec: async (sessionId, command, chatSessionId) => {
     return ipcRenderer.invoke("netcatty:ai:exec", { sessionId, command, chatSessionId });
   },
-  aiCattyCancelExec: async (chatSessionId) => {
-    return ipcRenderer.invoke("netcatty:ai:catty:cancel", { chatSessionId });
+  aiCancelExec: async (chatSessionId) => {
+    return ipcRenderer.invoke("netcatty:ai:exec:cancel", { chatSessionId });
   },
   aiSetChatSessionCancelled: async (chatSessionId, cancelled = true) => {
     return ipcRenderer.invoke("netcatty:ai:chat-session:set-cancelled", { chatSessionId, cancelled });
-  },
-  aiCapability: async (rpcMethod, params, chatSessionId) => {
-    return ipcRenderer.invoke("netcatty:ai:capability", { rpcMethod, params, chatSessionId });
   },
   aiDiscoverAgents: async (options) => {
     return ipcRenderer.invoke("netcatty:ai:agents:discover", options);

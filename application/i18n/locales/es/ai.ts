@@ -294,7 +294,6 @@ export const esAiMessages: Messages = {
   // AI Default Agent
   'ai.defaultAgent': 'Agente predeterminado',
   'ai.defaultAgent.description': 'Agente que se usará al iniciar una nueva sesión de IA',
-  'ai.defaultAgent.catty': 'Catty (Integrado)',
   'ai.toolAccess.title': 'Acceso a herramientas',
   'ai.toolAccess.mode': 'Modo de acceso de Netcatty',
   'ai.toolAccess.description': 'Elige cómo acceden los agentes externos a las sesiones de Netcatty. MCP expone el servidor integrado, mientras que Habilidades + CLI apunta a los agentes hacia las habilidades locales de Netcatty y los comandos de CLI.',
@@ -452,7 +451,7 @@ export const esAiMessages: Messages = {
   'ai.chat.permAutoDesc': 'Ejecutar libremente',
   'ai.chat.emptyHint': 'Pregunta sobre tus servidores, ejecuta comandos u obtén ayuda con las configuraciones.',
   'ai.chat.placeholder': 'Mensaje a {agent} — @ para incluir contexto, / para comandos',
-  'ai.chat.placeholderDefault': 'Mensaje al agente Catty...',
+  'ai.chat.placeholderDefault': 'Mensaje al agente...',
   'ai.chat.noModel': 'Sin modelo',
   'ai.chat.noProviderModel': 'No hay modelo predeterminado: define uno en Configuración → IA → Proveedores.',
   'ai.chat.selectProvider': 'Seleccionar proveedor',

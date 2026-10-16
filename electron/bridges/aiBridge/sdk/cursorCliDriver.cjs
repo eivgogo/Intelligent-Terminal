@@ -3,7 +3,7 @@
 /**
  * Cursor Agent CLI turn runner — subscription / login session path.
  *
- * Spawns `cursor-agent` in print/stream-json mode so Catty can use the local
+ * Spawns `cursor-agent` in print/stream-json mode so the agent can use the local
  * CLI login quota without CURSOR_API_KEY.
  */
 const { spawn } = require("node:child_process");

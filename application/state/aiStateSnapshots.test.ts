@@ -6,7 +6,7 @@ import {
   cleanupSdkAgentSessions,
 } from './aiStateSnapshots';
 
-test('orphan cleanup keeps durable Catty output while explicit deletion removes it', async () => {
+test('orphan cleanup keeps durable agent output while explicit deletion removes it', async () => {
   const sdkCleanups: string[] = [];
   const outputCleanups: string[] = [];
   const terminalOutputCleanups: string[] = [];

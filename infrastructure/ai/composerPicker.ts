@@ -1,9 +1,6 @@
 import type { AgentModelPreset, ProviderConfig } from './types';
 import { formatThinkingLabel, PROVIDER_PRESETS, resolveAgentModelSelection } from './types';
 
-export const CATTY_REASONING_LEVELS = ['off', 'low', 'medium', 'high'] as const;
-export type CattyReasoningLevel = (typeof CATTY_REASONING_LEVELS)[number];
-
 export const CLAUDE_REASONING_LEVELS = ['low', 'medium', 'high', 'max'] as const;
 
 export const COMPOSER_RECENT_MODEL_LIMIT = 6;
@@ -24,16 +21,6 @@ export interface ComposerModelPrefEntry {
 export interface ComposerModelPrefs {
   recent: ComposerModelPrefEntry[];
   pinned: ComposerModelPrefEntry[];
-}
-
-export function isCattyReasoningLevel(value: string | null | undefined): value is CattyReasoningLevel {
-  return CATTY_REASONING_LEVELS.some((level) => level === value);
-}
-
-export function normalizeCattyReasoningLevel(
-  value: string | null | undefined,
-): CattyReasoningLevel {
-  return isCattyReasoningLevel(value) ? value : 'off';
 }
 
 export function composerModelPrefKey(entry: ComposerModelPrefEntry): string {

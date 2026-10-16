@@ -44,12 +44,12 @@
 
 ---
 
-<a name="catty-agent"></a>
-# 🔥 Catty Agent — あなたの IT 運用 AI パートナー
+<a name="ai-agents"></a>
+# 🔥 AI Agents — あなたの IT 運用 AI パートナー
 
-> 🚀 **AI で日常の IT 運用作業を加速。** Catty Agent はサーバー環境を理解し、コマンドを実行し、自然な会話で複数ホストの複雑な操作をこなす内蔵 AI アシスタントです。
+> 🚀 **AI で日常の IT 運用作業を加速。** Intelligent Terminal は、あなた自身の CLI/SDK エージェント（Codex、Claude Code、GitHub Copilot CLI、Cursor、CodeBuddy、OpenCode など）をターミナルに統合し、サーバー環境を理解してコマンドを実行し、自然な会話で複数ホストの複雑な操作をこなします。
 
-### 🔥 Catty Agent にできること
+### 🔥 エージェントにできること
 
 - 🚀 **自然言語でサーバー管理** — コマンドを暗記せず、必要なことを話しかけるだけ
 - 🔥 **リアルタイムサーバー診断** — 会話を通じてステータス確認、ログ調査、リソース監視
@@ -61,13 +61,13 @@
 
 #### 🔥 シングルホスト — インテリジェントなサーバー診断
 
-Catty Agent にサーバーの健全性チェックを依頼すると、適切なコマンドを実行し、出力を分析して数秒で明確なサマリーを提示します。
+エージェントにサーバーの健全性チェックを依頼すると、適切なコマンドを実行し、出力を分析して数秒で明確なサマリーを提示します。
 
 <img width="1510" height="870" alt="ai-single" src="https://github.com/user-attachments/assets/d3f34e53-8476-4fab-8634-394b931d1ff1" />
 
 #### 🚀 マルチホスト — Docker Swarm クラスターのセットアップ
 
-1 つの会話で 2 台のサーバーをまたいで Docker Swarm クラスターをオーケストレーションする Catty Agent をご覧ください。初期化、トークン交換、ノード参加まですべてこなします — あなたは望む結果を伝えるだけ。
+1 つの会話で 2 台のサーバーをまたいで Docker Swarm クラスターをオーケストレーションするエージェントをご覧ください。初期化、トークン交換、ノード参加まですべてこなします — あなたは望む結果を伝えるだけ。
 
 <img width="1515" height="870" alt="ai-muti" src="https://github.com/user-attachments/assets/ca166fc5-65d9-4d7b-951a-962c2ef230d8" />
 
@@ -75,7 +75,7 @@ Catty Agent にサーバーの健全性チェックを依頼すると、適切�
 
 # 目次 <!-- omit in toc -->
 
-- [🔥 Catty Agent — AI パートナー](#catty-agent)
+- [🔥 AI Agents — AI パートナー](#ai-agents)
 - [Intelligent Terminal とは](#intelligent-terminal-とは)
 - [なぜ Intelligent Terminal](#なぜ-intelligent-terminal)
 - [機能](#機能)

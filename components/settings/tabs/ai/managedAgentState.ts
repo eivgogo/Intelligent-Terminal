@@ -61,7 +61,7 @@ export function buildManagedAgentState(
             cursorAuthMode: existingManaged.cursorAuthMode === "cli-login" ? "cli-login" : "api-key",
           },
         ],
-        defaultAgentId: existingManaged.id === defaultAgentId ? "catty" : defaultAgentId,
+        defaultAgentId: existingManaged.id === defaultAgentId ? "" : defaultAgentId,
       };
     }
     if (agentKey === "codebuddy") {
@@ -85,14 +85,14 @@ export function buildManagedAgentState(
               available: false,
             },
           ],
-          defaultAgentId: existingManaged.id === defaultAgentId ? "catty" : defaultAgentId,
+          defaultAgentId: existingManaged.id === defaultAgentId ? "" : defaultAgentId,
         };
       }
     }
     return {
       agents: otherAgents,
       defaultAgentId: managedAgents.some((agent) => agent.id === defaultAgentId)
-        ? "catty"
+        ? ""
         : defaultAgentId,
     };
   }

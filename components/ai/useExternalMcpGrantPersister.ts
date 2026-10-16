@@ -4,7 +4,7 @@ import { useAIPermissionGrantsState } from '../../application/state/useAIPermiss
 import { registerGrantPersister } from '../../infrastructure/ai/shared/approvalGate';
 
 /**
- * Keep Always Allow grants writable even when Catty AI panel is not mounted
+ * Keep Always Allow grants writable even when AI panel is not mounted
  * (External MCP approvals in main/settings windows).
  */
 export function useExternalMcpGrantPersister(): void {

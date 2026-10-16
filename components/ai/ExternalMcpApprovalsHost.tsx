@@ -1,7 +1,7 @@
 /**
  * Always-mounted host for External MCP approval cards.
  * Confirm-mode write tools from Codex/Claude/Cursor/Grok must be approvable
- * even when the Catty AI side panel has never been opened.
+ * even when the AI side panel has never been opened.
  */
 
 import React, { useCallback, useEffect, useState } from 'react';

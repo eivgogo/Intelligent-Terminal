@@ -3,10 +3,42 @@ import test from 'node:test';
 import { AgentRuntime } from './agentRuntime';
 import { TraceStore } from './traceStore';
 import { SessionStateStore } from './sessionState';
-import type { TurnDriver, TurnDriverContext, TurnInput } from './turnDrivers/types';
+import type { TurnDriver, TurnDriverContext, TurnInput, ExternalTurnInput } from './turnDrivers/types';
+
+function externalTurnInput(overrides: Partial<ExternalTurnInput> & { chatSessionId: string }): ExternalTurnInput {
+  return {
+    backend: 'external-sdk',
+    assistantMsgId: 'assistant-1',
+    userText: 'hi',
+    signal: new AbortController().signal,
+    agentConfig: {
+      id: 'discovered_codex',
+      name: 'Codex CLI',
+      command: 'codex',
+      enabled: true,
+      args: ['{prompt}'],
+      sdkBackend: 'codex',
+    } as unknown as ExternalTurnInput['agentConfig'],
+    attachedImages: [],
+    context: {
+      terminalSessions: [],
+      providers: [],
+      toolIntegrationMode: 'mcp',
+      permissionMode: 'confirm',
+    },
+    ui: {
+      addMessageToSession: () => {},
+      updateLastMessage: () => {},
+      updateMessageById: () => {},
+      reportStreamError: () => {},
+      setStreamingForScope: () => {},
+    },
+    ...overrides,
+  };
+}
 
 class MockTurnDriver implements TurnDriver {
-  readonly backend = 'catty' as const;
+  readonly backend = 'external-sdk' as const;
   readonly runs: TurnInput[] = [];
 
   async run(input: TurnInput, ctx: TurnDriverContext): Promise<void> {
@@ -15,7 +47,7 @@ class MockTurnDriver implements TurnDriver {
       id: 'model-delta-1',
       type: 'model_delta',
       text: 'hello',
-    } as import('./types').AgentEvent);
+    } as unknown as import('./types').AgentEvent);
     if (input.signal.aborted) return;
   }
 
@@ -31,7 +63,7 @@ test('AgentRuntime clearChatSession releases its trace history', () => {
     sessionId: 'chat-clear',
     turnId: 'turn-clear',
     startedAt: Date.now(),
-  } as import('./types').AgentEvent);
+  } as unknown as import('./types').AgentEvent);
 
   runtime.clearChatSession('chat-clear');
   assert.equal(traceStore.getEvents('chat-clear').length, 0);
@@ -46,31 +78,10 @@ test('AgentRuntime runTurn emits turn lifecycle and records trace', async () => 
   runtime.subscribe(event => events.push(event.type));
 
   const controller = new AbortController();
-  const result = await runtime.runTurn({
-    backend: 'catty',
+  const result = await runtime.runTurn(externalTurnInput({
     chatSessionId: 'chat-1',
-    sendScopeKey: 'chat-1',
-    userText: 'hi',
     signal: controller.signal,
-    currentSession: undefined,
-    assistantMsgId: 'assistant-1',
-    context: {
-      activeProvider: undefined,
-      activeModelId: '',
-      scopeType: 'terminal',
-      globalPermissionMode: 'confirm',
-      terminalSessions: [],
-      autoTitleSession: () => {},
-    },
-    maxIterations: 5,
-    ui: {
-      addMessageToSession: () => {},
-      updateLastMessage: () => {},
-      updateMessageById: () => {},
-      reportStreamError: () => {},
-      setStreamingForScope: () => {},
-    },
-  });
+  }));
 
   assert.equal(result.reason, 'completed');
   assert.equal(driver.runs.length, 1);
@@ -80,7 +91,7 @@ test('AgentRuntime runTurn emits turn lifecycle and records trace', async () => 
 
 test('AgentRuntime records session state from tool call and result events', async () => {
   class ToolTurnDriver implements TurnDriver {
-    readonly backend = 'catty' as const;
+    readonly backend = 'external-sdk' as const;
     async run(_input: TurnInput, ctx: TurnDriverContext): Promise<void> {
       ctx.emit({
         id: 'secret-call',
@@ -88,56 +99,34 @@ test('AgentRuntime records session state from tool call and result events', asyn
         toolCallId: 'call-secret',
         toolName: 'terminal_execute',
         args: { sessionId: 'sess-1', command: 'curl -H "Authorization: Bearer secret_token_123456" https://example.test --password swordfish' },
-      } as import('./types').AgentEvent);
+      } as unknown as import('./types').AgentEvent);
       ctx.emit({
         id: 'tool-call-1',
         type: 'tool_call',
         toolCallId: 'call-1',
         toolName: 'terminal_execute',
         args: { sessionId: 'sess-1', command: 'uptime' },
-      } as import('./types').AgentEvent);
+      } as unknown as import('./types').AgentEvent);
       ctx.emit({
         id: 'tool-result-1',
         type: 'tool_result',
         toolCallId: 'call-1',
         result: 'ok',
         isError: false,
-      } as import('./types').AgentEvent);
+      } as unknown as import('./types').AgentEvent);
     }
     abort(): void {}
   }
 
   const sessionStateStore = new SessionStateStore();
   const runtime = new AgentRuntime({ drivers: [new ToolTurnDriver()], sessionStateStore });
-  await runtime.runTurn({
-    backend: 'catty',
+  await runtime.runTurn(externalTurnInput({
     chatSessionId: 'chat-tool',
-    sendScopeKey: 'chat-tool',
     userText: 'check uptime',
-    signal: new AbortController().signal,
-    currentSession: undefined,
-    assistantMsgId: 'assistant-1',
-    context: {
-      activeProvider: undefined,
-      activeModelId: '',
-      scopeType: 'terminal',
-      globalPermissionMode: 'confirm',
-      terminalSessions: [],
-      autoTitleSession: () => {},
-    },
-    maxIterations: 5,
-    ui: {
-      addMessageToSession: () => {},
-      updateLastMessage: () => {},
-      updateMessageById: () => {},
-      reportStreamError: () => {},
-      setStreamingForScope: () => {},
-    },
-  });
+  }));
 
   const text = sessionStateStore.toReinjectionText('chat-tool');
   assert.ok(text?.includes('uptime'));
-  assert.ok(text?.includes('check uptime'));
 });
 
 test('AgentRuntime keeps terminal output when session close reports failure', async () => {
@@ -150,14 +139,14 @@ test('AgentRuntime keeps terminal output when session close reports failure', as
         toolCallId: 'close-1',
         toolName: 'session_close',
         args: { sessionId: 'terminal-still-open' },
-      } as import('./types').AgentEvent);
+      } as unknown as import('./types').AgentEvent);
       ctx.emit({
         id: 'close-result',
         type: 'tool_result',
         toolCallId: 'close-1',
         result: JSON.stringify({ ok: false, error: 'close rejected' }),
         isError: false,
-      } as import('./types').AgentEvent);
+      } as unknown as import('./types').AgentEvent);
     }
     abort(): void {}
   }
@@ -170,38 +159,17 @@ test('AgentRuntime keeps terminal output when session close reports failure', as
     sessionId: 'terminal-still-open',
     content: 'keep me',
   });
-  await runtime.runTurn({
-    backend: 'external-sdk',
+  await runtime.runTurn(externalTurnInput({
     chatSessionId: 'chat-close-failed',
-    sendScopeKey: 'chat-close-failed',
     userText: 'close it',
-    signal: new AbortController().signal,
-    currentSession: undefined,
-    assistantMsgId: 'assistant-close-failed',
-    context: {
-      activeProvider: undefined,
-      activeModelId: '',
-      scopeType: 'terminal',
-      globalPermissionMode: 'confirm',
-      terminalSessions: [],
-      autoTitleSession: () => {},
-    },
-    maxIterations: 5,
-    ui: {
-      addMessageToSession: () => {},
-      updateLastMessage: () => {},
-      updateMessageById: () => {},
-      reportStreamError: () => {},
-      setStreamingForScope: () => {},
-    },
-  });
+  }));
 
   assert.ok(store.get(handle.id, 'chat-close-failed'));
 });
 
 test('AgentRuntime redacts secrets before trace and listener fan-out', async () => {
   class SecretDriver implements TurnDriver {
-    readonly backend = 'catty' as const;
+    readonly backend = 'external-sdk' as const;
     async run(_input: TurnInput, ctx: TurnDriverContext): Promise<void> {
       ctx.emit({
         id: 'secret-result',
@@ -209,7 +177,7 @@ test('AgentRuntime redacts secrets before trace and listener fan-out', async () 
         toolCallId: 'call-secret',
         toolName: 'terminal_execute',
         result: 'API_TOKEN=tok_live_1234567890',
-      } as import('./types').AgentEvent);
+      } as unknown as import('./types').AgentEvent);
     }
   }
   const traceStore = new TraceStore();
@@ -218,27 +186,10 @@ test('AgentRuntime redacts secrets before trace and listener fan-out', async () 
   runtime.subscribe(event => {
     if (event.type === 'tool_result') heard.push(event.result);
   });
-  await runtime.runTurn({
-    backend: 'catty',
+  await runtime.runTurn(externalTurnInput({
     chatSessionId: 'chat-secret',
-    sendScopeKey: 'chat-secret',
     userText: 'check',
-    signal: new AbortController().signal,
-    assistantMsgId: 'assistant-1',
-    context: {
-      activeProvider: undefined,
-      activeModelId: '',
-      scopeType: 'terminal',
-      globalPermissionMode: 'confirm',
-      terminalSessions: [],
-      autoTitleSession: () => {},
-    },
-    maxIterations: 1,
-    ui: {
-      addMessageToSession: () => {}, updateLastMessage: () => {}, updateMessageById: () => {},
-      reportStreamError: () => {}, setStreamingForScope: () => {},
-    },
-  });
+  }));
 
   assert.doesNotMatch(JSON.stringify(traceStore.exportTrace('chat-secret')), /tok_live/);
   assert.doesNotMatch(JSON.stringify(traceStore.exportTrace('chat-secret')), /secret_token|swordfish/);
@@ -254,7 +205,7 @@ test('AgentRuntime stopTurn delegates to active driver', async () => {
 test('AgentRuntime delegates steering only while a compatible turn is active', async () => {
   let releaseRun: (() => void) | undefined;
   class SteeringDriver implements TurnDriver {
-    readonly backend = 'catty' as const;
+    readonly backend = 'external-sdk' as const;
     async run(): Promise<void> {
       await new Promise<void>(resolve => { releaseRun = resolve; });
     }
@@ -263,31 +214,10 @@ test('AgentRuntime delegates steering only while a compatible turn is active', a
     }
   }
   const runtime = new AgentRuntime({ drivers: [new SteeringDriver()] });
-  const run = runtime.runTurn({
-    backend: 'catty',
+  const run = runtime.runTurn(externalTurnInput({
     chatSessionId: 'chat-steer',
-    sendScopeKey: 'chat-steer',
     userText: 'initial',
-    signal: new AbortController().signal,
-    currentSession: undefined,
-    assistantMsgId: 'assistant-1',
-    context: {
-      activeProvider: undefined,
-      activeModelId: '',
-      scopeType: 'terminal',
-      globalPermissionMode: 'confirm',
-      terminalSessions: [],
-      autoTitleSession: () => {},
-    },
-    maxIterations: 5,
-    ui: {
-      addMessageToSession: () => {},
-      updateLastMessage: () => {},
-      updateMessageById: () => {},
-      reportStreamError: () => {},
-      setStreamingForScope: () => {},
-    },
-  });
+  }));
   await new Promise<void>(resolve => setImmediate(resolve));
 
   assert.deepEqual(await runtime.steerTurn({
@@ -316,7 +246,7 @@ test('AgentRuntime runTurn rejects a concurrent start for the same session', asy
   });
 
   class BusyMockDriver implements TurnDriver {
-    readonly backend = 'catty' as const;
+    readonly backend = 'external-sdk' as const;
     readonly runs: TurnInput[] = [];
 
     async run(input: TurnInput): Promise<void> {
@@ -329,42 +259,17 @@ test('AgentRuntime runTurn rejects a concurrent start for the same session', asy
 
   const driver = new BusyMockDriver();
   const runtime = new AgentRuntime({ drivers: [driver], traceStore: new TraceStore() });
-  const ui = {
-    addMessageToSession: () => {},
-    updateLastMessage: () => {},
-    updateMessageById: () => {},
-    reportStreamError: () => {},
-    setStreamingForScope: () => {},
-  };
 
-  const first = runtime.runTurn({
-    backend: 'catty',
+  const first = runtime.runTurn(externalTurnInput({
     chatSessionId: 'chat-busy',
-    sendScopeKey: 'scope',
     userText: 'one',
-    signal: new AbortController().signal,
-    currentSession: undefined,
-    assistantMsgId: 'a1',
-    context: {} as never,
-    maxIterations: 1,
-    bridge: null,
-    ui,
-  });
+  }));
 
   await assert.rejects(
-    () => runtime.runTurn({
-      backend: 'catty',
+    () => runtime.runTurn(externalTurnInput({
       chatSessionId: 'chat-busy',
-      sendScopeKey: 'scope',
       userText: 'two',
-      signal: new AbortController().signal,
-      currentSession: undefined,
-      assistantMsgId: 'a2',
-      context: {} as never,
-      maxIterations: 1,
-      bridge: null,
-      ui,
-    }),
+    })),
     (err: unknown) => err instanceof Error
       && (err as Error & { code?: string }).code === 'AGENT_TURN_BUSY',
   );

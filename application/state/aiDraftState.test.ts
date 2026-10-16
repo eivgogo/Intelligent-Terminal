@@ -23,7 +23,7 @@ import {
 } from "./aiDraftState.ts";
 
 test("draftsByScopeEqualIgnoringComposerText ignores typing in the active scope", () => {
-  const base = createEmptyDraft("catty");
+  const base = createEmptyDraft("codex");
   const prev = { "terminal:1": { ...base, text: "" } };
   const next = { "terminal:1": { ...base, text: "你好", updatedAt: base.updatedAt + 1 } };
   assert.equal(draftsByScopeEqualIgnoringComposerText(prev, next, "terminal:1"), true);
@@ -57,7 +57,7 @@ test("draftsByScopeEqualIgnoringComposerText ignores typing in the active scope"
 });
 
 test("first composer draft is treated as text-only identity churn", () => {
-  const empty = createEmptyDraft("catty");
+  const empty = createEmptyDraft("codex");
   const created = { ...empty, text: "你" };
   assert.equal(draftsByScopeEqualIgnoringAllComposerText({}, { "terminal:1": empty }), false);
   assert.equal(draftsByScopeEqualIgnoringAllComposerText({}, { "terminal:1": created }), true);
@@ -89,7 +89,7 @@ test("first composer draft is treated as text-only identity churn", () => {
 });
 
 test("draftsByScopeEqualIgnoringAllComposerText ignores typing in every scope", () => {
-  const base = createEmptyDraft("catty");
+  const base = createEmptyDraft("codex");
   const prev = {
     "terminal:1": { ...base, text: "a" },
     "terminal:2": { ...base, text: "b", attachments: [] },
@@ -109,9 +109,9 @@ test("draftsByScopeEqualIgnoringAllComposerText ignores typing in every scope", 
 });
 
 test("updateDraftForScope keeps the original map when the updater is a no-op", () => {
-  const draft = createEmptyDraft("catty");
+  const draft = createEmptyDraft("codex");
   const prev = { "terminal:1": draft };
-  const next = updateDraftForScope(prev, "terminal:1", "catty", (current) => current);
+  const next = updateDraftForScope(prev, "terminal:1", "codex", (current) => current);
   assert.equal(next, prev);
 });
 

@@ -1,4 +1,4 @@
-import type { NetcattyBridge } from './cattyAgent/executor';
+import type { NetcattyBridge } from './bridgeTypes';
 import type {
   OpenAIChatAssistantFields,
   ProviderContinuationOptions,
@@ -162,7 +162,7 @@ export interface PanelBridge extends NetcattyBridge {
     agentCommand?: string,
     codexRuntime?: 'sdk' | 'app-server',
   ) => Promise<{ ok: boolean; models?: Array<{ id: string; name: string; description?: string; thinkingLevels?: string[]; defaultThinkingLevel?: string }>; currentModelId?: string | null; warning?: string; error?: string }>;
-  aiCattyCancelExec?(chatSessionId: string): Promise<unknown>;
+  aiCancelExec?(chatSessionId: string): Promise<unknown>;
   aiSetChatSessionCancelled?(chatSessionId: string, cancelled?: boolean): Promise<{ ok: boolean; error?: string }>;
   aiMcpSyncPermissionGrants?(grants: Array<Record<string, unknown>>): Promise<{ ok: boolean; count?: number; error?: string }>;
   aiSdkAgentCancel?: (requestId: string, chatSessionId?: string) => Promise<{ ok: boolean; error?: string }>;

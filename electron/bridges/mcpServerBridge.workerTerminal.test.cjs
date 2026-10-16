@@ -545,7 +545,7 @@ test("MCP/Catty chat cancellation forwards to worker background jobs", async () 
   });
   assert.deepEqual(sends, [
     {
-      channel: "netcatty:ai:catty:cancel",
+      channel: "netcatty:ai:exec:cancel",
       payload: { chatSessionId: "chat-1" },
       options: {},
     },

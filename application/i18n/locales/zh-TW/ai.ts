@@ -294,7 +294,6 @@ export const zhTWAiMessages: Messages = {
   // AI Default Agent
   'ai.defaultAgent': '預設 Agent',
   'ai.defaultAgent.description': '建立新 AI 工作階段時使用的 Agent',
-  'ai.defaultAgent.catty': 'Catty（內建）',
   'ai.toolAccess.title': '工具介接',
   'ai.toolAccess.mode': 'Netcatty 介接模式',
   'ai.toolAccess.description': '選擇外部 Agent 存取 Netcatty 工作階段的方式。MCP 會公開內建伺服器，Skills + CLI 會引導 Agent 讀取本機 Skill 並呼叫 Netcatty CLI。',
@@ -451,7 +450,7 @@ export const zhTWAiMessages: Messages = {
   'ai.chat.permAutoDesc': '自由執行',
   'ai.chat.emptyHint': '詢問伺服器相關問題、執行指令或取得設定協助。',
   'ai.chat.placeholder': '向 {agent} 傳送訊息 — @ 引用上下文，/ 使用指令',
-  'ai.chat.placeholderDefault': '向 Catty Agent 傳送訊息...',
+  'ai.chat.placeholderDefault': '向 Agent 傳送訊息...',
   'ai.chat.noModel': '未選擇模型',
   'ai.chat.noProviderModel': '未設定預設模型——前往 設定 → AI → 供應商 設定。',
   'ai.chat.selectProvider': '選擇供應商',

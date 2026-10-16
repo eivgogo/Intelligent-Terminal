@@ -37,7 +37,7 @@ test('buildManagedAgentState removes stale managed agents when path detection fa
     state.agents.map((agent) => agent.id),
     ['custom-agent'],
   );
-  assert.equal(state.defaultAgentId, 'catty');
+  assert.equal(state.defaultAgentId, '');
 });
 
 test('buildManagedAgentState keeps unrelated defaults when removing stale managed agents', () => {
@@ -74,7 +74,7 @@ test('buildManagedAgentState keeps unrelated defaults when removing stale manage
 test('buildManagedAgentState stores the system Claude executable for SDK runs', () => {
   const state = buildManagedAgentState(
     [],
-    'catty',
+    '',
     'claude',
     { path: '/opt/homebrew/bin/claude', version: '2.1.145 (Claude Code)', available: true },
   );
@@ -90,13 +90,13 @@ test('buildManagedAgentState stores the system Claude executable for SDK runs', 
 test('buildManagedAgentState stores SDK backend keys for discovered managed agents', () => {
   const codexState = buildManagedAgentState(
     [],
-    'catty',
+    '',
     'codex',
     { path: '/opt/homebrew/bin/codex', version: '1.0.0', available: true },
   );
   const copilotState = buildManagedAgentState(
     [],
-    'catty',
+    '',
     'copilot',
     { path: '/opt/homebrew/bin/copilot', version: '1.0.0', available: true },
   );
@@ -149,7 +149,7 @@ test('buildManagedAgentState preserves Grok runtime across path refreshes', () =
 test('getInitialManagedAgentPaths ignores auto-detected command paths', () => {
   const state = buildManagedAgentState(
     [],
-    'catty',
+    '',
     'codex',
     { path: '/opt/homebrew/bin/codex', version: '1.0.0', available: true },
     'auto',
@@ -162,7 +162,7 @@ test('getInitialManagedAgentPaths ignores auto-detected command paths', () => {
 test('getInitialManagedAgentPaths keeps manual and legacy command paths', () => {
   const manualState = buildManagedAgentState(
     [],
-    'catty',
+    '',
     'codex',
     { path: '/opt/homebrew/bin/codex', version: '1.0.0', available: true },
     'manual',
@@ -182,7 +182,7 @@ test('getInitialManagedAgentPaths keeps manual and legacy command paths', () => 
 test('buildManagedAgentState stores SDK backend key for discovered Cursor', () => {
   const state = buildManagedAgentState(
     [],
-    'catty',
+    '',
     'cursor',
     { path: 'cursor', version: 'Cursor SDK 1.0.18', available: true },
   );
@@ -218,7 +218,7 @@ test('buildManagedAgentState preserves a saved Cursor API key when SDK is not re
   // Keep enabled so a later mode/path that becomes available is not sticky-disabled.
   assert.equal(state.agents[0].enabled, true);
   assert.equal(state.agents[0].available, false);
-  assert.equal(state.defaultAgentId, 'catty');
+  assert.equal(state.defaultAgentId, '');
 });
 
 test('buildManagedAgentState preserves enabled when CLI login probe is temporarily unavailable', () => {
@@ -257,7 +257,7 @@ test('buildManagedAgentState preserves enabled when CLI login probe is temporari
   // When CLI login returns, mode-aware available becomes true and enabled stays on.
   const recovered = buildManagedAgentState(
     unavailable.agents,
-    'catty',
+    '',
     'cursor',
     {
       path: '/bin/cursor-agent',
@@ -315,7 +315,7 @@ test('buildManagedAgentState keeps API key when Cursor stays on CLI login mode',
 test('buildManagedAgentState stores CODEBUDDY_CODE_PATH for codebuddy', () => {
   const state = buildManagedAgentState(
     [],
-    'catty',
+    '',
     'codebuddy',
     { path: '/opt/homebrew/bin/codebuddy', version: '0.1.0', available: true },
   );
@@ -331,7 +331,7 @@ test('buildManagedAgentState stores CODEBUDDY_CODE_PATH for codebuddy', () => {
 test('buildManagedAgentState stores OPENCODE_BIN for opencode', () => {
   const state = buildManagedAgentState(
     [],
-    'catty',
+    '',
     'opencode',
     { path: '/opt/homebrew/bin/opencode', version: '1.0.0', available: true },
   );
@@ -368,7 +368,7 @@ test('buildManagedAgentState preserves disabled CodeBuddy config when path detec
     { path: null, version: null, available: false },
   );
 
-  assert.equal(state.defaultAgentId, 'catty');
+  assert.equal(state.defaultAgentId, '');
   assert.equal(state.agents.length, 1);
   assert.equal(state.agents[0].id, 'discovered_codebuddy');
   assert.equal(state.agents[0].enabled, false);
@@ -383,7 +383,7 @@ test('buildManagedAgentState enables preconfigured CodeBuddy when path detection
 
   const state = buildManagedAgentState(
     agents,
-    'catty',
+    '',
     'codebuddy',
     { path: '/opt/homebrew/bin/codebuddy', version: '0.1.0', available: true },
   );
@@ -431,7 +431,7 @@ test('buildManagedAgentState preserves advanced CodeBuddy config when detection 
     { path: null, version: null, available: false },
   );
 
-  assert.equal(state.defaultAgentId, 'catty');
+  assert.equal(state.defaultAgentId, '');
   assert.equal(state.agents.length, 1);
   assert.equal(state.agents[0].enabled, false);
   assert.equal(state.agents[0].available, false);

@@ -1,5 +1,5 @@
 /* eslint-disable no-undef */
-// Module-level require on purpose: code inside registerCattyExecHandlers
+// Module-level require on purpose: code inside registerAiExecHandlers
 // runs under `with (ctx)` where bare `require` resolves to ctx.require
 // (based in electron/bridges/). Requiring here keeps the path unambiguous.
 const { formatSyntheticEcho } = require("../ai/shellUtils.cjs");
@@ -64,7 +64,7 @@ async function proxyCattyExecToWorker({
   }
 }
 
-function registerCattyExecHandlers(ctx) {
+function registerAiExecHandlers(ctx) {
   with (ctx) {
   ipcMain.handle("netcatty:ai:exec", async (event, { sessionId, command, chatSessionId }) => {
     // Validate IPC sender (Issue #17)
@@ -185,7 +185,7 @@ function registerCattyExecHandlers(ctx) {
                 syntheticEcho: true,
               });
             },
-            // Catty Agent has no terminal_start fallback for long-running
+            // The built-in agent path has no terminal_start fallback for long-running
             // commands, so do NOT enforce a hard wall-clock timeout here.
             // The inactivity timeout still applies, so genuinely hung
             // processes are still terminated.
@@ -235,8 +235,8 @@ function registerCattyExecHandlers(ctx) {
     }
   });
 
-  // Cancel in-flight Catty Agent command executions for a chat session
-  ipcMain.handle("netcatty:ai:catty:cancel", async (event, { chatSessionId }) => {
+  // Cancel in-flight agent command executions for a chat session
+  ipcMain.handle("netcatty:ai:exec:cancel", async (event, { chatSessionId }) => {
     if (!validateSender(event)) {
       return { ok: false, error: "Unauthorized IPC sender" };
     }
@@ -246,7 +246,7 @@ function registerCattyExecHandlers(ctx) {
       mcpServerBridge.cancelWorkerBackgroundJobsForSession(chatSessionId);
     } else {
       try {
-        terminalWorkerManager?.send?.("netcatty:ai:catty:cancel", { chatSessionId }, {
+        terminalWorkerManager?.send?.("netcatty:ai:exec:cancel", { chatSessionId }, {
           webContentsId: event?.sender?.id,
         });
       } catch {
@@ -269,20 +269,7 @@ function registerCattyExecHandlers(ctx) {
       return { ok: false, error: err?.message || String(err) };
     }
   });
-
-  ipcMain.handle("netcatty:ai:capability", async (event, { rpcMethod, params, chatSessionId }) => {
-    if (!validateSender(event)) {
-      return { ok: false, error: "Unauthorized IPC sender" };
-    }
-    if (!rpcMethod || typeof rpcMethod !== "string") {
-      return { ok: false, error: "rpcMethod is required" };
-    }
-    return mcpServerBridge.dispatchBuiltinRpc(rpcMethod, {
-      ...(params || {}),
-      chatSessionId,
-    });
-  });
   }
 }
 
-module.exports = { registerCattyExecHandlers };
+module.exports = { registerAiExecHandlers };

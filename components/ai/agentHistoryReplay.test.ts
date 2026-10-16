@@ -6,7 +6,7 @@ import {
   buildHistoricalToolReplayMaps,
   buildHistoricalToolResultReplayText,
   buildHistoricalUserReplayContent,
-} from "./cattyHistoryReplay.ts";
+} from "./agentHistoryReplay.ts";
 import type { ChatMessage } from "../../infrastructure/ai/types.ts";
 
 test("buildHistoricalUserReplayContent replaces historical image data with a placeholder", () => {

@@ -2,7 +2,7 @@
  * PTY and SSH channel command execution.
  *
  * Provides a unified `execViaPty` that works for both MCP server bridge
- * (tracking in activePtyExecs for cancellation) and Catty Agent
+ * (tracking in activePtyExecs for cancellation) and the in-app agent
  * (stripping MCP markers from output).
  *
  * Also provides `execViaChannel` for SSH exec channel fallback.
@@ -123,7 +123,6 @@ function startPtyJob(ptyStream, command, options) {
   // Hard wall-clock deadline: opt-in via enforceWallTimeout. Used by callers
   // that have a strict tool-call budget (e.g. MCP terminal_execute, where the
   // model can fall back to terminal_start). Default is off so existing
-  // foreground execution paths (Catty Agent) keep their inactivity-based
   // timeout for long-running streaming commands.
   function armWallTimeout() {
     if (!enforceWallTimeout || maxBufferedChars > 0) return;

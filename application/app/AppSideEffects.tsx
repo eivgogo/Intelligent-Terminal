@@ -1302,7 +1302,7 @@ export function AppSideEffects() {
 
   const openHostForVaultAgent = useCallback((host: Host, isExternalMcpCall: boolean) => {
     // Silent sessions only apply to actual external MCP clients (chatSessionId
-    // equals the reserved external-MCP scope). The in-app Catty AI chat's
+    // equals the reserved external-MCP scope). The in-app AI chat's
     // host_open always opens a visible tab, as documented.
     const hidden = isExternalMcpCall && readExternalMcpSilentSessions();
     const sessionId = handleConnectToHost(host, true, hidden);

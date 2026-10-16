@@ -51,7 +51,6 @@ export type {
 export { ToolResultDedup, hashScopeKey, previewToolResult } from './toolResultDedup';
 export type { ToolResultDedupEntry } from './toolResultDedup';
 
-export { cattyTurnDriver } from './turnDrivers/cattyTurnDriver';
 export { externalSdkTurnDriver } from './turnDrivers/externalSdkTurnDriver';
 export type {
   TurnInput,
@@ -59,13 +58,11 @@ export type {
   TurnDriver,
   TurnDriverContext,
   TurnUiCallbacks,
-  CattyTurnInput,
   ExternalTurnInput,
 } from './turnDrivers/types';
 
 export {
   prepareTurnContext,
-  prepareStepContext,
   buildExternalBridgeContext,
   extractLatestUserGoal,
 } from './contextManager';
@@ -89,16 +86,7 @@ export type { PromptContextSnapshot } from './promptContextSnapshot';
 export { pruneStaleToolContext } from './staleContextPruner';
 export { pruneUntilFitsCompaction } from './compactionPruner';
 
-export { CATTY_COMPACTION_STATUS_KEYS } from './compactionStatusKeys';
-
 export { buildExternalBridgeContextMessages } from './externalBridgeContext';
-
-export {
-  fitTerminalExecuteResultForModel,
-  MAX_LIVE_TERMINAL_STDOUT_CHARS,
-  MAX_LIVE_TERMINAL_STDERR_CHARS,
-} from './terminalCompression';
-export type { TerminalExecuteResult, TerminalOutputHandle } from './terminalCompression';
 
 export {
   encodeSdkSessionIdentity,
@@ -108,30 +96,10 @@ export {
 export type { SdkSessionIdentityPayload } from './sdkSessionIdentity';
 
 export {
-  mapCattyStreamChunkToAgentEvents,
   mapSdkStreamEventToAgentEvents,
   createHarnessEventSink,
 } from './agentEventAdapter';
 export type { StreamEventContext } from './agentEventAdapter';
-
-export {
-  compactCattyMessages,
-  prepareCattyMessagesForStream,
-} from './cattyRuntime';
-export type { CompactCattyMessagesInput, CompactCattyMessagesResult } from './cattyRuntime';
-
-export { createCattyToolsFromCatalog } from './capabilityTools';
-export type { CattyToolsBundle } from './capabilityTools';
-
-export {
-  createInitialCattyRuntimeContext,
-  cattyRuntimeContextSchema,
-  cattyToolContextSchema,
-} from './cattyRuntimeContext';
-export type { CattyRuntimeContext, CattyToolContext } from './cattyRuntimeContext';
-
-export { buildCattyStreamTimeouts, buildCattyCompactionTimeout } from './streamTimeouts';
-export { buildCattyToolApproval } from './cattyToolApproval';
 
 export {
   PermissionGrantStore,

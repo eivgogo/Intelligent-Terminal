@@ -11,7 +11,7 @@ import type {
   WebSearchConfig,
 } from '../infrastructure/ai/types';
 import type { AIQuickMessage } from '../infrastructure/ai/quickMessages';
-import type { ExecutorContext } from '../infrastructure/ai/cattyAgent/executor';
+import type { ExecutorContext } from '../infrastructure/ai/bridgeTypes';
 import type { Host, Snippet, VaultNote } from '../types';
 
 // -------------------------------------------------------------------

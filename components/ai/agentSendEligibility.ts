@@ -16,5 +16,5 @@ export function canSendWithAgent(
   agentId: string,
   agents: ExternalAgentConfig[],
 ): boolean {
-  return agentId === "catty" || Boolean(findEnabledExternalAgent(agents, agentId));
+  return Boolean(findEnabledExternalAgent(agents, agentId));
 }

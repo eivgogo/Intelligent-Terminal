@@ -2,7 +2,7 @@
 
 ## Originally authored for netcatty
 
-- `catty.svg`, `terminal.svg`, `plus.svg`, and other generic UI glyphs.
+- `terminal.svg`, `plus.svg`, and other generic UI glyphs.
 
 ## From [lobehub/lobe-icons](https://github.com/lobehub/lobe-icons) (MIT)
 

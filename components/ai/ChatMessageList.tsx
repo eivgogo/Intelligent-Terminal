@@ -824,7 +824,7 @@ const ChatMessageList: React.FC<ChatMessageListProps> = ({
           .filter(([id, req]) => {
             if (!id.startsWith('mcp_approval_')) return false;
             // External MCP approvals render in ExternalMcpApprovalsHost so they
-            // remain visible even when the Catty AI panel is closed.
+            // remain visible even when the AI panel is closed.
             if (req.chatSessionId === '__external_mcp__') return false;
             return !activeSessionId || req.chatSessionId === activeSessionId;
           })

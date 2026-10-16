@@ -4,6 +4,7 @@
 
 ### 功能
 
+- **彻底移除内置 Catty Agent，仅保留本地 CLI/SDK Agent**：移除内置 AI agent（`cattyAgent/`、Catty turn driver / stream processor / runtime context、Catty 工具按需渲染本地执行器、Catty 供应商模型目录与推理档位、Catty 系统提示与 harness 工具面、`cattyToolSpecs.json` 生成产物、`ai:capability`/`netcatty:ai:exec` 渲染进程入口及相关设置项）。AI 侧边栏仅保留用户本机的外部 CLI/SDK Agent（Codex、Claude Code、GitHub Copilot CLI、Cursor、CodeBuddy、OpenCode 等），其工具执行仍走 MCP / 主进程链路，`netcatty:ai:exec` 与取消通道（重命名为 `netcatty:ai:exec:cancel`）继续由 MCP/vault 复用。共享类型（`NetcattyBridge`/`ExecutorContext`）迁移到 `infrastructure/ai/bridgeTypes.ts`，`cattyHistoryReplay` 重命名为 `agentHistoryReplay`
 - **彻底移除系统托盘图标与托盘面板**：移除顶部托盘图标、托盘菜单、托盘面板窗口（`#/tray`）、托盘会话跳转/端口转发开关、"关闭到托盘"（close-to-tray）设置；保留全局快捷键（Quake 模式）与 macOS Dock 菜单（"新连接"入口）。外部 MCP/CLI 的 `openMainWindow` 与 Dock 连接链路不受影响
 - **自动更新默认关闭（opt-in）**：新安装/未显式设置的用户默认不启用自动更新，启动时不再自动检查与下载，需在 Settings > System 手动开启；已有用户显式开启/关闭的偏好不受影响
 - Linux deb/rpm/pacman 安装包启用应用内自动更新；未标记的开发包和 Snap 继续提供手动下载入口

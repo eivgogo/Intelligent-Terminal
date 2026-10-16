@@ -22,30 +22,20 @@ function getMcpToolName(capability) {
     || null;
 }
 
-function getCattyToolName(capability) {
-  return capability.surfaces?.[CAPABILITY_SURFACES.CATTY]?.toolName
-    || getMcpToolName(capability)
-    || capability.id.replace(/\./g, "_");
-}
-
-function getCattyRpcMethod(capability) {
-  return capability.surfaces?.builtin?.rpcMethod
-    || capability.surfaces?.global?.rpcMethod
-    || capability.surfaces?.public?.rpcMethod
-    || null;
-}
-
 function getAgentToolName(capability, agentKind) {
   if (agentKind === AGENT_KINDS.GLOBAL) {
     return capability.surfaces?.[CAPABILITY_SURFACES.GLOBAL_AGENT]?.toolName
       || getMcpToolName(capability)
       || capability.id.replace(/\./g, "_");
   }
-  return getCattyToolName(capability);
+  return getMcpToolName(capability) || capability.id.replace(/\./g, "_");
 }
 
 function getAgentRpcMethod(capability) {
-  return getCattyRpcMethod(capability);
+  return capability.surfaces?.builtin?.rpcMethod
+    || capability.surfaces?.global?.rpcMethod
+    || capability.surfaces?.public?.rpcMethod
+    || null;
 }
 
 function buildToolDescription(capability) {
@@ -58,7 +48,6 @@ function listToolSurfaces(options = {}) {
   const {
     surface = CAPABILITY_SURFACES.PUBLIC,
     status = CAPABILITY_STATUS.IMPLEMENTED,
-    includeCatty = true,
   } = options;
 
   const tools = [];
@@ -69,22 +58,20 @@ function listToolSurfaces(options = {}) {
     if (!binding) continue;
 
     const mcpTool = getMcpToolName(capability);
-    const cattyToolName = getCattyToolName(capability);
-    if (!includeCatty && !mcpTool) continue;
+    const toolName = mcpTool || capability.id.replace(/\./g, "_");
 
     const builtinRpc = capability.surfaces?.builtin?.rpcMethod || binding.rpcMethod || null;
 
     tools.push({
       capabilityId: capability.id,
       domain: capability.domain,
-      toolName: cattyToolName,
+      toolName,
       mcpTool,
       rpcMethod: builtinRpc,
       publicRpcMethod: capability.surfaces?.public?.rpcMethod || null,
       description: buildToolDescription(capability),
       policy: capability.policy,
       inputShape: buildZodShape(TOOL_INPUT_FIELDS[capability.id]),
-      cattyEnabled: includeCatty && Boolean(TOOL_INPUT_FIELDS[capability.id] != null || mcpTool),
     });
   }
 
@@ -92,21 +79,17 @@ function listToolSurfaces(options = {}) {
 }
 
 function listMcpTools() {
-  return listToolSurfaces({ surface: CAPABILITY_SURFACES.PUBLIC, includeCatty: false })
+  return listToolSurfaces({ surface: CAPABILITY_SURFACES.PUBLIC })
     .filter((tool) => tool.mcpTool);
 }
 
-/** Capabilities excluded from Catty even when implemented (CLI-only / meta). */
-const CATTY_CAPABILITY_DENYLIST = new Set([
+/** Capabilities excluded from the in-app agent even when implemented (CLI-only / meta). */
+const AGENT_CAPABILITY_DENYLIST = new Set([
   "meta.status",
   "session.cancel",
   "session.resume",
   "session.get",
 ]);
-
-function isCattyOnlyCapability(capability) {
-  return isAgentLocalOnlyCapability(capability, AGENT_KINDS.SIDEBAR);
-}
 
 function isAgentLocalOnlyCapability(capability, agentKind) {
   if (agentKind === AGENT_KINDS.GLOBAL) {
@@ -114,15 +97,12 @@ function isAgentLocalOnlyCapability(capability, agentKind) {
       && !getAgentRpcMethod(capability)
       && !getMcpToolName(capability);
   }
-  return Boolean(capability.surfaces?.[CAPABILITY_SURFACES.CATTY]?.toolName)
-    && !getAgentRpcMethod(capability)
-    && !getMcpToolName(capability);
+  return false;
 }
 
 /**
  * Resolve which agents may use a capability when agentKinds is not set explicitly.
  * - surfaces.globalAgent only → global agent
- * - surfaces.catty only (harness) → sidebar agent
  * - RPC/MCP-backed tools → both agents (shared infrastructure)
  */
 function resolveAgentKinds(capability) {
@@ -132,18 +112,15 @@ function resolveAgentKinds(capability) {
   if (capability.surfaces?.[CAPABILITY_SURFACES.GLOBAL_AGENT]) {
     return [AGENT_KINDS.GLOBAL];
   }
-  if (isAgentLocalOnlyCapability(capability, AGENT_KINDS.SIDEBAR)) {
-    return [AGENT_KINDS.SIDEBAR];
-  }
-  if (isAgentEligibleForKind(capability, AGENT_KINDS.SIDEBAR, { skipAgentKindCheck: true })) {
-    return [AGENT_KINDS.SIDEBAR, AGENT_KINDS.GLOBAL];
+  if (isAgentEligibleForKind(capability, AGENT_KINDS.GLOBAL, { skipAgentKindCheck: true })) {
+    return [AGENT_KINDS.GLOBAL];
   }
   return [];
 }
 
 function isAgentEligibleForKind(capability, agentKind, options = {}) {
   if (capability.status !== CAPABILITY_STATUS.IMPLEMENTED) return false;
-  if (CATTY_CAPABILITY_DENYLIST.has(capability.id)) return false;
+  if (AGENT_CAPABILITY_DENYLIST.has(capability.id)) return false;
   if (!options.skipAgentKindCheck && !resolveAgentKinds(capability).includes(agentKind)) {
     return false;
   }
@@ -155,50 +132,32 @@ function isAgentEligibleForKind(capability, agentKind, options = {}) {
   return hasBuiltinRpc || hasGlobalRpc || Boolean(getMcpToolName(capability));
 }
 
-function isCattyEligible(capability) {
-  return isAgentEligibleForKind(capability, AGENT_KINDS.SIDEBAR);
-}
-
-function listAgentToolSpecs(agentKind = AGENT_KINDS.SIDEBAR) {
+function listAgentToolSpecs(agentKind = AGENT_KINDS.GLOBAL) {
   return ALL_CAPABILITIES
     .filter((capability) => isAgentEligibleForKind(capability, agentKind))
-    .map((capability) => {
-      const spec = {
-        capabilityId: capability.id,
-        toolName: getAgentToolName(capability, agentKind),
-        rpcMethod: getAgentRpcMethod(capability),
-        localExecution: isAgentLocalOnlyCapability(capability, agentKind),
-        description: buildToolDescription(capability),
-        inputShape: buildZodShape(TOOL_INPUT_FIELDS[capability.id]),
-        policy: capability.policy,
-      };
-      if (agentKind !== AGENT_KINDS.SIDEBAR) {
-        spec.agentKind = agentKind;
-      }
-      return spec;
-    });
-}
-
-function listCattyToolSpecs() {
-  return listAgentToolSpecs(AGENT_KINDS.SIDEBAR);
+    .map((capability) => ({
+      capabilityId: capability.id,
+      toolName: getAgentToolName(capability, agentKind),
+      rpcMethod: getAgentRpcMethod(capability),
+      localExecution: isAgentLocalOnlyCapability(capability, agentKind),
+      description: buildToolDescription(capability),
+      inputShape: buildZodShape(TOOL_INPUT_FIELDS[capability.id]),
+      policy: capability.policy,
+      agentKind,
+    }));
 }
 
 module.exports = {
   AGENT_KINDS,
   buildZodShape,
   buildToolDescription,
-  CATTY_CAPABILITY_DENYLIST,
+  AGENT_CAPABILITY_DENYLIST,
   getAgentRpcMethod,
   getAgentToolName,
-  getCattyToolName,
-  getCattyRpcMethod,
   isAgentEligibleForKind,
   isAgentLocalOnlyCapability,
-  isCattyEligible,
-  isCattyOnlyCapability,
   listAgentToolSpecs,
   listToolSurfaces,
   listMcpTools,
-  listCattyToolSpecs,
   resolveAgentKinds,
 };

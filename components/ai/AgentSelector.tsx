@@ -36,15 +36,14 @@ interface AgentSelectorProps {
   disabled?: boolean;
 }
 
-const BUILTIN_AGENTS: AgentInfo[] = [
-  {
-    id: 'catty',
-    name: 'Catty Agent',
-    type: 'builtin',
-    description: 'Built-in terminal assistant',
-    available: true,
-  },
-];
+const BUILTIN_AGENTS: AgentInfo[] = [];
+
+const EMPTY_AGENT: AgentInfo = {
+  id: '',
+  name: '—',
+  type: 'external',
+  available: true,
+};
 
 const SectionLabel: React.FC<{ children: React.ReactNode; action?: React.ReactNode }> = ({ children, action }) => (
   <div className="flex items-center justify-between px-3 pb-1.5 pt-1.5">
@@ -175,8 +174,11 @@ const AgentSelector: React.FC<AgentSelectorProps> = ({
   );
 
   const currentAgent = useMemo(
-    () => allAgents.find((agent) => agent.id === currentAgentId) ?? BUILTIN_AGENTS[0],
-    [allAgents, currentAgentId],
+    () => allAgents.find((agent) => agent.id === currentAgentId)
+      ?? enabledExternalAgents[0]
+      ?? BUILTIN_AGENTS[0]
+      ?? EMPTY_AGENT,
+    [allAgents, currentAgentId, enabledExternalAgents],
   );
 
   const handleSelect = useCallback(
@@ -246,7 +248,7 @@ const AgentSelector: React.FC<AgentSelectorProps> = ({
 
         {enabledExternalAgents.length > 0 && (
           <>
-            <div className="mx-0 my-1 border-t border-border/50" />
+            {BUILTIN_AGENTS.length > 0 && <div className="mx-0 my-1 border-t border-border/50" />}
             <SectionLabel>{t('ai.chat.agents')}</SectionLabel>
             {enabledExternalAgents.map((agent) => (
               <AgentMenuRow

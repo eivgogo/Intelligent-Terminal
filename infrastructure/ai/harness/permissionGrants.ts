@@ -1,4 +1,4 @@
-import cattyToolSpecs from './generated/cattyToolSpecs.json';
+import agentToolSpecs from './generated/globalAgentToolSpecs.json';
 import {
   buildAlwaysAllowCommandPatterns,
   extractGrantableShellCommandSegments,
@@ -35,7 +35,7 @@ type CattyToolSpecRef = {
 const TOOL_NAME_TO_CAPABILITY = new Map<string, string>();
 const RPC_METHOD_TO_CAPABILITY = new Map<string, string>();
 
-for (const spec of cattyToolSpecs as CattyToolSpecRef[]) {
+for (const spec of agentToolSpecs as CattyToolSpecRef[]) {
   TOOL_NAME_TO_CAPABILITY.set(spec.toolName, spec.capabilityId);
   if (spec.rpcMethod) {
     RPC_METHOD_TO_CAPABILITY.set(spec.rpcMethod, spec.capabilityId);
@@ -209,7 +209,7 @@ const COMMAND_GRANT_CAPABILITIES = new Set([
 
 const GRANTABLE_CAPABILITY_IDS: readonly string[] = Object.freeze(
   [...new Set(
-    (cattyToolSpecs as CattyToolSpecRef[])
+    (agentToolSpecs as CattyToolSpecRef[])
       .filter((spec) => spec.policy?.write && !spec.policy?.bypassesApproval)
       .map((spec) => spec.capabilityId),
   )].sort(),

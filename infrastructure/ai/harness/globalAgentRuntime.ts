@@ -1,9 +1,8 @@
 import { AgentRuntime } from './agentRuntime';
-import { cattyTurnDriver } from './turnDrivers/cattyTurnDriver';
 import { externalSdkTurnDriver } from './turnDrivers/externalSdkTurnDriver';
 
 export const globalAgentRuntime = new AgentRuntime({
-  drivers: [cattyTurnDriver, externalSdkTurnDriver],
+  drivers: [externalSdkTurnDriver],
 });
 
 export function getAgentRuntime(): AgentRuntime {

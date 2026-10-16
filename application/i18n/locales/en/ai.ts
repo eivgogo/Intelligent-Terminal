@@ -294,7 +294,6 @@ export const enAiMessages: Messages = {
   // AI Default Agent
   'ai.defaultAgent': 'Default Agent',
   'ai.defaultAgent.description': 'Agent to use when starting a new AI session',
-  'ai.defaultAgent.catty': 'Catty (Built-in)',
   'ai.toolAccess.title': 'Tool Access',
   'ai.toolAccess.mode': 'Netcatty Access Mode',
   'ai.toolAccess.description': 'Choose how external agents access Netcatty sessions. MCP exposes the built-in server, while Skills + CLI points agents to the local Netcatty skill and CLI commands.',
@@ -452,7 +451,7 @@ export const enAiMessages: Messages = {
   'ai.chat.permAutoDesc': 'Run freely',
   'ai.chat.emptyHint': 'Ask about your servers, run commands, or get help with configurations.',
   'ai.chat.placeholder': 'Message {agent} — @ to include context, / for commands',
-  'ai.chat.placeholderDefault': 'Message Catty Agent...',
+  'ai.chat.placeholderDefault': 'Message the agent...',
   'ai.chat.noModel': 'No model',
   'ai.chat.noProviderModel': 'No default model — set one in Settings → AI → Providers.',
   'ai.chat.selectProvider': 'Select provider',

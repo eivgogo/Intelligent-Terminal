@@ -247,7 +247,6 @@ export const ruAiMessages: Messages = {
   // AI Default Agent
   'ai.defaultAgent': 'Агент по умолчанию',
   'ai.defaultAgent.description': 'Агент, который будет использоваться при запуске новой AI-сессии',
-  'ai.defaultAgent.catty': 'Catty (встроенный)',
   'ai.toolAccess.title': 'Доступ к инструментам',
   'ai.toolAccess.mode': 'Режим доступа Netcatty',
   'ai.toolAccess.description': 'Выберите, как внешние агенты получают доступ к сессиям Netcatty. MCP предоставляет встроенный сервер, а Skills + CLI указывает агентам на локальный skill Netcatty и команды CLI.',
@@ -404,7 +403,7 @@ export const ruAiMessages: Messages = {
   'ai.chat.permAutoDesc': 'Выполнять свободно',
   'ai.chat.emptyHint': 'Спрашивайте о ваших серверах, запускайте команды или получайте помощь с конфигурациями.',
   'ai.chat.placeholder': 'Сообщение {agent} — @ для добавления контекста, / для команд',
-  'ai.chat.placeholderDefault': 'Сообщение агенту Catty...',
+  'ai.chat.placeholderDefault': 'Сообщение агенту...',
   'ai.chat.noModel': 'Нет модели',
   'ai.chat.noProviderModel': 'Модель по умолчанию не задана — настройте её в Настройки → AI → Провайдеры.',
   'ai.chat.selectProvider': 'Выберите провайдера',

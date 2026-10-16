@@ -621,16 +621,15 @@ const SettingsAITab: React.FC<SettingsAITabProps> = ({
   );
 
   // Agent options for default agent
-  const agentOptions = useMemo(() => [
-    { value: "catty", label: t('ai.defaultAgent.catty'), icon: <AgentIconBadge agent={{ id: "catty", type: "builtin" }} size="xs" variant="plain" /> },
-    ...externalAgents
+  const agentOptions = useMemo(() =>
+    externalAgents
       .filter((a) => canSendWithAgent(a.id, externalAgents))
       .map((a) => ({ value: a.id, label: a.name, icon: <AgentIconBadge agent={a} size="xs" variant="plain" /> })),
-  ], [externalAgents, t]);
+  [externalAgents]);
 
   useEffect(() => {
     if (!agentOptions.some((option) => option.value === defaultAgentId)) {
-      setDefaultAgentId("catty");
+      setDefaultAgentId(agentOptions[0]?.value ?? "");
     }
   }, [agentOptions, defaultAgentId, setDefaultAgentId]);
 

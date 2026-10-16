@@ -72,10 +72,9 @@ test("implemented capabilities expose at least one surface binding", () => {
     assert.ok(surfaces.length > 0, `${capability.id} has no surfaces`);
     const hasRpc = surfaces.some((surface) => capability.surfaces[surface]?.rpcMethod);
     const hasCli = surfaces.some((surface) => capability.surfaces[surface]?.command);
-    const hasCatty = Boolean(capability.surfaces[CAPABILITY_SURFACES.CATTY]?.toolName);
     assert.ok(
-      hasRpc || hasCli || hasCatty || capability.surfaces[CAPABILITY_SURFACES.BUILTIN]?.mcpTool,
-      `${capability.id} has no rpc/cli/catty/mcp binding`,
+      hasRpc || hasCli || capability.surfaces[CAPABILITY_SURFACES.BUILTIN]?.mcpTool,
+      `${capability.id} has no rpc/cli/mcp binding`,
     );
   }
 });

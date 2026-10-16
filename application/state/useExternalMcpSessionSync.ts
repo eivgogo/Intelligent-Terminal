@@ -72,7 +72,7 @@ function isMainAppWindow(): boolean {
 
 /**
  * Keep the reserved External MCP scope aligned with every live terminal
- * session, independent of whether the Catty AI side panel / TerminalLayer
+ * session, independent of whether the AI side panel / TerminalLayer
  * has mounted yet.
  */
 export function useExternalMcpSessionSync({

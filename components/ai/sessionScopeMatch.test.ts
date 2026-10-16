@@ -11,7 +11,7 @@ function createSession(id: string, targetId: string, hostIds: string[]): AISessi
     messages: [],
     createdAt: 1,
     updatedAt: 1,
-    agentId: "catty",
+    agentId: "codex",
     scope: {
       type: "terminal",
       targetId,

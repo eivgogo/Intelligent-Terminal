@@ -2,7 +2,7 @@
 
 /**
  * Shared Vault tool-selection guidance for MCP external agents and get_environment.
- * Keep in sync with infrastructure/ai/cattyAgent/systemPrompt.ts (Catty sidebar).
+ * Keep in sync with electron/capabilities/catalog/vault.cjs guidance.
  */
 const VAULT_HOSTS_VS_NOTES_GUIDANCE =
   "Vault → Hosts vs Vault → Notes: When the user asks to add/create/import a host "

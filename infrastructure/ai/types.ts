@@ -130,7 +130,7 @@ export interface AIDraft {
 }
 
 export interface AISessionContextCompaction {
-  /** Summary sent in place of the older conversation on later Catty turns. */
+  /** Summary sent in place of the older conversation on later turns. */
   summary: string;
   /** Number of persisted messages covered by the summary. */
   compactedMessageCount: number;
@@ -404,7 +404,7 @@ export const DEFAULT_AI_SETTINGS: AISettings = {
   globalPermissionMode: 'confirm',
   toolIntegrationMode: 'mcp',
   externalAgents: [],
-  defaultAgentId: 'catty',
+  defaultAgentId: '',
   commandBlocklist: [...DEFAULT_COMMAND_BLOCKLIST],
   commandTimeout: DEFAULT_COMMAND_TIMEOUT_SECONDS,
   maxIterations: 20,
