@@ -292,6 +292,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
   const [showHistory, setShowHistory] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [runtimeAgentModelPresets, setRuntimeAgentModelPresets] = useState<Record<string, AgentModelPreset[]>>({});
+  const [runtimeModelLoading, setRuntimeModelLoading] = useState<Record<string, boolean>>({});
   const [runtimeModelWarnings, setRuntimeModelWarnings] = useState<Record<string, string>>({});
   const [steerWarnings, setSteerWarnings] = useState<Record<string, SteerWarning>>({});
   const [steeringSessionId, setSteeringSessionId] = useState<string | null>(null);
@@ -871,6 +872,12 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     const cached = sdkRuntimeModelCache.read(target.cacheKey);
     if (cached) {
       applySdkRuntimeModelCatalog(target.agentId, cached);
+      setRuntimeModelLoading((prev) => (prev[target.agentId] ? { ...prev, [target.agentId]: false } : prev));
+    } else {
+      // No cached catalog yet: mark the agent as loading so the composer shows a
+      // loading chip (instead of a stale/fabricated model list) until the live
+      // catalog arrives.
+      setRuntimeModelLoading((prev) => (prev[target.agentId] ? prev : { ...prev, [target.agentId]: true }));
     }
 
     // Respect renderer TTL / in-flight coalescing for all SDK agents including
@@ -881,6 +888,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     let cancelled = false;
     const cancelIdle = scheduleWhenAiComposerIdle(() => {
       void loadSdkRuntimeModelCatalog(target).then((catalog) => {
+        setRuntimeModelLoading((prev) => (prev[target.agentId] ? { ...prev, [target.agentId]: false } : prev));
         if (cancelled || !catalog) return;
         applySdkRuntimeModelCatalog(target.agentId, catalog, { adoptCurrentModel: true });
       });
@@ -1439,6 +1447,7 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
         canSendCurrentAgent={canSendCurrentAgent}
         modelCatalogWarning={runtimeModelWarnings[currentAgentId]}
         agentModelPresets={agentModelPresets}
+        agentModelLoading={Boolean(runtimeModelLoading[currentAgentId])}
         selectedAgentModel={selectedAgentModel}
         handleAgentModelSelect={handleAgentModelSelect}
         files={files}

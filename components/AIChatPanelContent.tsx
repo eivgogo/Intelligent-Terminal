@@ -65,6 +65,7 @@ interface AIChatPanelContentProps {
   canSendCurrentAgent: boolean;
   modelCatalogWarning?: string;
   agentModelPresets: AgentModelPreset[];
+  agentModelLoading?: boolean;
   selectedAgentModel: string;
   handleAgentModelSelect: (modelId: string) => void;
   files: UploadedFile[];
@@ -126,6 +127,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
   canSendCurrentAgent,
   modelCatalogWarning,
   agentModelPresets,
+  agentModelLoading = false,
   selectedAgentModel,
   handleAgentModelSelect,
   files,
@@ -314,6 +316,7 @@ export const AIChatPanelContent: React.FC<AIChatPanelContentProps> = ({
                   disabled={!canSendCurrentAgent}
                   agentName={externalAgents.find(a => a.id === currentAgentId)?.name}
                   modelPresets={agentModelPresets}
+                  modelLoading={agentModelLoading}
                   selectedModelId={selectedAgentModel}
                   onModelSelect={handleAgentModelSelect}
                   pickerScope={currentAgentId}

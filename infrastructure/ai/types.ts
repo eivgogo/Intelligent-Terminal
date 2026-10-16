@@ -786,13 +786,10 @@ export const CODEBUDDY_MODEL_PRESETS: AgentModelPreset[] = [
   codebuddyPreset('hy3-preview', 'Hy3 Preview'),
 ];
 
-export const OPENCODE_MODEL_PRESETS: AgentModelPreset[] = [
-  { id: 'openai/gpt-5.1', name: 'OpenAI GPT-5.1' },
-  { id: 'anthropic/claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
-  { id: 'deepseek/deepseek-chat', name: 'DeepSeek Chat' },
-  { id: 'openrouter/openai/gpt-5.1', name: 'OpenRouter GPT-5.1' },
-  { id: 'ollama/llama3.3', name: 'Ollama Llama 3.3' },
-];
+// OpenCode's model list is fully user-configured (resolved from the running
+// `opencode` server's provider catalog), so there is no meaningful static
+// fallback: `getAgentModelPresets` returns an empty list until the live catalog
+// arrives, and the composer shows a loading state instead of fabricated models.
 
 // Curated Grok Build models when `grok models` is unavailable. IDs mirror the
 // public Grok Build / xAI coding agent lineup; live discovery still overrides.
@@ -823,7 +820,7 @@ export function getAgentModelPresets(
   if (backend === 'codex') return CODEX_MODEL_PRESETS;
   if (backend === 'cursor') return CURSOR_MODEL_PRESETS;
   if (backend === 'codebuddy') return CODEBUDDY_MODEL_PRESETS;
-  if (backend === 'opencode') return OPENCODE_MODEL_PRESETS;
+  // OpenCode has no static fallback (see note above); rely on live discovery.
   if (backend === 'grok') return GROK_MODEL_PRESETS;
 
   if (!agentCommand) return [];
@@ -842,7 +839,7 @@ export function getAgentModelPresets(
     return CURSOR_MODEL_PRESETS;
   }
   if (basename.startsWith('codebuddy')) return CODEBUDDY_MODEL_PRESETS;
-  if (basename.startsWith('opencode')) return OPENCODE_MODEL_PRESETS;
+  // OpenCode has no static fallback (see note above); rely on live discovery.
   if (basename.startsWith('grok')) return GROK_MODEL_PRESETS;
   return [];
 }

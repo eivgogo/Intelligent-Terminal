@@ -53,6 +53,15 @@ test('getAgentModelPresets keeps Codex presets separate from CodeBuddy presets',
   assert.notDeepEqual(CODEBUDDY_MODEL_PRESETS, CODEX_MODEL_PRESETS);
 });
 
+test('getAgentModelPresets returns no static fallback for OpenCode', () => {
+  // OpenCode models come only from live discovery (`client.config.providers()`);
+  // a hardcoded seed list used to flash fabricated models before the real
+  // catalog loaded. It must stay empty until the live catalog arrives.
+  assert.deepEqual(getAgentModelPresets(undefined, 'opencode'), []);
+  assert.deepEqual(getAgentModelPresets('/opt/homebrew/bin/opencode'), []);
+  assert.deepEqual(getAgentModelPresets('C\\\\Tools\\\\opencode.exe', 'opencode'), []);
+});
+
 test('getAgentModelPresets returns curated Grok fallback when runtime catalog is empty', () => {
   assert.ok(GROK_MODEL_PRESETS.length > 0);
   assert.deepEqual(getAgentModelPresets(undefined, 'grok'), GROK_MODEL_PRESETS);

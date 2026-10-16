@@ -180,6 +180,8 @@ interface ChatInputProps {
   placeholder?: string;
   /** Available model presets for the current agent */
   modelPresets?: AgentModelPreset[];
+  /** True while the live model catalog is being fetched for the current agent */
+  modelLoading?: boolean;
   /** Currently selected model ID */
   selectedModelId?: string;
   /** Callback when user selects a model */
@@ -231,6 +233,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   agentName,
   placeholder,
   modelPresets = [],
+  modelLoading = false,
   selectedModelId,
   onModelSelect,
   files = [],
@@ -862,7 +865,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
     modelPresets,
   );
   const selectedBaseModelId = selectedPreset?.id;
-  const modelLabel = selectedPreset?.name || modelName || providerName || t('ai.chat.noModel');
+  const modelLabel = modelLoading && modelPresets.length === 0
+    ? t('ai.chat.loadingModels')
+    : selectedPreset?.name || modelName || providerName || t('ai.chat.noModel');
   const modelChipMaxWidth = 'max-w-[96px]';
   const hasModelPicker = modelPresets.length > 0 && !!onModelSelect;
   const thinkingLevels = selectedPreset?.thinkingLevels ?? [];
@@ -1264,7 +1269,9 @@ const ChatInput: React.FC<ChatInputProps> = ({
               aria-label={t('ai.chat.selectModel')}
               aria-expanded={showModelPicker}
             >
-              <Cpu size={11} className="text-muted-foreground/64" />
+              {modelLoading && modelPresets.length === 0
+                ? <Loader2 size={11} className="animate-spin text-muted-foreground/64" />
+                : <Cpu size={11} className="text-muted-foreground/64" />}
               <span className={`truncate min-w-0 ${modelChipMaxWidth}`}>{modelLabel}</span>
               {hasModelPicker && <ChevronDown size={9} className="text-muted-foreground/50" />}
             </button>
@@ -1524,6 +1531,7 @@ function chatInputPropsAreEqual(prev: ChatInputProps, next: ChatInputProps): boo
     && prev.agentName === next.agentName
     && prev.placeholder === next.placeholder
     && prev.modelPresets === next.modelPresets
+    && prev.modelLoading === next.modelLoading
     && prev.selectedModelId === next.selectedModelId
     && prev.onModelSelect === next.onModelSelect
     && prev.files === next.files
