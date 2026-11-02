@@ -127,6 +127,19 @@ test('first send awaits web search sync instead of idle-deferring it', () => {
   assert.doesNotMatch(source, /scheduleWhenAiComposerIdle\(\(\) => \{\s*void bridge\.aiSyncWebSearch/);
 });
 
+test('SDK model catalog fetch is not gated on composer idleness', () => {
+  const source = readFileSync(new URL('./AIChatSidePanel.tsx', import.meta.url), 'utf8');
+  // `scheduleWhenAiComposerIdle` treats a merely-focused composer as busy, so
+  // deferring the catalog left the composer stuck on "Loading models...".
+  assert.doesNotMatch(
+    source,
+    /scheduleWhenAiComposerIdle\(\(\) => \{\s*void loadSdkRuntimeModelCatalog/,
+  );
+  // The loading chip must be cleared when the fetch settles, not only on cache hit.
+  assert.match(source, /void loadSdkRuntimeModelCatalog\(target\)/);
+  assert.match(source, /setRuntimeModelLoading\(\(prev\) => \(prev\[target\.agentId\] \? \{ \.\.\.prev, \[target\.agentId\]: false \} : prev\)\)/);
+});
+
 test('send and new chat discard pending composer text', () => {
   const source = readFileSync(new URL('./AIChatSidePanel.tsx', import.meta.url), 'utf8');
   assert.match(source, /discardPendingComposerText/);

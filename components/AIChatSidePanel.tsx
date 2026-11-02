@@ -889,20 +889,30 @@ const AIChatSidePanelActive: React.FC<AIChatSidePanelProps> = ({
     // Respect renderer TTL / in-flight coalescing for all SDK agents including
     // OpenCode. Forced refresh used to re-spawn opencode on every effect re-run
     // even when the user never selected OpenCode (#2184). Manual refresh still
-    // passes force via the model selector path. Defer the network refresh so
-    // expand → first type does not wait on CLI model listing.
+    // passes force via the model selector path.
+    //
+    // Do NOT route this through `scheduleWhenAiComposerIdle`: that scheduler
+    // reports `isAiComposerBusy()` while the composer merely has focus, so
+    // clicking into the input starved the fetch forever and the composer sat on
+    // its "Loading models..." chip. The IPC is async (and cached/coalesced), so
+    // it cannot block typing.
     let cancelled = false;
-    const cancelIdle = scheduleWhenAiComposerIdle(() => {
-      void loadSdkRuntimeModelCatalog(target).then((catalog) => {
-        setRuntimeModelLoading((prev) => (prev[target.agentId] ? { ...prev, [target.agentId]: false } : prev));
+    void loadSdkRuntimeModelCatalog(target)
+      .then((catalog) => {
         if (cancelled || !catalog) return;
         applySdkRuntimeModelCatalog(target.agentId, catalog, { adoptCurrentModel: true });
+      })
+      .finally(() => {
+        // Clear the loading chip as soon as this run settles. Without this the
+        // composer could stay on "Loading models..." indefinitely.
+        // Skip when the effect already re-ran: the newer run owns the flag and
+        // clears it itself, so an older slow fetch must not clobber it.
+        if (cancelled) return;
+        setRuntimeModelLoading((prev) => (prev[target.agentId] ? { ...prev, [target.agentId]: false } : prev));
       });
-    });
 
     return () => {
       cancelled = true;
-      cancelIdle();
     };
   }, [
     isVisible,
